@@ -1,0 +1,6 @@
+requests
+beautifulsoup4
+pyyaml
+python-dotenv
+trafilatura
+schedule

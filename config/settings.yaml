@@ -1,0 +1,137 @@
+catalog:
+  user_url: ""  # e.g. https://api.changsta.com
+
+discord:
+  guild_id: ""  # Override with DISCORD_GUILD_ID env var
+  report_channel: music-research
+  log_channel: logs
+  alert_channel: alerts
+
+llm:
+  stage1:
+    provider: "mistral"
+    model: "mistral-small-latest"
+    max_tokens: 4096
+    temperature: 0.1
+    timeout_seconds: 60
+
+  stage2:
+    provider: "anthropic"
+    model: "claude-sonnet-4-6"
+    max_tokens: 4096
+    temperature: 0.2
+    timeout_seconds: 90
+
+  # Fallback chain for Stage 1 only — tried in order if primary fails
+  fallback_chain:
+    - provider: "groq"
+      model: "llama-3.1-70b-versatile"
+    - provider: "ollama"
+      model: "qwen3:8b"
+      base_url: "http://192.168.1.170:11434"
+    - provider: "openrouter"
+      model: "deepseek/deepseek-chat"
+
+sources:
+
+  juno:
+    enabled: true
+    rss_pattern: "https://www.juno.co.uk/{genre_slug}/feeds/rss/"
+    # Maps internal genre names to Juno URL slugs
+    genre_map:
+      dnb: drumandbass
+      breaks: breakbeat
+      uk-bass: bass
+      ukg: garage
+      house: house
+      techno: techno
+      electronica: leftfield
+
+  beatport:
+    enabled: true
+    tracks_pattern: "https://www.beatport.com/genre/{slug}/{id}/tracks"
+    releases_pattern: "https://www.beatport.com/genre/{slug}/{id}/releases"
+    # Verify IDs marked with # verify before running
+    genres:
+      - name: dnb
+        slug: drum-bass
+        id: 1
+      - name: breaks
+        slug: breaks
+        id: 9
+      - name: house
+        slug: house
+        id: 5
+      - name: techno
+        slug: techno
+        id: 6
+      - name: uk-bass
+        slug: bass-house    # verify
+        id: 91              # verify
+      - name: ukg
+        slug: uk-garage     # verify
+        id: 92              # verify
+      - name: electronica
+        slug: electronica   # verify
+        id: 3               # verify
+
+  traxsource:
+    enabled: true
+    genre_url_pattern: "https://www.traxsource.com/genre/{id}/{slug}"
+    genres:
+      - name: dnb
+        id: 31
+        slug: drum-and-bass
+      - name: house
+        id: 4
+        slug: house
+      - name: techno
+        id: 20
+        slug: techno
+      - name: ukg
+        id: 29
+        slug: garage
+      - name: electronica
+        id: 5
+        slug: electronica
+      - name: electronica
+        id: 14
+        slug: leftfield
+
+  bandcamp:
+    enabled: true
+    count_per_tag: 20
+    tags:
+      - drum-and-bass
+      - breakbeat
+      - uk-garage
+      - uk-bass
+      - house
+      - techno
+      - electronic
+
+  boomkat:
+    enabled: false   # Cloudflare bot protection — cannot scrape
+
+  bleep:
+    enabled: false   # Requires login to access new releases
+
+  resident_advisor:
+    enabled: true
+    releases_url: "https://ra.co/music/releases"
+
+  discogs:
+    enabled: false
+
+pipeline:
+  max_candidates: 100
+  top_picks_count: 5
+  label_watch_count: 5
+  artist_watch_count: 5
+  wildcard_count: 3
+
+data_dir: data
+
+testing:
+  use_fixtures: false
+  fixtures_dir: fixtures
