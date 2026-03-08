@@ -110,6 +110,84 @@ Stage 1 (reason enrichment) tries providers in order, skipping any with no API k
 
 Stage 2 (report writing) always uses Anthropic Claude Sonnet directly — no fallback.
 
+## Scheduling (macOS launchd)
+
+To run the pipeline automatically every week, create a launchd plist. The example below runs every Sunday at 09:00.
+
+**1. Create the plist**
+
+Save to `~/Library/LaunchAgents/com.musicfinder.weekly.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.musicfinder.weekly</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOUR_USERNAME/Documents/Development/MusicFinder/venv/bin/python</string>
+    <string>-m</string>
+    <string>musicfinder</string>
+    <string>run</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_USERNAME/Documents/Development/MusicFinder</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>0</integer>  <!-- 0 = Sunday -->
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USERNAME/Documents/Development/MusicFinder/logs/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USERNAME/Documents/Development/MusicFinder/logs/launchd.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
+```
+
+Replace `YOUR_USERNAME` with your macOS username (`whoami`).
+
+**2. Load and enable**
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.musicfinder.weekly.plist
+```
+
+**3. Useful commands**
+
+```bash
+# Check it loaded correctly
+launchctl list | grep musicfinder
+
+# Run immediately (for testing)
+launchctl start com.musicfinder.weekly
+
+# Unload / disable
+launchctl unload ~/Library/LaunchAgents/com.musicfinder.weekly.plist
+
+# Watch the log
+tail -f /path/to/MusicFinder/logs/launchd.log
+```
+
+> **Note:** The Mac must be awake at the scheduled time. If it's asleep, launchd will run the job the next time it wakes. To change the day/time, edit `StartCalendarInterval` and reload the plist.
+
 ## Project structure
 
 ```
