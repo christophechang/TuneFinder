@@ -8,7 +8,7 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 2. **Fetch** — scrapes new releases from Juno, Beatport, Bandcamp, Traxsource, and Resident Advisor
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness)
-5. **Report** — two-stage LLM pipeline: Stage 1 (Mistral) writes a one-line reason per track; Stage 2 (Claude Sonnet) writes the full Discord-formatted report
+5. **Report** — two-stage LLM pipeline: Stage 1 runs a 6-provider cascade (Mistral → Groq → Gemini → MiniMax → OpenRouter → Anthropic) to write a one-line reason per track; Stage 2 (Claude Sonnet) writes the full Discord-formatted report
 6. **Post** — sends the report to your Discord `#music-research` channel via Bot token
 
 ## Sources
@@ -47,14 +47,16 @@ cp .env.example .env
 
 ```
 # Required
-ANTHROPIC_API_KEY=        # Stage 2 report generation
-MISTRAL_API_KEY=          # Stage 1 reason enrichment (primary)
+ANTHROPIC_API_KEY=        # Stage 2 report generation (also Stage 1 last resort)
+MISTRAL_API_KEY=          # Stage 1 primary
 DISCORD_BOT_TOKEN=        # Discord bot token
 DISCORD_GUILD_ID=         # Your Discord server ID
 
-# Optional Stage 1 fallbacks (used if Mistral fails)
-GROQ_API_KEY=
-OPENROUTER_API_KEY=
+# Optional Stage 1 fallbacks (used in order if earlier providers fail)
+GROQ_API_KEY=             # fallback 1 — free
+GEMINI_API_KEY=           # fallback 2 — free
+MINIMAX_API_KEY=          # fallback 3 — paid
+OPENROUTER_API_KEY=       # fallback 4 — capped
 ```
 
 ## Commands
@@ -97,12 +99,16 @@ Edit `config/settings.yaml` to:
 
 Stage 1 (reason enrichment) tries providers in order, skipping any with no API key set:
 
-1. Mistral `mistral-small-latest`
-2. Groq `llama-3.1-70b-versatile`
-3. Ollama `qwen3:8b` (local, configurable base URL)
-4. OpenRouter `deepseek/deepseek-chat`
+| # | Provider | Model | Cost |
+|---|---|---|---|
+| 1 | Mistral | `mistral-small-latest` | free (primary) |
+| 2 | Groq | `llama-3.3-70b-versatile` | free |
+| 3 | Gemini | `gemini-2.5-flash` | free |
+| 4 | MiniMax | `MiniMax-M2.5` | paid |
+| 5 | OpenRouter | `deepseek/deepseek-chat` | capped |
+| 6 | Anthropic | `claude-sonnet-4-6` | capped (last resort) |
 
-Stage 2 (report writing) always uses Anthropic Claude Sonnet.
+Stage 2 (report writing) always uses Anthropic Claude Sonnet directly — no fallback.
 
 ## Project structure
 

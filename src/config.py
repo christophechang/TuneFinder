@@ -18,8 +18,21 @@ _REQUIRED_ENV_VARS = [
 
 _OPTIONAL_ENV_VARS = [
     "GROQ_API_KEY",
+    "GEMINI_API_KEY",
+    "MINIMAX_API_KEY",
     "OPENROUTER_API_KEY",
 ]
+
+# Maps provider name → environment variable name (for cascade config check)
+PROVIDER_ENV_VAR = {
+    "mistral": "MISTRAL_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "ollama": None,
+}
 
 _CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -69,6 +82,14 @@ class Settings:
     @property
     def groq_api_key(self) -> str:
         return os.getenv("GROQ_API_KEY", "")
+
+    @property
+    def gemini_api_key(self) -> str:
+        return os.getenv("GEMINI_API_KEY", "")
+
+    @property
+    def minimax_api_key(self) -> str:
+        return os.getenv("MINIMAX_API_KEY", "")
 
     @property
     def openrouter_api_key(self) -> str:

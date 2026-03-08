@@ -10,9 +10,44 @@ from src.config import load_settings
 
 
 def cmd_check_config(args):
+    import os
+    from src.config import PROVIDER_ENV_VAR
+
     settings = load_settings()
     settings.validate()
-    print("Config OK — all required environment variables are present.")
+
+    stage1_cfg = settings.llm_stage1
+    fallback_chain = settings.llm_fallback_chain
+
+    cascade = [
+        {"provider": stage1_cfg.get("provider", "mistral"), "model": stage1_cfg.get("model", ""), "position": "primary"}
+    ] + [
+        {"provider": e.get("provider", ""), "model": e.get("model", ""), "position": f"fallback {i + 1}"}
+        for i, e in enumerate(fallback_chain)
+    ]
+
+    print("\nStage 1 LLM cascade:")
+    print(f"  {'Position':<12}  {'Provider':<12}  {'Model':<30}  {'Env Var':<22}  Status")
+    print(f"  {'-'*12}  {'-'*12}  {'-'*30}  {'-'*22}  ------")
+    for entry in cascade:
+        provider = entry["provider"]
+        model = entry["model"]
+        position = entry["position"]
+        env_var = PROVIDER_ENV_VAR.get(provider)
+        if env_var is None:
+            status = "no key needed"
+            env_var_display = "(none)"
+        elif os.getenv(env_var):
+            status = "SET"
+            env_var_display = env_var
+        else:
+            status = "MISSING"
+            env_var_display = env_var
+        print(f"  {position:<12}  {provider:<12}  {model:<30}  {env_var_display:<22}  {status}")
+
+    print("\nStage 2: anthropic / claude-sonnet-4-6 (direct, no fallback)")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    print(f"  ANTHROPIC_API_KEY: {'SET' if anthropic_key else 'MISSING'}\n")
 
 
 def cmd_save_fixtures(args):

@@ -4,12 +4,12 @@ LLM cascade pattern — two-stage.
 Stage 1 (cheap, fast, fallback chain):
   Primary provider defined in llm.stage1 in settings.yaml.
   Fallback chain defined in llm.fallback_chain — tried in order if primary fails.
-  All providers except Ollama use the OpenAI-compatible /v1/chat/completions endpoint.
+  All providers except Ollama use the OpenAI-compatible /v1/chat/completions endpoint,
+  except Gemini which uses /chat/completions under its v1beta OpenAI-compat base URL.
   Sleep 1s between failures. Raise RuntimeError if all exhausted.
 
 Stage 2 (high quality, no fallback):
   Anthropic only, via /v1/messages with x-api-key auth.
-  Never in the Stage 1 chain.
 """
 import time
 
@@ -19,21 +19,31 @@ from src.logger import get_logger
 
 logger = get_logger(__name__)
 
-_PROVIDER_URLS = {
-    "mistral": "https://api.mistral.ai/v1/chat/completions",
-    "groq": "https://api.groq.com/openai/v1/chat/completions",
-    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+_PROVIDER_BASE_URLS = {
+    "mistral": "https://api.mistral.ai",
+    "groq": "https://api.groq.com/openai",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "minimax": "https://api.minimaxi.chat",
+    "openrouter": "https://openrouter.ai/api",
+}
+
+# Non-standard paths (default is /v1/chat/completions)
+_PROVIDER_PATHS = {
+    "gemini": "/chat/completions",
 }
 
 _API_KEY_ATTRS = {
     "mistral": "mistral_api_key",
     "groq": "groq_api_key",
+    "gemini": "gemini_api_key",
+    "minimax": "minimax_api_key",
     "openrouter": "openrouter_api_key",
+    "anthropic": "anthropic_api_key",
 }
 
 
 def _call_openai_compat(
-    url: str,
+    base_url: str,
     api_key: str,
     model: str,
     system: str,
@@ -41,7 +51,9 @@ def _call_openai_compat(
     temperature: float,
     max_tokens: int,
     timeout: int,
+    path: str = "/v1/chat/completions",
 ) -> str:
+    url = f"{base_url.rstrip('/')}{path}"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -81,6 +93,37 @@ def _call_ollama(
     return resp.json()["message"]["content"]
 
 
+def _call_anthropic(
+    api_key: str,
+    model: str,
+    system: str,
+    prompt: str,
+    temperature: float,
+    max_tokens: int,
+    timeout: int,
+) -> str:
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers=headers,
+        json=payload,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()["content"][0]["text"]
+
+
 def call_stage1(prompt: str, system: str, settings) -> str:
     """
     Cheap, fast extraction/classification via cascade chain.
@@ -117,13 +160,30 @@ def call_stage1(prompt: str, system: str, settings) -> str:
                     timeout=timeout,
                 )
 
-            elif provider in _PROVIDER_URLS:
+            elif provider == "anthropic":
+                api_key = settings.anthropic_api_key
+                if not api_key:
+                    logger.debug("[llm.stage1] Skipping anthropic — no API key set")
+                    continue
+                result = _call_anthropic(
+                    api_key=api_key,
+                    model=model,
+                    system=system,
+                    prompt=prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+
+            elif provider in _PROVIDER_BASE_URLS:
                 api_key = getattr(settings, _API_KEY_ATTRS.get(provider, ""), "")
                 if not api_key:
                     logger.debug(f"[llm.stage1] Skipping {provider} — no API key set")
                     continue
+                path = _PROVIDER_PATHS.get(provider, "/v1/chat/completions")
                 result = _call_openai_compat(
-                    url=_PROVIDER_URLS[provider],
+                    base_url=_PROVIDER_BASE_URLS[provider],
+                    path=path,
                     api_key=api_key,
                     model=model,
                     system=system,
@@ -151,7 +211,7 @@ def call_stage1(prompt: str, system: str, settings) -> str:
 def call_stage2(prompt: str, system: str, settings) -> str:
     """
     High-quality synthesis and report writing via Anthropic Sonnet.
-    No fallback — Anthropic is never in the Stage 1 chain.
+    No fallback — direct Anthropic call only.
     """
     stage2_cfg = settings.llm_stage2
     model = stage2_cfg.get("model", "claude-sonnet-4-6")
@@ -159,25 +219,13 @@ def call_stage2(prompt: str, system: str, settings) -> str:
     temperature = stage2_cfg.get("temperature", 0.2)
     timeout = stage2_cfg.get("timeout_seconds", 90)
 
-    headers = {
-        "x-api-key": settings.anthropic_api_key,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "system": system,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-
     logger.info(f"[llm.stage2] Calling Anthropic ({model})")
-    resp = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers=headers,
-        json=payload,
+    return _call_anthropic(
+        api_key=settings.anthropic_api_key,
+        model=model,
+        system=system,
+        prompt=prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
         timeout=timeout,
     )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]

@@ -25,12 +25,15 @@ llm:
   # Fallback chain for Stage 1 only — tried in order if primary fails
   fallback_chain:
     - provider: "groq"
-      model: "llama-3.1-70b-versatile"
-    - provider: "ollama"
-      model: "qwen3:8b"
-      base_url: "http://192.168.1.170:11434"
+      model: "llama-3.3-70b-versatile"
+    - provider: "gemini"
+      model: "gemini-2.5-flash"
+    - provider: "minimax"
+      model: "MiniMax-M2.5"
     - provider: "openrouter"
       model: "deepseek/deepseek-chat"
+    - provider: "anthropic"
+      model: "claude-sonnet-4-6"
 
 sources:
 
