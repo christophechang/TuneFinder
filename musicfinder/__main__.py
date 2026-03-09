@@ -156,9 +156,10 @@ def cmd_run(args):
     # Inject pool candidates (skip any already present as fresh tracks)
     fresh_candidates = list(candidates)
     fresh_keys = {c.key for c in fresh_candidates}
-    pool_injected = pool_to_candidates([r for r in pool_records if r.key not in fresh_keys])
-    pool_injected = filter_known(pool_injected, known_keys)
-    pool_injected = filter_history(pool_injected, history_keys)
+    pool_injected = [
+        c for c in pool_to_candidates([r for r in pool_records if r.key not in fresh_keys])
+        if c.key not in known_keys and c.key not in history_keys
+    ]
     all_candidates = fresh_candidates + pool_injected
     candidates = all_candidates
 
