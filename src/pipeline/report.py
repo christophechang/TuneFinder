@@ -11,6 +11,7 @@ Stage 2 (Anthropic Sonnet):
   One call per run.
 """
 import json
+import re
 from datetime import datetime, timezone
 
 from src.llm import call_stage1, call_stage2
@@ -18,6 +19,37 @@ from src.logger import get_logger
 from src.models import Candidate
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Discord output sanitiser
+# ---------------------------------------------------------------------------
+
+_LINK_RE = re.compile(r'\[([^\]]+)\]\((https?://[^)<>]+)\)')
+_BARE_URL_RE = re.compile(r'(?<![(<])(https?://\S+)(?![)>])')
+
+
+def _sanitize_report(text: str) -> str:
+    """Post-process report: suppress Discord embeds and remove duplicate URLs per line."""
+    lines = []
+    for line in text.split("\n"):
+        # Convert [text](url) → [text](<url>) to suppress Discord embed previews
+        line = _LINK_RE.sub(lambda m: f'[{m.group(1)}](<{m.group(2)}>)', line)
+        # Remove any remaining bare URLs (not inside <> or markdown links) — these trigger embeds
+        line = _BARE_URL_RE.sub('', line).strip()
+        # Deduplicate: if the same URL appears twice in masked links on one line, keep first only
+        seen: set[str] = set()
+
+        def _dedup(m: re.Match) -> str:
+            url = m.group(2)
+            if url in seen:
+                return ''
+            seen.add(url)
+            return m.group(0)
+
+        line = re.sub(r'\[([^\]]*)\]\(<(https?://[^>]+)>\)', _dedup, line)
+        lines.append(line)
+    return "\n".join(lines)
+
 
 _DJ_CONTEXT = (
     "The DJ plays D&B, Breakbeat, UK Bass, UK Garage, House, Techno, and Electronica. "
@@ -138,22 +170,26 @@ def generate_report(
         "You write a weekly music discovery report for a DJ's Discord channel #music-research. "
         f"{_DJ_CONTEXT} "
         "Write in a concise, knowledgeable tone — like a respected record shop selector. "
-        "Format for Discord markdown. Use ** for bold, ## for section headers. "
-        "Each track on its own line. Include all track links as [Listen →](url). "
-        "Max 2 lines per track. Quality over quantity. Do not add tracks that aren't in the input."
+        "Format for Discord markdown. Use ** for bold, ## for section headers with emojis. "
+        "Exact track format: **Artist — Title** [Label] → [Listen](<url>) "
+        "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
+        "Never output bare URLs. Never repeat the same URL twice for one track. "
+        "Section headers: ## 🔺 Top Picks, ## 🏷️ Label Watch, ## 👁️ Artist Watch, ## 🃏 Wildcards. "
+        "Quality over quantity. Do not add tracks that aren't in the input."
     )
 
     prompt = (
         f"Write the weekly music discovery report for {today} (Report ID: {report_id}).\n\n"
         f"{sections_text}\n\n"
         f"PROCESSING SUMMARY:\n{stats_text}\n\n"
-        "Format the full Discord report with ## section headers, bold artist names, "
-        "track links, and a ## Processing Summary section at the end."
+        "Format the full Discord report with ## section headers (with emojis), bold artist names, "
+        "track links as [Listen](<url>), and a ## ⚙️ Processing Summary section at the end."
     )
 
     logger.info("[report] Calling Stage 2 (Anthropic) for report generation")
     try:
         report = call_stage2(prompt, system, settings)
+        report = _sanitize_report(report)
         logger.info(f"[report] Report generated — {len(report)} chars")
         return report
     except Exception as e:
@@ -196,22 +232,26 @@ def generate_mix_prep_report(
         f"You write a mix preparation report for a DJ building a {genre} mix. "
         f"{_DJ_CONTEXT} "
         "Write in a concise, knowledgeable tone — like a respected record shop selector. "
-        "Format for Discord markdown. Use ** for bold, ## for section headers. "
-        "Each track on its own line. Include all track links as [Listen →](url). "
-        "Max 2 lines per track. Quality over quantity. Do not add tracks that aren't in the input."
+        "Format for Discord markdown. Use ** for bold, ## for section headers with emojis. "
+        "Exact track format: **Artist — Title** [Label] → [Listen](<url>) "
+        "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
+        "Never output bare URLs. Never repeat the same URL twice for one track. "
+        f"Section headers: ## 🔺 Top Picks ({genre}), ## 🎧 Deep Cuts. "
+        "Quality over quantity. Do not add tracks that aren't in the input."
     )
 
     prompt = (
         f"Write the {genre} mix preparation report for {today} (Report ID: {report_id}).\n\n"
         f"{sections_text}\n\n"
         f"PROCESSING SUMMARY:\n{stats_text}\n\n"
-        "Format the full Discord report with ## section headers, bold artist names, "
-        "track links, and a ## Processing Summary section at the end."
+        "Format the full Discord report with ## section headers (with emojis), bold artist names, "
+        "track links as [Listen](<url>), and a ## ⚙️ Processing Summary section at the end."
     )
 
     logger.info(f"[report] Calling Stage 2 (Anthropic) for mix-prep report — genre: {genre}")
     try:
         report = call_stage2(prompt, system, settings)
+        report = _sanitize_report(report)
         logger.info(f"[report] Mix-prep report generated — {len(report)} chars")
         return report
     except Exception as e:
@@ -229,8 +269,8 @@ def _fallback_mix_prep_report(
 ) -> str:
     lines = [f"**Mix Prep ({genre}) — {today} ({report_id})**\n"]
     section_labels = {
-        "top_picks": f"## Top Picks ({genre})",
-        "deep_cuts": "## Deep Cuts",
+        "top_picks": f"## 🔺 Top Picks ({genre})",
+        "deep_cuts": "## 🎧 Deep Cuts",
     }
     for key, header in section_labels.items():
         candidates = sections.get(key, [])
@@ -238,15 +278,13 @@ def _fallback_mix_prep_report(
             continue
         lines.append(header)
         for c in candidates:
-            sk = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
-            reason = reasons.get(sk) or c.primary_reason or ""
             label_str = f" [{c.label}]" if c.label else ""
-            link_str = f" [Listen →]({c.link})" if c.link else ""
-            lines.append(f"**{c.artist}** — {c.title}{label_str} — {reason}{link_str}")
+            link_str = f" → [Listen](<{c.link}>)" if c.link else ""
+            lines.append(f"**{c.artist} — {c.title}**{label_str}{link_str}")
         lines.append("")
-    lines.append("## Processing Summary")
+    lines.append("## ⚙️ Processing Summary")
     lines.append(f"Report ID: {report_id} | Genre: {genre} | Candidates: {stats.get('after_genre', '?')}")
-    return "\n".join(lines)
+    return _sanitize_report("\n".join(lines))
 
 
 def _fallback_report(
@@ -259,10 +297,10 @@ def _fallback_report(
     """Plain-text fallback report if Stage 2 fails."""
     lines = [f"**Music Finder — {today} ({report_id})**\n"]
     section_labels = {
-        "top_picks": "## Top Picks",
-        "label_watch": "## Label Watch",
-        "artist_watch": "## Artist Watch",
-        "wildcards": "## Wildcards",
+        "top_picks": "## 🔺 Top Picks",
+        "label_watch": "## 🏷️ Label Watch",
+        "artist_watch": "## 👁️ Artist Watch",
+        "wildcards": "## 🃏 Wildcards",
     }
     for key, header in section_labels.items():
         candidates = sections.get(key, [])
@@ -270,14 +308,12 @@ def _fallback_report(
             continue
         lines.append(header)
         for c in candidates:
-            sk = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
-            reason = reasons.get(sk) or c.primary_reason or ""
             label_str = f" [{c.label}]" if c.label else ""
-            link_str = f" [Listen →]({c.link})" if c.link else ""
-            lines.append(f"**{c.artist}** — {c.title}{label_str} — {reason}{link_str}")
+            link_str = f" → [Listen](<{c.link}>)" if c.link else ""
+            lines.append(f"**{c.artist} — {c.title}**{label_str}{link_str}")
         lines.append("")
 
-    lines.append("## Processing Summary")
+    lines.append("## ⚙️ Processing Summary")
     lines.append(f"Report ID: {report_id} | Sources: {stats.get('sources_fetched', '?')} | "
                  f"Candidates: {stats.get('after_history', '?')}")
-    return "\n".join(lines)
+    return _sanitize_report("\n".join(lines))
