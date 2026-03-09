@@ -10,11 +10,11 @@ discord:
 
 llm:
   stage1:
-    provider: "mistral"
-    model: "mistral-small-latest"
+    provider: "minimax"
+    model: "MiniMax-M2.5"
     max_tokens: 4096
     temperature: 0.1
-    timeout_seconds: 60
+    timeout_seconds: 120
 
   stage2:
     provider: "anthropic"
@@ -29,8 +29,6 @@ llm:
       model: "llama-3.3-70b-versatile"
     - provider: "gemini"
       model: "gemini-2.5-flash"
-    - provider: "minimax"
-      model: "MiniMax-M2.5"
     - provider: "openrouter"
       model: "deepseek/deepseek-chat"
     - provider: "anthropic"

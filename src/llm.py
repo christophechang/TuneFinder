@@ -11,6 +11,7 @@ Stage 1 (cheap, fast, fallback chain):
 Stage 2 (high quality, no fallback):
   Anthropic only, via /v1/messages with x-api-key auth.
 """
+import re
 import time
 
 import requests
@@ -18,6 +19,14 @@ import requests
 from src.logger import get_logger
 
 logger = get_logger(__name__)
+
+_THINK_RE = re.compile(r'<think(?:ing)?>.*?</think(?:ing)?>', re.DOTALL | re.IGNORECASE)
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove inline thinking blocks emitted by reasoning models (e.g. MiniMax M2.5)."""
+    return _THINK_RE.sub('', text).strip()
+
 
 _PROVIDER_BASE_URLS = {
     "mistral": "https://api.mistral.ai",
@@ -69,7 +78,8 @@ def _call_openai_compat(
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    content = resp.json()["choices"][0]["message"]["content"]
+    return _strip_thinking(content)
 
 
 def _call_ollama(
