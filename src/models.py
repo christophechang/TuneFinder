@@ -126,3 +126,23 @@ class RecommendationRecord:
     @property
     def key(self) -> str:
         return f"{self.artist.lower().strip()}||{self.title.lower().strip()}"
+
+
+@dataclass
+class PoolRecord:
+    """A candidate that was scored but not recommended — held for future runs."""
+    artist: str
+    title: str
+    link: str
+    source: str
+    added_at: str            # ISO date string when first added to pool
+    last_score: float = 0.0  # most recent computed score — used for cap-trimming
+    label: Optional[str] = None
+    release_date: Optional[str] = None
+    release_name: Optional[str] = None
+    genre_tags: list[str] = field(default_factory=list)
+    raw_metadata: dict = field(default_factory=dict)
+
+    @property
+    def key(self) -> str:
+        return f"{self.artist.lower().strip()}||{self.title.lower().strip()}"

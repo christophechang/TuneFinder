@@ -113,9 +113,10 @@ def cmd_run(args):
         filter_known, filter_history,
     )
     from src.pipeline.ranker import rank_candidates, all_section_candidates
+    from src.pipeline.pool import load_pool, pool_to_candidates, save_pool, POOL_CAP
     from src.pipeline.report import generate_report
     from src.output.discord import make_discord_client
-    from src.models import RecommendationRecord
+    from src.models import RecommendationRecord, PoolRecord
     from datetime import datetime, timezone
 
     settings = load_settings()
@@ -132,9 +133,10 @@ def cmd_run(args):
     save_artist_profiles(profiles, settings.data_dir)
     known_keys = build_known_track_keys(tracks)
 
-    # 2. Load recommendation history
+    # 2. Load recommendation history and candidate pool
     history = load_history(settings.data_dir)
     history_keys = build_history_keys(history)
+    pool_records = load_pool(settings.data_dir)
 
     # 3. Fetch external sources
     source_items = fetch_all_sources(settings)
@@ -145,10 +147,20 @@ def cmd_run(args):
     source_items = deduplicate_source_items(source_items)
     after_dedup = len(source_items)
     candidates = items_to_candidates(source_items)
+    label_seed = list(candidates)  # capture before filtering so known artists inform label relevance
     candidates = filter_known(candidates, known_keys)
     after_known = len(candidates)
     candidates = filter_history(candidates, history_keys)
     after_history = len(candidates)
+
+    # Inject pool candidates (skip any already present as fresh tracks)
+    fresh_candidates = list(candidates)
+    fresh_keys = {c.key for c in fresh_candidates}
+    pool_injected = pool_to_candidates([r for r in pool_records if r.key not in fresh_keys])
+    pool_injected = filter_known(pool_injected, known_keys)
+    pool_injected = filter_history(pool_injected, history_keys)
+    all_candidates = fresh_candidates + pool_injected
+    candidates = all_candidates
 
     stats = {
         "sources_fetched": sources_fetched,
@@ -156,6 +168,7 @@ def cmd_run(args):
         "after_dedup": after_dedup,
         "after_known": after_known,
         "after_history": after_history,
+        "pool_injected": len(pool_injected),
     }
 
     if not candidates:
@@ -165,7 +178,7 @@ def cmd_run(args):
         return
 
     # 5. Rank and split into sections
-    sections = rank_candidates(candidates, profiles, settings)
+    sections = rank_candidates(candidates, profiles, settings, label_seed=label_seed)
 
     # 6. Generate report
     report_text = generate_report(sections, report_id, stats, settings)
@@ -174,8 +187,9 @@ def cmd_run(args):
     discord = make_discord_client(settings)
     discord.post_report(report_text)
 
-    # 8. Update recommendation history
+    # 8. Update recommendation history and rebuild candidate pool
     now_iso = datetime.now(timezone.utc).isoformat()
+    recommended = all_section_candidates(sections)
     new_records = [
         RecommendationRecord(
             artist=c.artist,
@@ -185,9 +199,34 @@ def cmd_run(args):
             recommended_at=now_iso,
             report_id=report_id,
         )
-        for c in all_section_candidates(sections)
+        for c in recommended
     ]
     append_records(new_records, settings.data_dir)
+
+    recommended_keys = {c.key for c in recommended}
+    existing_added_at = {r.key: r.added_at for r in pool_records}
+    unselected = sorted(
+        [c for c in all_candidates if c.key not in recommended_keys],
+        key=lambda c: c.score,
+        reverse=True,
+    )[:POOL_CAP]
+    new_pool = [
+        PoolRecord(
+            artist=c.artist,
+            title=c.title,
+            link=c.link,
+            source=c.source,
+            label=c.label,
+            release_date=c.release_date,
+            release_name=c.release_name,
+            genre_tags=c.genre_tags,
+            raw_metadata=c.raw_metadata,
+            added_at=existing_added_at.get(c.key, now_iso),
+            last_score=c.score,
+        )
+        for c in unselected
+    ]
+    save_pool(new_pool, settings.data_dir)
 
     # 9. Post run summary to log channel
     duration = int(time.time() - start)
@@ -200,6 +239,7 @@ def cmd_run(args):
         f"Sources: {source_summary}\n"
         f"Candidates: {sources_fetched} → {after_dedup} deduped → "
         f"{after_known} after known filter → {after_history} after history\n"
+        f"Pool: {len(pool_injected)} injected, {len(new_pool)} total (cap {POOL_CAP})\n"
         f"Recommended: {len(new_records)} tracks"
     )
     discord.post_log(log_msg)

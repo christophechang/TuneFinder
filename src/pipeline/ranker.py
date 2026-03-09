@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from src.logger import get_logger
 from src.models import ArtistProfile, Candidate, RecommendationSignal
+from src.pipeline.dedup import normalise_artist
 from src.pipeline.profile import _split_artists
 
 logger = get_logger(__name__)
@@ -144,14 +145,44 @@ def _assign_sections(
     wildcard_n = settings.pipeline_wildcard_count
 
     used: set[int] = set()
+    MAX_PER_ARTIST = 2
+    MAX_PER_RELEASE = 2
+    MAX_PER_GENRE = 3
+    # "electronic" is too broad to cap — nearly every track carries it
+    _UNCAPPED_GENRES = {"electronic"}
+
+    # Genre cap is global across all sections so one genre can't flood the full report
+    genre_counts: dict[str, int] = {}
 
     def pick(n: int, require_signal: str = None) -> list[Candidate]:
+        # Artist/release caps reset per section so an artist can appear in different
+        # sections (e.g. top_picks and label_watch serve distinct curatorial purposes)
+        artist_counts: dict[str, int] = {}
+        release_counts: dict[str, int] = {}
         result = []
         for c in ranked:
             if id(c) in used:
                 continue
             if require_signal and not any(s.code == require_signal for s in c.signals):
                 continue
+            artist_key = normalise_artist(c.artist)
+            release_key = (c.release_name or "").strip().lower()
+            if artist_counts.get(artist_key, 0) >= MAX_PER_ARTIST:
+                continue
+            if release_key and release_counts.get(release_key, 0) >= MAX_PER_RELEASE:
+                continue
+            # Genre cap: use first specific (non-broad) genre tag; exempt if none found
+            cap_genre = next(
+                (g for g in c.genre_tags if g in _OUR_GENRES and g not in _UNCAPPED_GENRES),
+                None,
+            )
+            if cap_genre and genre_counts.get(cap_genre, 0) >= MAX_PER_GENRE:
+                continue
+            artist_counts[artist_key] = artist_counts.get(artist_key, 0) + 1
+            if release_key:
+                release_counts[release_key] = release_counts.get(release_key, 0) + 1
+            if cap_genre:
+                genre_counts[cap_genre] = genre_counts.get(cap_genre, 0) + 1
             result.append(c)
             used.add(id(c))
             if len(result) >= n:
@@ -163,10 +194,11 @@ def _assign_sections(
     artist_watch = pick(artist_n, require_signal="known_artist")
     wildcards = pick(wildcard_n)
 
+    genre_summary = ", ".join(f"{g}: {n}" for g, n in sorted(genre_counts.items()))
     logger.info(
         f"[ranker] Sections — top_picks: {len(top_picks)}, "
         f"label_watch: {len(label_watch)}, artist_watch: {len(artist_watch)}, "
-        f"wildcards: {len(wildcards)}"
+        f"wildcards: {len(wildcards)} | genres: {genre_summary or 'none tagged'}"
     )
     return {
         "top_picks": top_picks,
@@ -180,13 +212,19 @@ def rank_candidates(
     candidates: list[Candidate],
     profiles: dict[str, ArtistProfile],
     settings,
+    label_seed: list[Candidate] | None = None,
 ) -> dict[str, list[Candidate]]:
     """
     Score all candidates, assign signals, sort, and split into report sections.
     Returns a dict with keys: top_picks, label_watch, artist_watch, wildcards.
+
+    label_seed: pre-filter candidates used for label relevance derivation.
+    Pass the full source candidate list before filter_known/filter_history so
+    that known artists (who are filtered out of candidates) still contribute
+    their labels. Defaults to candidates if not provided.
     """
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
-    relevant_labels = _build_relevant_labels(candidates, profiles_lower)
+    relevant_labels = _build_relevant_labels(label_seed if label_seed is not None else candidates, profiles_lower)
 
     for c in candidates:
         _score(c, profiles_lower, relevant_labels)
