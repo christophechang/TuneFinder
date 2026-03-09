@@ -235,6 +235,68 @@ def rank_candidates(
     return _assign_sections(ranked, settings)
 
 
+def _assign_sections_mix_prep(
+    ranked: list[Candidate],
+    settings,
+) -> dict[str, list[Candidate]]:
+    top_n = settings.pipeline_mix_prep_top_picks_count
+    deep_n = settings.pipeline_mix_prep_deep_cuts_count
+
+    used: set[int] = set()
+    MAX_PER_ARTIST = 2
+    MAX_PER_RELEASE = 2
+
+    def pick(n: int) -> list[Candidate]:
+        artist_counts: dict[str, int] = {}
+        release_counts: dict[str, int] = {}
+        result = []
+        for c in ranked:
+            if id(c) in used:
+                continue
+            artist_key = normalise_artist(c.artist)
+            release_key = (c.release_name or "").strip().lower()
+            if artist_counts.get(artist_key, 0) >= MAX_PER_ARTIST:
+                continue
+            if release_key and release_counts.get(release_key, 0) >= MAX_PER_RELEASE:
+                continue
+            artist_counts[artist_key] = artist_counts.get(artist_key, 0) + 1
+            if release_key:
+                release_counts[release_key] = release_counts.get(release_key, 0) + 1
+            result.append(c)
+            used.add(id(c))
+            if len(result) >= n:
+                break
+        return result
+
+    top_picks = pick(top_n)
+    deep_cuts = pick(deep_n)
+    logger.info(f"[ranker] Mix-prep sections — top_picks: {len(top_picks)}, deep_cuts: {len(deep_cuts)}")
+    return {"top_picks": top_picks, "deep_cuts": deep_cuts}
+
+
+def rank_candidates_mix_prep(
+    candidates: list[Candidate],
+    profiles: dict[str, ArtistProfile],
+    settings,
+    label_seed: list[Candidate] | None = None,
+) -> dict[str, list[Candidate]]:
+    """
+    Score and section candidates for a mix-prep run.
+    Same scoring as rank_candidates but uses two sections (top_picks, deep_cuts)
+    with no per-genre cap — the genre has already been filtered upstream.
+    """
+    profiles_lower = {k.lower(): v for k, v in profiles.items()}
+    relevant_labels = _build_relevant_labels(label_seed if label_seed is not None else candidates, profiles_lower)
+
+    for c in candidates:
+        _score(c, profiles_lower, relevant_labels)
+
+    ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
+    logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
+
+    return _assign_sections_mix_prep(ranked, settings)
+
+
 def all_section_candidates(sections: dict[str, list[Candidate]]) -> list[Candidate]:
     """Flatten all section candidates into a single list for history recording."""
     seen: set[int] = set()

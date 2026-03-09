@@ -73,6 +73,10 @@ class Settings:
     def discord_alert_channel(self) -> str:
         return self._data.get("discord", {}).get("alert_channel", "alerts")
 
+    @property
+    def discord_mix_prep_channel(self) -> str:
+        return self._data.get("discord", {}).get("mix_prep_channel", "mix-prep")
+
     # --- LLM ---
 
     @property
@@ -140,6 +144,14 @@ class Settings:
     @property
     def pipeline_wildcard_count(self) -> int:
         return self._data.get("pipeline", {}).get("wildcard_count", 3)
+
+    @property
+    def pipeline_mix_prep_top_picks_count(self) -> int:
+        return self._data.get("pipeline", {}).get("mix_prep_top_picks_count", 20)
+
+    @property
+    def pipeline_mix_prep_deep_cuts_count(self) -> int:
+        return self._data.get("pipeline", {}).get("mix_prep_deep_cuts_count", 20)
 
     # --- Data ---
 

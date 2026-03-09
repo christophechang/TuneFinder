@@ -161,6 +161,94 @@ def generate_report(
         return _fallback_report(sections, reasons, report_id, today, stats)
 
 
+def generate_mix_prep_report(
+    sections: dict[str, list[Candidate]],
+    report_id: str,
+    stats: dict,
+    genre: str,
+    settings,
+) -> str:
+    """
+    Generate a Discord-formatted mix-prep report focused on a single genre.
+    Uses the same two-stage LLM pipeline as generate_report but with genre-aware prompts.
+    """
+    all_candidates = []
+    for candidates in sections.values():
+        all_candidates.extend(candidates)
+
+    reasons = _enrich_reasons(all_candidates, settings) if all_candidates else {}
+
+    today = datetime.now(timezone.utc).strftime("%-d %B %Y")
+    sections_text = "\n\n".join(filter(None, [
+        _format_section_for_prompt(f"TOP PICKS (best {genre} tracks for the mix)", sections.get("top_picks", []), reasons),
+        _format_section_for_prompt("DEEP CUTS (deeper selections worth exploring)", sections.get("deep_cuts", []), reasons),
+    ]))
+
+    stats_text = (
+        f"Genre: {genre}\n"
+        f"Sources fetched: {stats.get('sources_fetched', '?')}\n"
+        f"After genre filter: {stats.get('after_genre', '?')}\n"
+        f"Pool injected: {stats.get('pool_injected', '?')}\n"
+        f"Report ID: {report_id}"
+    )
+
+    system = (
+        f"You write a mix preparation report for a DJ building a {genre} mix. "
+        f"{_DJ_CONTEXT} "
+        "Write in a concise, knowledgeable tone — like a respected record shop selector. "
+        "Format for Discord markdown. Use ** for bold, ## for section headers. "
+        "Each track on its own line. Include all track links as [Listen →](url). "
+        "Max 2 lines per track. Quality over quantity. Do not add tracks that aren't in the input."
+    )
+
+    prompt = (
+        f"Write the {genre} mix preparation report for {today} (Report ID: {report_id}).\n\n"
+        f"{sections_text}\n\n"
+        f"PROCESSING SUMMARY:\n{stats_text}\n\n"
+        "Format the full Discord report with ## section headers, bold artist names, "
+        "track links, and a ## Processing Summary section at the end."
+    )
+
+    logger.info(f"[report] Calling Stage 2 (Anthropic) for mix-prep report — genre: {genre}")
+    try:
+        report = call_stage2(prompt, system, settings)
+        logger.info(f"[report] Mix-prep report generated — {len(report)} chars")
+        return report
+    except Exception as e:
+        logger.error(f"[report] Stage 2 failed: {e}")
+        return _fallback_mix_prep_report(sections, reasons, report_id, today, genre, stats)
+
+
+def _fallback_mix_prep_report(
+    sections: dict[str, list[Candidate]],
+    reasons: dict[str, str],
+    report_id: str,
+    today: str,
+    genre: str,
+    stats: dict,
+) -> str:
+    lines = [f"**Mix Prep ({genre}) — {today} ({report_id})**\n"]
+    section_labels = {
+        "top_picks": f"## Top Picks ({genre})",
+        "deep_cuts": "## Deep Cuts",
+    }
+    for key, header in section_labels.items():
+        candidates = sections.get(key, [])
+        if not candidates:
+            continue
+        lines.append(header)
+        for c in candidates:
+            sk = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
+            reason = reasons.get(sk) or c.primary_reason or ""
+            label_str = f" [{c.label}]" if c.label else ""
+            link_str = f" [Listen →]({c.link})" if c.link else ""
+            lines.append(f"**{c.artist}** — {c.title}{label_str} — {reason}{link_str}")
+        lines.append("")
+    lines.append("## Processing Summary")
+    lines.append(f"Report ID: {report_id} | Genre: {genre} | Candidates: {stats.get('after_genre', '?')}")
+    return "\n".join(lines)
+
+
 def _fallback_report(
     sections: dict[str, list[Candidate]],
     reasons: dict[str, str],

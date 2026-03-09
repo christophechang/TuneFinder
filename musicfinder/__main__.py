@@ -247,6 +247,114 @@ def cmd_run(args):
     print(f"Run complete — {report_id} — {len(new_records)} tracks recommended in {duration}s")
 
 
+def cmd_mix_prep(args):
+    import time
+    from src.fetchers.catalog import fetch_all_tracks
+    from src.fetchers import fetch_all_sources
+    from src.pipeline.profile import (
+        build_artist_profiles, build_known_track_keys,
+        save_known_tracks, save_artist_profiles,
+    )
+    from src.pipeline.history import (
+        load_mix_prep_history, build_history_keys, append_mix_prep_records, make_report_id,
+    )
+    from src.pipeline.dedup import (
+        deduplicate_source_items, items_to_candidates,
+        filter_known, filter_genre,
+    )
+    from src.pipeline.ranker import rank_candidates_mix_prep, all_section_candidates
+    from src.pipeline.pool import load_pool, pool_to_candidates
+    from src.pipeline.report import generate_mix_prep_report
+    from src.output.discord import make_discord_client
+    from src.models import RecommendationRecord
+    from datetime import datetime, timezone
+
+    genre = args.genre
+    settings = load_settings()
+    settings.validate()
+    logger = get_logger(__name__)
+    start = time.time()
+    report_id = f"{make_report_id()}-mix-prep-{genre}"
+    logger.info(f"[mix-prep] Starting mix-prep run — genre: {genre} — {report_id}")
+
+    # 1. Refresh profile and known-track set
+    tracks = fetch_all_tracks(settings)
+    profiles = build_artist_profiles(tracks)
+    save_known_tracks(tracks, settings.data_dir)
+    save_artist_profiles(profiles, settings.data_dir)
+    known_keys = build_known_track_keys(tracks)
+
+    # 2. Load mix-prep history (separate from weekly history)
+    mix_prep_history = load_mix_prep_history(settings.data_dir)
+    mix_prep_history_keys = build_history_keys(mix_prep_history)
+
+    # 3. Fetch external sources
+    source_items = fetch_all_sources(settings)
+    sources_fetched = len(source_items)
+
+    # 4. Dedup + filter + genre narrow
+    source_items = deduplicate_source_items(source_items)
+    candidates = items_to_candidates(source_items)
+    label_seed = list(candidates)
+    candidates = filter_known(candidates, known_keys)
+    candidates = [c for c in candidates if c.key not in mix_prep_history_keys]
+    candidates = filter_genre(candidates, genre)
+    after_genre = len(candidates)
+
+    # Inject pool candidates for this genre
+    pool_records = load_pool(settings.data_dir)
+    fresh_keys = {c.key for c in candidates}
+    pool_injected = [
+        c for c in filter_genre(
+            pool_to_candidates([r for r in pool_records if r.key not in fresh_keys]),
+            genre,
+        )
+        if c.key not in known_keys and c.key not in mix_prep_history_keys
+    ]
+    candidates = candidates + pool_injected
+
+    stats = {
+        "sources_fetched": sources_fetched,
+        "after_genre": after_genre,
+        "pool_injected": len(pool_injected),
+    }
+
+    if not candidates:
+        logger.warning(f"[mix-prep] No {genre} candidates after filtering — nothing to report")
+        discord = make_discord_client(settings)
+        discord.post_alert(f"Mix-prep {report_id}: no candidates found for genre '{genre}'. Check sources.")
+        return
+
+    # 5. Rank and section
+    sections = rank_candidates_mix_prep(candidates, profiles, settings, label_seed=label_seed)
+
+    # 6. Generate report
+    report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings)
+
+    # 7. Post to mix-prep Discord channel
+    discord = make_discord_client(settings)
+    discord.post(settings.discord_mix_prep_channel, report_text)
+
+    # 8. Save to mix-prep history (does not affect weekly run)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    recommended = all_section_candidates(sections)
+    new_records = [
+        RecommendationRecord(
+            artist=c.artist,
+            title=c.title,
+            link=c.link,
+            source=c.source,
+            recommended_at=now_iso,
+            report_id=report_id,
+        )
+        for c in recommended
+    ]
+    append_mix_prep_records(new_records, settings.data_dir)
+
+    duration = int(time.time() - start)
+    print(f"Mix-prep complete — {report_id} — {len(new_records)} tracks in {duration}s")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="musicfinder",
@@ -258,6 +366,15 @@ def main():
     subparsers.add_parser("build-profile", help="Build artist profiles and known-track exclusion set from mix history")
     subparsers.add_parser("fetch-sources", help="Fetch candidate music from all enabled external sources")
     subparsers.add_parser("run", help="Run the full pipeline and post the weekly report to Discord")
+    mix_prep_parser = subparsers.add_parser(
+        "mix-prep",
+        help="Generate a genre-focused track list for mix preparation",
+    )
+    mix_prep_parser.add_argument(
+        "genre",
+        choices=["dnb", "breaks", "house", "techno", "ukg", "uk-bass", "electronica"],
+        help="Genre to focus on",
+    )
 
     args = parser.parse_args()
 
@@ -275,6 +392,8 @@ def main():
         cmd_fetch_sources(args)
     elif args.command == "run":
         cmd_run(args)
+    elif args.command == "mix-prep":
+        cmd_mix_prep(args)
 
 
 if __name__ == "__main__":

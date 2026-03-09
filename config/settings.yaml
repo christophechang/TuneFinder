@@ -6,6 +6,7 @@ discord:
   report_channel: music-research
   log_channel: logs
   alert_channel: alerts
+  mix_prep_channel: mix-prep
 
 llm:
   stage1:
@@ -132,6 +133,8 @@ pipeline:
   label_watch_count: 5
   artist_watch_count: 5
   wildcard_count: 3
+  mix_prep_top_picks_count: 20
+  mix_prep_deep_cuts_count: 20
 
 data_dir: data
 

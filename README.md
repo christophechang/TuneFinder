@@ -30,6 +30,22 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 - **Artist Watch** — new material from artists already in your mixes
 - **Wildcards** — interesting outliers from the remaining pool
 
+## Mix prep
+
+When preparing a mix in a specific style, run `mix-prep <genre>` to get a focused report of the best available tracks for that genre:
+
+```bash
+./venv/bin/python -m musicfinder mix-prep house
+```
+
+Valid genres: `dnb`, `breaks`, `house`, `techno`, `ukg`, `uk-bass`, `electronica`
+
+The mix-prep report has two sections:
+- **Top Picks** — highest-scored tracks for the genre
+- **Deep Cuts** — next-tier selections worth exploring
+
+Results are posted to the Discord `#mix-prep` channel. Mix-prep uses its own history file (`data/mix_prep_history.json`) so it won't deplete your weekly discovery feed — the same track can appear in both. Re-running mix-prep for the same genre will skip tracks already surfaced in prior mix-prep sessions.
+
 ## Setup
 
 **Requirements:** Python 3.11+
@@ -76,6 +92,9 @@ OPENROUTER_API_KEY=       # fallback 4 — capped
 
 # Run the full pipeline and post the weekly report to Discord
 ./venv/bin/python -m musicfinder run
+
+# Generate a genre-focused track list for mix preparation
+./venv/bin/python -m musicfinder mix-prep house
 ```
 
 ## First-time setup
@@ -149,8 +168,9 @@ src/
     profile.py       # Artist profile builder
     dedup.py         # Normalisation and deduplication
     ranker.py        # Scoring and section assignment
-    history.py       # Recommendation history store
-    report.py        # LLM report generation
+    history.py       # Recommendation history store (weekly + mix-prep)
+    pool.py          # Persistent candidate pool across runs
+    report.py        # LLM report generation (weekly + mix-prep)
   output/
     discord.py       # Discord bot client
 musicfinder/

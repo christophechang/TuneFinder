@@ -8,6 +8,7 @@ from src.models import RecommendationRecord
 logger = get_logger(__name__)
 
 _HISTORY_FILE = "recommendation_history.json"
+_MIX_PREP_HISTORY_FILE = "mix_prep_history.json"
 
 
 def make_report_id() -> str:
@@ -82,3 +83,26 @@ def append_records(new_records: list[RecommendationRecord], data_dir: str) -> No
 def build_history_keys(records: list[RecommendationRecord]) -> set[str]:
     """Return normalised keys for all previously recommended tracks."""
     return {r.key for r in records}
+
+
+def load_mix_prep_history(data_dir: str) -> list[RecommendationRecord]:
+    path = os.path.join(data_dir, _MIX_PREP_HISTORY_FILE)
+    if not os.path.exists(path):
+        logger.info(f"[history] No mix-prep history file at {path} — starting fresh")
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    records = [_dict_to_record(d) for d in data]
+    logger.info(f"[history] Loaded {len(records)} mix-prep history records")
+    return records
+
+
+def append_mix_prep_records(new_records: list[RecommendationRecord], data_dir: str) -> None:
+    """Append newly recommended tracks to the mix-prep history file (separate from weekly history)."""
+    existing = load_mix_prep_history(data_dir)
+    combined = existing + new_records
+    os.makedirs(data_dir, exist_ok=True)
+    path = os.path.join(data_dir, _MIX_PREP_HISTORY_FILE)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump([_record_to_dict(r) for r in combined], f, indent=2, ensure_ascii=False)
+    logger.info(f"[history] Appended {len(new_records)} mix-prep records (total: {len(combined)})")

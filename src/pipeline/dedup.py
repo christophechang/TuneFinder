@@ -116,6 +116,13 @@ def filter_known(candidates: list[Candidate], known_keys: set[str]) -> list[Cand
     return result
 
 
+def filter_genre(candidates: list[Candidate], genre: str) -> list[Candidate]:
+    """Keep only candidates tagged with the specified genre."""
+    result = [c for c in candidates if genre in c.genre_tags]
+    logger.info(f"[dedup] Genre filter '{genre}': {len(candidates) - len(result)} removed → {len(result)} remaining")
+    return result
+
+
 def filter_history(candidates: list[Candidate], history_keys: set[str]) -> list[Candidate]:
     """Remove candidates that have been previously recommended."""
     result = []
