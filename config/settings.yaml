@@ -122,6 +122,10 @@ sources:
     enabled: true
     releases_url: "https://ra.co/music/releases"
 
+  subsurface_selections:
+    enabled: true
+    archive_url: "https://subsurfaceselections.beehiiv.com/archive"
+
   discogs:
     enabled: false
 
