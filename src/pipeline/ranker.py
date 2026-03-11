@@ -30,10 +30,12 @@ _W_LABEL_MATCH = 2.5       # label connected to a known artist via this candidat
 _W_CROSS_SOURCE = 1.0      # seen on 2+ sources (more credibility)
 _W_GENRE = 0.5             # per matching genre tag
 _W_FRESH = 0.5             # released within 30 days
+_W_CHART_TOP = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
 
 _MAX_ARTIST_SCORE = 10.0   # cap so one mega-artist doesn't dominate
 _RECURRING_THRESHOLD = 3   # play_count needed to earn the recurring bonus
 _FRESH_DAYS = 30
+_CHART_SCALE = 100         # chart positions are 1–100
 
 
 def _build_relevant_labels(
@@ -131,6 +133,16 @@ def _score(
                 ))
         except ValueError:
             pass
+
+    # --- Chart position (Juno and any other source that sets chart_position) ---
+    chart_pos = c.raw_metadata.get("chart_position")
+    if chart_pos and isinstance(chart_pos, int) and 1 <= chart_pos <= _CHART_SCALE:
+        chart_bonus = _W_CHART_TOP * (1 - (chart_pos - 1) / _CHART_SCALE)
+        score += chart_bonus
+        c.signals.append(RecommendationSignal(
+            code="chart_position",
+            explanation=f"#{chart_pos} on the {c.source.title()} weekly chart.",
+        ))
 
     c.score = round(score, 2)
 
