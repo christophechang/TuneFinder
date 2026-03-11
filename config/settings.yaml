@@ -53,29 +53,40 @@ sources:
     enabled: true
     tracks_pattern: "https://www.beatport.com/genre/{slug}/{id}/tracks"
     releases_pattern: "https://www.beatport.com/genre/{slug}/{id}/releases"
-    # Verify IDs marked with # verify before running
     genres:
+      # Standalone genres
+      - name: downtempo
+        slug: downtempo
+        id: 63
       - name: dnb
         slug: drum-bass
         id: 1
-      - name: breaks
-        slug: breaks
-        id: 9
+      - name: electronica
+        slug: electronica
+        id: 3
+      - name: ukg
+        slug: uk-garage-bassline
+        id: 86
+      # House sub-genres — all tagged "house" via _SLUG_TO_TAGS in fetcher
       - name: house
         slug: house
         id: 5
-      - name: techno
-        slug: techno
-        id: 6
-      - name: uk-bass
-        slug: bass-house    # verify
-        id: 91              # verify
-      - name: ukg
-        slug: uk-garage     # verify
-        id: 92              # verify
-      - name: electronica
-        slug: electronica   # verify
-        id: 3               # verify
+      - name: house
+        slug: melodic-house-techno
+        id: 90
+      - name: house
+        slug: minimal-deep-tech
+        id: 14
+      - name: house
+        slug: deep-house
+        id: 12
+      - name: house
+        slug: tech-house
+        id: 11
+      # Combined breaks + uk-bass feed — per-track genre slug read from __NEXT_DATA__
+      - name: breaks-uk-bass
+        slug: breaks-breakbeat-uk-bass
+        id: 9
 
   traxsource:
     enabled: true

@@ -126,11 +126,37 @@ def _format_fetcher_health(health: dict) -> str:
         count = info.get("count", 0)
         error = info.get("error")
         if error:
-            lines.append(f"❌ {source}: FAILED — {error}")
+            lines.append(f"❌ **{source}**: FAILED — {error}")
         elif count == 0:
-            lines.append(f"⚠️ {source}: 0 tracks (possible schema/config issue)")
+            lines.append(f"⚠️ **{source}**: 0 tracks (possible schema/config issue)")
         else:
-            lines.append(f"✅ {source}: {count} tracks")
+            lines.append(f"✅ **{source}**: {count} tracks")
+    return "\n".join(lines)
+
+
+def _build_footer(report_id: str, stats: dict, recommended_count: int | None = None) -> str:
+    """Build the Processing Summary and Fetcher Health footer in plain Discord-friendly text."""
+    lines = ["## ⚙️ Processing Summary"]
+    lines.append(f"📥 Sources fetched: **{stats.get('sources_fetched', '?')}**")
+    lines.append(f"🔀 After dedup: **{stats.get('after_dedup', stats.get('sources_fetched', '?'))}**")
+    if "after_known" in stats:
+        lines.append(f"🎵 After known-track filter: **{stats['after_known']}**")
+    if "after_history" in stats:
+        lines.append(f"📋 After history filter: **{stats['after_history']}**")
+    if "after_genre" in stats:
+        lines.append(f"🎚️ After genre filter: **{stats['after_genre']}**")
+    if "pool_injected" in stats:
+        lines.append(f"♻️ Pool injected: **{stats['pool_injected']}**")
+    if recommended_count is not None:
+        lines.append(f"🎯 Tracks in report: **{recommended_count}**")
+    lines.append(f"`Report ID: {report_id}`")
+
+    health = stats.get("fetcher_health", {})
+    if health:
+        lines.append("")
+        lines.append("## 🔌 Fetcher Health")
+        lines.append(_format_fetcher_health(health))
+
     return "\n".join(lines)
 
 
@@ -174,17 +200,6 @@ def generate_report(
         _format_section_for_prompt("WILDCARDS (interesting outliers worth a listen)", sections.get("wildcards", []), reasons),
     ]))
 
-    fetcher_health_text = _format_fetcher_health(stats.get("fetcher_health", {}))
-    stats_text = (
-        f"Sources fetched: {stats.get('sources_fetched', '?')}\n"
-        f"Raw candidates: {stats.get('raw_count', '?')}\n"
-        f"After dedup: {stats.get('after_dedup', '?')}\n"
-        f"After known-track filter: {stats.get('after_known', '?')}\n"
-        f"After history filter: {stats.get('after_history', '?')}\n"
-        f"Report ID: {report_id}\n\n"
-        f"FETCHER HEALTH:\n{fetcher_health_text}"
-    )
-
     system = (
         "You write a weekly music discovery report for a DJ's Discord channel #music-research. "
         f"{_DJ_CONTEXT} "
@@ -195,22 +210,24 @@ def generate_report(
         "Never output bare URLs. Never repeat the same URL twice for one track. "
         "Section headers: ## 🔺 Top Picks, ## 🏷️ Label Watch, ## 👁️ Artist Watch, ## 🃏 Wildcards. "
         "Quality over quantity. Do not add tracks that aren't in the input. "
-        "Always end with a ## ⚙️ Processing Summary section and a ## 🔌 Fetcher Health section listing each source with its status."
+        "End after the last track section — do not add a summary or stats section."
     )
 
     prompt = (
         f"Write the weekly music discovery report for {today} (Report ID: {report_id}).\n\n"
         f"{sections_text}\n\n"
-        f"PROCESSING SUMMARY:\n{stats_text}\n\n"
         "Format the full Discord report with ## section headers (with emojis), bold artist names, "
-        "track links as [Listen](<url>), a ## ⚙️ Processing Summary section, "
-        "and a ## 🔌 Fetcher Health section at the end showing each source's track count and any errors."
+        "and track links as [Listen](<url>)."
     )
+
+    recommended_count = sum(len(v) for v in sections.values())
+    footer = _build_footer(report_id, stats, recommended_count)
 
     logger.info("[report] Calling Stage 2 (Anthropic) for report generation")
     try:
         report = call_stage2(prompt, system, settings)
         report = _sanitize_report(report)
+        report = report.rstrip() + "\n\n" + footer
         logger.info(f"[report] Report generated — {len(report)} chars")
         return report
     except Exception as e:
@@ -241,16 +258,6 @@ def generate_mix_prep_report(
         _format_section_for_prompt("DEEP CUTS (deeper selections worth exploring)", sections.get("deep_cuts", []), reasons),
     ]))
 
-    fetcher_health_text = _format_fetcher_health(stats.get("fetcher_health", {}))
-    stats_text = (
-        f"Genre: {genre}\n"
-        f"Sources fetched: {stats.get('sources_fetched', '?')}\n"
-        f"After genre filter: {stats.get('after_genre', '?')}\n"
-        f"Pool injected: {stats.get('pool_injected', '?')}\n"
-        f"Report ID: {report_id}\n\n"
-        f"FETCHER HEALTH:\n{fetcher_health_text}"
-    )
-
     system = (
         f"You write a mix preparation report for a DJ building a {genre} mix. "
         f"{_DJ_CONTEXT} "
@@ -260,21 +267,24 @@ def generate_mix_prep_report(
         "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
         "Never output bare URLs. Never repeat the same URL twice for one track. "
         f"Section headers: ## 🔺 Top Picks ({genre}), ## 🎧 Deep Cuts. "
-        "Quality over quantity. Do not add tracks that aren't in the input."
+        "Quality over quantity. Do not add tracks that aren't in the input. "
+        "End after the last track section — do not add a summary or stats section."
     )
 
     prompt = (
         f"Write the {genre} mix preparation report for {today} (Report ID: {report_id}).\n\n"
         f"{sections_text}\n\n"
-        f"PROCESSING SUMMARY:\n{stats_text}\n\n"
         "Format the full Discord report with ## section headers (with emojis), bold artist names, "
-        "track links as [Listen](<url>), and a ## ⚙️ Processing Summary section at the end."
+        "and track links as [Listen](<url>)."
     )
+
+    footer = _build_footer(report_id, stats)
 
     logger.info(f"[report] Calling Stage 2 (Anthropic) for mix-prep report — genre: {genre}")
     try:
         report = call_stage2(prompt, system, settings)
         report = _sanitize_report(report)
+        report = report.rstrip() + "\n\n" + footer
         logger.info(f"[report] Mix-prep report generated — {len(report)} chars")
         return report
     except Exception as e:
@@ -305,13 +315,7 @@ def _fallback_mix_prep_report(
             link_str = f" → [Listen](<{c.link}>)" if c.link else ""
             lines.append(f"**{c.artist} — {c.title}**{label_str}{link_str}")
         lines.append("")
-    lines.append("## ⚙️ Processing Summary")
-    lines.append(f"Report ID: {report_id} | Genre: {genre} | Candidates: {stats.get('after_genre', '?')}")
-    health = stats.get("fetcher_health", {})
-    if health:
-        lines.append("")
-        lines.append("## 🔌 Fetcher Health")
-        lines.append(_format_fetcher_health(health))
+    lines.append(_build_footer(report_id, stats))
     return _sanitize_report("\n".join(lines))
 
 
@@ -341,12 +345,6 @@ def _fallback_report(
             lines.append(f"**{c.artist} — {c.title}**{label_str}{link_str}")
         lines.append("")
 
-    lines.append("## ⚙️ Processing Summary")
-    lines.append(f"Report ID: {report_id} | Sources: {stats.get('sources_fetched', '?')} | "
-                 f"Candidates: {stats.get('after_history', '?')}")
-    health = stats.get("fetcher_health", {})
-    if health:
-        lines.append("")
-        lines.append("## 🔌 Fetcher Health")
-        lines.append(_format_fetcher_health(health))
+    recommended_count = sum(len(v) for v in sections.values())
+    lines.append(_build_footer(report_id, stats, recommended_count))
     return _sanitize_report("\n".join(lines))

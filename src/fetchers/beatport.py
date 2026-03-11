@@ -15,6 +15,22 @@ logger = get_logger(__name__)
 
 _TRACK_URL = "https://www.beatport.com/track/{slug}/{id}"
 
+# Maps Beatport genre slugs to internal genre tags.
+# Handles merged genres (e.g. breaks-breakbeat-uk-bass → both tags)
+# and sub-genres that all roll up to a parent (house sub-genres → house).
+_SLUG_TO_TAGS: dict[str, list[str]] = {
+    "drum-bass": ["dnb"],
+    "breaks-breakbeat-uk-bass": ["breaks", "uk-bass"],
+    "house": ["house"],
+    "melodic-house-techno": ["house"],
+    "minimal-deep-tech": ["house"],
+    "deep-house": ["house"],
+    "tech-house": ["house"],
+    "uk-garage-bassline": ["ukg"],
+    "electronica": ["electronica"],
+    "downtempo": ["downtempo"],
+}
+
 
 def _extract_tracks_from_next_data(data: dict) -> list[dict]:
     """
@@ -47,7 +63,7 @@ def _extract_tracks_from_next_data(data: dict) -> list[dict]:
     return []
 
 
-def _parse_track(raw: dict, genre_name: str) -> SourceItem | None:
+def _parse_track(raw: dict, fallback_tags: list[str]) -> SourceItem | None:
     title = raw.get("name", "").strip()
     if not title:
         return None
@@ -69,6 +85,12 @@ def _parse_track(raw: dict, genre_name: str) -> SourceItem | None:
     release_obj = raw.get("release") or {}
     release_name = release_obj.get("name") or None
 
+    # Derive genre tags from the track's own genre slug if available,
+    # falling back to the feed-level tags. This correctly handles merged
+    # feeds (e.g. breaks-breakbeat-uk-bass) and house sub-genres.
+    genre_slug = (raw.get("genre") or {}).get("slug", "")
+    genre_tags = _SLUG_TO_TAGS.get(genre_slug) or fallback_tags
+
     return SourceItem(
         source="beatport",
         artist=artist,
@@ -77,7 +99,7 @@ def _parse_track(raw: dict, genre_name: str) -> SourceItem | None:
         label=label,
         release_date=release_date,
         release_name=release_name,
-        genre_tags=[genre_name],
+        genre_tags=genre_tags,
         raw_metadata={"beatport_id": track_id, "bpm": raw.get("bpm")},
     )
 
@@ -96,6 +118,8 @@ def fetch(settings) -> list[SourceItem]:
         slug = genre.get("slug", "")
         genre_id = genre.get("id", "")
         name = genre.get("name", slug)
+        # fallback_tags used if the track's own genre slug isn't in _SLUG_TO_TAGS
+        fallback_tags = _SLUG_TO_TAGS.get(slug) or [name]
 
         if not slug or not genre_id:
             logger.warning(f"[beatport] Skipping genre with missing slug/id: {genre}")
@@ -125,7 +149,7 @@ def fetch(settings) -> list[SourceItem]:
 
         genre_items = []
         for raw in raw_tracks:
-            item = _parse_track(raw, name)
+            item = _parse_track(raw, fallback_tags)
             if item:
                 genre_items.append(item)
 

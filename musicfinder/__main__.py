@@ -116,12 +116,13 @@ def cmd_run(args):
     from src.models import RecommendationRecord, PoolRecord
     from datetime import datetime, timezone
 
+    dry_run = getattr(args, "dry_run", False)
     settings = load_settings()
     settings.validate()
     logger = get_logger(__name__)
     start = time.time()
     report_id = make_report_id()
-    logger.info(f"[run] Starting report run — {report_id}")
+    logger.info(f"[run] Starting report run — {report_id}" + (" (DRY RUN)" if dry_run else ""))
 
     # 1. Refresh profile and known-track set
     tracks = fetch_all_tracks(settings)
@@ -184,9 +185,11 @@ def cmd_run(args):
 
     # 7. Post to Discord
     discord = make_discord_client(settings)
+    if dry_run:
+        report_text = "🧪 **[DRY RUN — history not updated]**\n\n" + report_text
     discord.post_report(report_text)
 
-    # 8. Update recommendation history and rebuild candidate pool
+    # 8. Update recommendation history and rebuild candidate pool (skipped in dry-run)
     now_iso = datetime.now(timezone.utc).isoformat()
     recommended = all_section_candidates(sections)
     new_records = [
@@ -200,8 +203,6 @@ def cmd_run(args):
         )
         for c in recommended
     ]
-    append_records(new_records, settings.data_dir)
-
     recommended_keys = {c.key for c in recommended}
     existing_added_at = {r.key: r.added_at for r in pool_records}
     unselected = sorted(
@@ -225,9 +226,11 @@ def cmd_run(args):
         )
         for c in unselected
     ]
-    save_pool(new_pool, settings.data_dir)
+    if not dry_run:
+        append_records(new_records, settings.data_dir)
+        save_pool(new_pool, settings.data_dir)
 
-    # 9. Post run summary to log channel
+    # 9. Post run summary to log channel (skipped in dry-run)
     duration = int(time.time() - start)
     by_source: dict[str, int] = {}
     for item in source_items:
@@ -241,8 +244,10 @@ def cmd_run(args):
         f"Pool: {len(pool_injected)} injected, {len(new_pool)} total (cap {POOL_CAP})\n"
         f"Recommended: {len(new_records)} tracks"
     )
-    discord.post_log(log_msg)
-    print(f"Run complete — {report_id} — {len(new_records)} tracks recommended in {duration}s")
+    if not dry_run:
+        discord.post_log(log_msg)
+    print(f"Run complete — {report_id} — {len(new_records)} tracks recommended in {duration}s"
+          + (" (DRY RUN — no writes)" if dry_run else ""))
 
 
 def cmd_mix_prep(args):
@@ -268,12 +273,13 @@ def cmd_mix_prep(args):
     from datetime import datetime, timezone
 
     genre = args.genre
+    dry_run = getattr(args, "dry_run", False)
     settings = load_settings()
     settings.validate()
     logger = get_logger(__name__)
     start = time.time()
     report_id = f"{make_report_id()}-mix-prep-{genre}"
-    logger.info(f"[mix-prep] Starting mix-prep run — genre: {genre} — {report_id}")
+    logger.info(f"[mix-prep] Starting mix-prep run — genre: {genre} — {report_id}" + (" (DRY RUN)" if dry_run else ""))
 
     # 1. Refresh profile and known-track set
     tracks = fetch_all_tracks(settings)
@@ -332,9 +338,11 @@ def cmd_mix_prep(args):
 
     # 7. Post to mix-prep Discord channel
     discord = make_discord_client(settings)
+    if dry_run:
+        report_text = "🧪 **[DRY RUN — history not updated]**\n\n" + report_text
     discord.post(settings.discord_mix_prep_channel, report_text)
 
-    # 8. Save to mix-prep history (does not affect weekly run)
+    # 8. Save to mix-prep history (skipped in dry-run)
     now_iso = datetime.now(timezone.utc).isoformat()
     recommended = all_section_candidates(sections)
     new_records = [
@@ -348,10 +356,12 @@ def cmd_mix_prep(args):
         )
         for c in recommended
     ]
-    append_mix_prep_records(new_records, settings.data_dir)
+    if not dry_run:
+        append_mix_prep_records(new_records, settings.data_dir)
 
     duration = int(time.time() - start)
-    print(f"Mix-prep complete — {report_id} — {len(new_records)} tracks in {duration}s")
+    print(f"Mix-prep complete — {report_id} — {len(new_records)} tracks in {duration}s"
+          + (" (DRY RUN — no writes)" if dry_run else ""))
 
 
 def main():
@@ -364,15 +374,23 @@ def main():
     subparsers.add_parser("save-fixtures", help="Fetch live API data and save to fixtures/ for offline testing")
     subparsers.add_parser("build-profile", help="Build artist profiles and known-track exclusion set from mix history")
     subparsers.add_parser("fetch-sources", help="Fetch candidate music from all enabled external sources")
-    subparsers.add_parser("run", help="Run the full pipeline and post the weekly report to Discord")
+    run_parser = subparsers.add_parser("run", help="Run the full pipeline and post the weekly report to Discord")
+    run_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Run the full pipeline but skip Discord posts and history/pool writes",
+    )
     mix_prep_parser = subparsers.add_parser(
         "mix-prep",
         help="Generate a genre-focused track list for mix preparation",
     )
     mix_prep_parser.add_argument(
         "genre",
-        choices=["dnb", "breaks", "house", "techno", "ukg", "uk-bass", "electronica"],
+        choices=["dnb", "breaks", "uk-bass", "house", "ukg", "electronica", "downtempo"],
         help="Genre to focus on",
+    )
+    mix_prep_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Run the full pipeline but skip Discord posts and history writes",
     )
 
     args = parser.parse_args()
