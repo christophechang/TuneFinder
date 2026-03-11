@@ -2,11 +2,11 @@
 
 Weekly music discovery automation for DJs. Monitors release feeds across multiple stores and platforms, scores new tracks against your personal mix history, and posts a curated report to a Discord channel — fully automated.
 
-> **Requires [Changsta](https://changsta.com)** — TuneFinder uses the Changsta catalog API to read your published mix tracklist history and build your personal taste profile. It is designed as a companion tool to the Changsta ecosystem.
+> **Companion tool** — TuneFinder pairs with the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to read your published mix tracklist history and build a personal taste profile. The profile drives all scoring — without it, artist and label signals won't fire.
 
 ## How it works
 
-1. **Profile** — pulls your published mix tracklist catalogue from the Changsta catalog API to build an artist taste profile and a known-track exclusion set
+1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
 2. **Fetch** — scrapes new releases from Juno, Beatport, Bandcamp, Traxsource, Resident Advisor, and Subsurface Selections
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
