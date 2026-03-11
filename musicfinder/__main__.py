@@ -85,16 +85,13 @@ def cmd_fetch_sources(args):
     logger = get_logger(__name__)
 
     logger.info("[fetch-sources] Starting source fetch...")
-    items = fetch_all_sources(settings)
+    items, health = fetch_all_sources(settings)
     save_source_items(items, settings.data_dir)
 
-    by_source: dict[str, int] = {}
-    for item in items:
-        by_source[item.source] = by_source.get(item.source, 0) + 1
-
     print(f"Fetched {len(items)} items → {settings.data_dir}/source_items.json")
-    for source, count in sorted(by_source.items()):
-        print(f"  {source}: {count}")
+    for source, info in sorted(health.items()):
+        status = f"❌ ERROR: {info['error']}" if info["error"] else f"{info['count']} tracks"
+        print(f"  {source}: {status}")
 
 
 def cmd_run(args):
@@ -139,7 +136,7 @@ def cmd_run(args):
     pool_records = load_pool(settings.data_dir)
 
     # 3. Fetch external sources
-    source_items = fetch_all_sources(settings)
+    source_items, fetcher_health = fetch_all_sources(settings)
     save_source_items(source_items, settings.data_dir)
     sources_fetched = len(source_items)
 
@@ -170,6 +167,7 @@ def cmd_run(args):
         "after_known": after_known,
         "after_history": after_history,
         "pool_injected": len(pool_injected),
+        "fetcher_health": fetcher_health,
     }
 
     if not candidates:
@@ -289,7 +287,7 @@ def cmd_mix_prep(args):
     mix_prep_history_keys = build_history_keys(mix_prep_history)
 
     # 3. Fetch external sources
-    source_items = fetch_all_sources(settings)
+    source_items, fetcher_health = fetch_all_sources(settings)
     sources_fetched = len(source_items)
 
     # 4. Dedup + filter + genre narrow
@@ -317,6 +315,7 @@ def cmd_mix_prep(args):
         "sources_fetched": sources_fetched,
         "after_genre": after_genre,
         "pool_injected": len(pool_injected),
+        "fetcher_health": fetcher_health,
     }
 
     if not candidates:

@@ -28,9 +28,17 @@ _FETCHERS = [
 ]
 
 
-def fetch_all_sources(settings) -> list[SourceItem]:
+def fetch_all_sources(settings) -> tuple[list[SourceItem], dict[str, dict]]:
+    """
+    Run all enabled fetchers and return (items, health).
+
+    health is a dict keyed by source name:
+      {"count": int, "error": str | None}
+    where error is set if the fetcher raised an exception.
+    A count of 0 with no error is a warning (possible schema/config issue).
+    """
     all_items: list[SourceItem] = []
-    counts: dict[str, int] = {}
+    health: dict[str, dict] = {}
 
     for name, fetch_fn in _FETCHERS:
         if not settings.source_enabled(name):
@@ -38,18 +46,18 @@ def fetch_all_sources(settings) -> list[SourceItem]:
             continue
         try:
             items = fetch_fn(settings)
-            counts[name] = len(items)
+            health[name] = {"count": len(items), "error": None}
             all_items.extend(items)
         except Exception as e:
             logger.error(f"[sources] {name} fetch failed: {e}")
-            counts[name] = 0
+            health[name] = {"count": 0, "error": str(e)}
 
     logger.info(
         "[sources] Fetch complete — "
-        + ", ".join(f"{k}: {v}" for k, v in counts.items())
+        + ", ".join(f"{k}: {v['count']}" for k, v in health.items())
         + f" — total: {len(all_items)}"
     )
-    return all_items
+    return all_items, health
 
 
 # ---------------------------------------------------------------------------

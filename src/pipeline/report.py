@@ -117,6 +117,23 @@ def _enrich_reasons(candidates: list[Candidate], settings) -> dict[str, str]:
 # Stage 2 — full report
 # ---------------------------------------------------------------------------
 
+def _format_fetcher_health(health: dict) -> str:
+    """Format per-source fetch counts and errors for the report."""
+    if not health:
+        return ""
+    lines = []
+    for source, info in health.items():
+        count = info.get("count", 0)
+        error = info.get("error")
+        if error:
+            lines.append(f"❌ {source}: FAILED — {error}")
+        elif count == 0:
+            lines.append(f"⚠️ {source}: 0 tracks (possible schema/config issue)")
+        else:
+            lines.append(f"✅ {source}: {count} tracks")
+    return "\n".join(lines)
+
+
 def _format_section_for_prompt(label: str, candidates: list[Candidate], reasons: dict[str, str]) -> str:
     if not candidates:
         return ""
@@ -157,13 +174,15 @@ def generate_report(
         _format_section_for_prompt("WILDCARDS (interesting outliers worth a listen)", sections.get("wildcards", []), reasons),
     ]))
 
+    fetcher_health_text = _format_fetcher_health(stats.get("fetcher_health", {}))
     stats_text = (
         f"Sources fetched: {stats.get('sources_fetched', '?')}\n"
         f"Raw candidates: {stats.get('raw_count', '?')}\n"
         f"After dedup: {stats.get('after_dedup', '?')}\n"
         f"After known-track filter: {stats.get('after_known', '?')}\n"
         f"After history filter: {stats.get('after_history', '?')}\n"
-        f"Report ID: {report_id}"
+        f"Report ID: {report_id}\n\n"
+        f"FETCHER HEALTH:\n{fetcher_health_text}"
     )
 
     system = (
@@ -175,7 +194,8 @@ def generate_report(
         "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
         "Never output bare URLs. Never repeat the same URL twice for one track. "
         "Section headers: ## 🔺 Top Picks, ## 🏷️ Label Watch, ## 👁️ Artist Watch, ## 🃏 Wildcards. "
-        "Quality over quantity. Do not add tracks that aren't in the input."
+        "Quality over quantity. Do not add tracks that aren't in the input. "
+        "Always end with a ## ⚙️ Processing Summary section and a ## 🔌 Fetcher Health section listing each source with its status."
     )
 
     prompt = (
@@ -183,7 +203,8 @@ def generate_report(
         f"{sections_text}\n\n"
         f"PROCESSING SUMMARY:\n{stats_text}\n\n"
         "Format the full Discord report with ## section headers (with emojis), bold artist names, "
-        "track links as [Listen](<url>), and a ## ⚙️ Processing Summary section at the end."
+        "track links as [Listen](<url>), a ## ⚙️ Processing Summary section, "
+        "and a ## 🔌 Fetcher Health section at the end showing each source's track count and any errors."
     )
 
     logger.info("[report] Calling Stage 2 (Anthropic) for report generation")
@@ -220,12 +241,14 @@ def generate_mix_prep_report(
         _format_section_for_prompt("DEEP CUTS (deeper selections worth exploring)", sections.get("deep_cuts", []), reasons),
     ]))
 
+    fetcher_health_text = _format_fetcher_health(stats.get("fetcher_health", {}))
     stats_text = (
         f"Genre: {genre}\n"
         f"Sources fetched: {stats.get('sources_fetched', '?')}\n"
         f"After genre filter: {stats.get('after_genre', '?')}\n"
         f"Pool injected: {stats.get('pool_injected', '?')}\n"
-        f"Report ID: {report_id}"
+        f"Report ID: {report_id}\n\n"
+        f"FETCHER HEALTH:\n{fetcher_health_text}"
     )
 
     system = (
@@ -284,6 +307,11 @@ def _fallback_mix_prep_report(
         lines.append("")
     lines.append("## ⚙️ Processing Summary")
     lines.append(f"Report ID: {report_id} | Genre: {genre} | Candidates: {stats.get('after_genre', '?')}")
+    health = stats.get("fetcher_health", {})
+    if health:
+        lines.append("")
+        lines.append("## 🔌 Fetcher Health")
+        lines.append(_format_fetcher_health(health))
     return _sanitize_report("\n".join(lines))
 
 
@@ -316,4 +344,9 @@ def _fallback_report(
     lines.append("## ⚙️ Processing Summary")
     lines.append(f"Report ID: {report_id} | Sources: {stats.get('sources_fetched', '?')} | "
                  f"Candidates: {stats.get('after_history', '?')}")
+    health = stats.get("fetcher_health", {})
+    if health:
+        lines.append("")
+        lines.append("## 🔌 Fetcher Health")
+        lines.append(_format_fetcher_health(health))
     return _sanitize_report("\n".join(lines))
