@@ -54,8 +54,7 @@ sources:
 
   beatport:
     enabled: true
-    tracks_pattern: "https://www.beatport.com/genre/{slug}/{id}/tracks"
-    releases_pattern: "https://www.beatport.com/genre/{slug}/{id}/releases"
+    chart_pattern: "https://www.beatport.com/genre/{slug}/{id}/top-100"
     genres:
       # Standalone genres
       - name: downtempo

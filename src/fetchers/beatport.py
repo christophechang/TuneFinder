@@ -1,11 +1,16 @@
 """
-Beatport source fetcher — __NEXT_DATA__ JSON extraction.
+Beatport source fetcher — top-100 chart via __NEXT_DATA__ JSON extraction.
 
 Beatport uses Next.js with React Query. The full track listing is embedded
 in a <script id="__NEXT_DATA__"> JSON blob, so no HTML scraping is needed.
 We extract the dehydrated React Query cache and find the results array.
 
+Chart URL pattern: https://www.beatport.com/genre/{slug}/{id}/top-100
 Track URL pattern: https://www.beatport.com/track/{slug}/{id}
+
+Key signals extracted:
+  - chart_position: rank on the Beatport genre top-100 chart (results are ordered)
+  - bpm: tempo from track metadata
 """
 from src.fetchers.common import get_html, extract_next_data, find_in_next_data, polite_sleep
 from src.logger import get_logger
@@ -63,7 +68,7 @@ def _extract_tracks_from_next_data(data: dict) -> list[dict]:
     return []
 
 
-def _parse_track(raw: dict, fallback_tags: list[str]) -> SourceItem | None:
+def _parse_track(raw: dict, fallback_tags: list[str], chart_position: int | None = None) -> SourceItem | None:
     title = raw.get("name", "").strip()
     if not title:
         return None
@@ -100,7 +105,7 @@ def _parse_track(raw: dict, fallback_tags: list[str]) -> SourceItem | None:
         release_date=release_date,
         release_name=release_name,
         genre_tags=genre_tags,
-        raw_metadata={"beatport_id": track_id, "bpm": raw.get("bpm")},
+        raw_metadata={"beatport_id": track_id, "bpm": raw.get("bpm"), "chart_position": chart_position},
     )
 
 
@@ -109,7 +114,7 @@ def fetch(settings) -> list[SourceItem]:
     if not cfg.get("enabled", False):
         return []
 
-    tracks_pattern = cfg.get("tracks_pattern", "")
+    chart_pattern = cfg.get("chart_pattern", "")
     genres: list[dict] = cfg.get("genres", [])
 
     all_items: list[SourceItem] = []
@@ -125,8 +130,8 @@ def fetch(settings) -> list[SourceItem]:
             logger.warning(f"[beatport] Skipping genre with missing slug/id: {genre}")
             continue
 
-        url = tracks_pattern.replace("{slug}", slug).replace("{id}", str(genre_id))
-        logger.info(f"[beatport] Fetching tracks for {name}: {url}")
+        url = chart_pattern.replace("{slug}", slug).replace("{id}", str(genre_id))
+        logger.info(f"[beatport] Fetching top-100 chart for {name}: {url}")
 
         try:
             html = get_html(url)
@@ -148,8 +153,8 @@ def fetch(settings) -> list[SourceItem]:
             continue
 
         genre_items = []
-        for raw in raw_tracks:
-            item = _parse_track(raw, fallback_tags)
+        for pos, raw in enumerate(raw_tracks, start=1):
+            item = _parse_track(raw, fallback_tags, chart_position=pos)
             if item:
                 genre_items.append(item)
 
