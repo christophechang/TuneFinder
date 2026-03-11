@@ -22,7 +22,7 @@ _VERSION_RE = re.compile(
     r"[^)\]]*\b(remix|mix|edit|version|bootleg|rework|reprise)\b[^)\]]*)\s*[\)\]]",
     re.IGNORECASE,
 )
-_FEAT_RE = re.compile(r"\s+(feat\.|ft\.|featuring)\s+.+$", re.IGNORECASE)
+_FEAT_RE = re.compile(r"\s+(feat\.?|ft\.?|featuring)\s+.+$", re.IGNORECASE)
 
 
 def normalise_title(title: str) -> str:
@@ -104,14 +104,27 @@ def items_to_candidates(items: list[SourceItem]) -> list[Candidate]:
 
 
 def filter_known(candidates: list[Candidate], known_keys: set[str]) -> list[Candidate]:
-    """Remove candidates that match a track in the known-track exclusion set."""
+    """Remove candidates that match a track in the known-track exclusion set.
+
+    Checks both the release-level title and any individual tracks nested in
+    raw_metadata["tracks"] (populated by the Juno scraper), so that an EP
+    whose tracks are already owned is correctly excluded.
+    """
     result = []
     removed = 0
     for c in candidates:
         if c.key in known_keys or make_dedup_key(c.artist, c.title) in known_keys:
             removed += 1
-        else:
-            result.append(c)
+            continue
+        # Also check individual tracks embedded in the release (Juno EP tracks)
+        tracks = c.raw_metadata.get("tracks", [])
+        if any(
+            make_dedup_key(t.get("artist", c.artist), t["title"]) in known_keys
+            for t in tracks if t.get("title")
+        ):
+            removed += 1
+            continue
+        result.append(c)
     logger.info(f"[dedup] Filtered {removed} known tracks → {len(result)} candidates remaining")
     return result
 
