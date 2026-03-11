@@ -1,41 +1,125 @@
 """
-Juno Download source fetcher — RSS-first.
+Juno Download source fetcher — weekly bestsellers chart scraper.
 
-Title format in the feed: "ARTIST NAME - Release Title (Label Name) format"
-Each RSS item is a release (EP/LP/single), not an individual track.
-We surface it as a SourceItem at release level; the ranker treats it accordingly.
+Scrapes the this-week bestsellers chart (singles/EPs only) for each configured
+genre. Each SourceItem represents a release; individual tracks are stored in
+raw_metadata["tracks"] for use by the ranker.
+
+Key signals extracted:
+  - chart_position: rank on the weekly chart
+  - has_review: editorial review present (quality indicator)
+  - tracks[].is_hot_track: biggest-selling track on the release
+  - tracks[].bpm: BPM where available
 """
 import re
+from datetime import datetime
 
-from src.fetchers.common import parse_rss, parse_rfc2822_date, polite_sleep
+from src.fetchers.common import get_html, make_soup, polite_sleep
 from src.logger import get_logger
 from src.models import SourceItem
 
 logger = get_logger(__name__)
 
-# Matches: "ARTIST - Release Title (Label) anything after"
-_TITLE_RE = re.compile(r"^(.+?)\s+-\s+(.+?)\s+\(([^)]+)\)", re.DOTALL)
+_BASE = "https://www.junodownload.com"
+_CHART_URL = (
+    "{base}/{slug}/charts/bestsellers/this-week/releases/"
+    "?items_per_page=100&music_product_type=single"
+)
+
+# Track row text format: 'Artist Name - "Track Title" - (mm:ss) 123 BPM'
+_TRACK_RE = re.compile(r'^(.+?)\s+-\s+"(.+?)"\s+-\s+\([\d:]+\)(?:\s+(\d+)\s*BPM)?', re.DOTALL)
+
+_DATE_FMTS = ["%d %b %y", "%d %b %Y"]
 
 
-def _parse_juno_title(raw: str) -> tuple[str, str, str]:
-    """
-    Returns (artist, release_name, label).
-    Artist is converted from ALL CAPS to Title Case.
-    Falls back gracefully if the pattern doesn't match.
-    """
-    m = _TITLE_RE.match(raw.strip())
-    if m:
-        artist = m.group(1).strip().title()
-        release_name = m.group(2).strip()
-        label = m.group(3).strip()
-        return artist, release_name, label
+def _parse_date(raw: str) -> str:
+    for fmt in _DATE_FMTS:
+        try:
+            return datetime.strptime(raw.strip(), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return raw.strip()
 
-    # Fallback: no label found
-    if " - " in raw:
-        artist, rest = raw.split(" - ", 1)
-        return artist.strip().title(), rest.strip(), ""
 
-    return "", raw.strip(), ""
+def _parse_release(card, genre: str) -> SourceItem | None:
+    # Chart position
+    pos_tag = card.find(class_="listing-position")
+    chart_position = int(pos_tag.get_text(strip=True)) if pos_tag else None
+
+    # Artist(s)
+    artist_div = card.find(class_="juno-artist")
+    if not artist_div:
+        return None
+    artists = [a.get_text(strip=True) for a in artist_div.find_all("a") if a.get_text(strip=True)]
+    artist = " / ".join(artists) if artists else artist_div.get_text(strip=True)
+    if not artist:
+        return None
+
+    # Release title + link
+    title_tag = card.find("a", class_="juno-title")
+    if not title_tag:
+        return None
+    release_title = title_tag.get_text(strip=True)
+    href = title_tag.get("href", "")
+    link = (_BASE + href) if href.startswith("/") else href
+
+    # Label
+    label_tag = card.find("a", class_="juno-label")
+    label = label_tag.get_text(strip=True) if label_tag else None
+
+    # Catalog# and release date — "text-sm text-muted mt-3" info block
+    catalog_num = None
+    release_date = None
+    info_div = card.find("div", class_=lambda c: c and "text-muted" in c and "mt-3" in c)
+    if info_div:
+        parts = [t.strip() for t in info_div.stripped_strings]
+        if parts:
+            catalog_num = parts[0]
+        if len(parts) >= 2:
+            release_date = _parse_date(parts[1])
+
+    # Editorial review (quality signal — non-empty means it was hand-picked)
+    review = None
+    review_span = card.find("span", class_="text-primary")
+    if review_span and "Review" in review_span.get_text():
+        parent = review_span.parent
+        if parent:
+            review = parent.get_text(" ", strip=True).removeprefix("Review:").strip()
+
+    # Individual tracks
+    tracks = []
+    tracklist = card.find(class_="jd-listing-tracklist")
+    if tracklist:
+        for text_div in tracklist.find_all("div", class_=["col", "pl-2"]):
+            is_hot = bool(text_div.find("img", class_="icon-hot-track"))
+            raw_text = text_div.get_text(" ", strip=True)
+            m = _TRACK_RE.match(raw_text)
+            if m:
+                tracks.append({
+                    "artist": m.group(1).strip(),
+                    "title": m.group(2).strip(),
+                    "bpm": int(m.group(3)) if m.group(3) else None,
+                    "is_hot_track": is_hot,
+                })
+
+    return SourceItem(
+        source="juno",
+        artist=artist,
+        title=release_title,
+        link=link,
+        label=label,
+        release_date=release_date,
+        release_name=release_title,
+        genre_tags=[genre],
+        raw_metadata={
+            "juno_genre": genre,
+            "chart_position": chart_position,
+            "catalog_num": catalog_num,
+            "has_review": bool(review),
+            "review": review,
+            "tracks": tracks,
+        },
+    )
 
 
 def fetch(settings) -> list[SourceItem]:
@@ -43,41 +127,30 @@ def fetch(settings) -> list[SourceItem]:
     if not cfg.get("enabled", False):
         return []
 
-    rss_pattern = cfg.get("rss_pattern", "https://www.juno.co.uk/{genre_slug}/feeds/rss/")
     genre_map: dict[str, str] = cfg.get("genre_map", {})
-
     all_items: list[SourceItem] = []
 
     for internal_genre, juno_slug in genre_map.items():
-        url = rss_pattern.replace("{genre_slug}", juno_slug)
-        logger.info(f"[juno] Fetching RSS for {internal_genre}: {url}")
+        url = _CHART_URL.format(base=_BASE, slug=juno_slug)
+        logger.info(f"[juno] Fetching chart for {internal_genre}: {url}")
 
         try:
-            entries = parse_rss(url)
+            html = get_html(url)
         except Exception as e:
             logger.warning(f"[juno] Failed to fetch {url}: {e}")
-            polite_sleep(1.0)
+            polite_sleep(2.0)
             continue
 
-        for entry in entries:
-            artist, release_name, label = _parse_juno_title(entry.get("title", ""))
-            if not artist and not release_name:
-                continue
+        soup = make_soup(html)
+        cards = soup.find_all("div", class_="jd-listing-item")
+        logger.info(f"[juno] {juno_slug}: {len(cards)} releases")
 
-            all_items.append(SourceItem(
-                source="juno",
-                artist=artist,
-                title=release_name,
-                link=entry.get("link", ""),
-                label=label or None,
-                release_date=parse_rfc2822_date(entry.get("pubDate", "")),
-                release_name=release_name,
-                genre_tags=[internal_genre],
-                raw_metadata={"juno_genre": juno_slug},
-            ))
+        for card in cards:
+            item = _parse_release(card, internal_genre)
+            if item:
+                all_items.append(item)
 
-        logger.info(f"[juno] {juno_slug}: {len(entries)} releases")
-        polite_sleep(1.0)
+        polite_sleep(2.0)
 
     logger.info(f"[juno] Total: {len(all_items)} items across {len(genre_map)} genres")
     return all_items

@@ -38,7 +38,6 @@ sources:
 
   juno:
     enabled: true
-    rss_pattern: "https://www.junodownload.com/{genre_slug}/feeds/rss/"
     # Maps internal genre names to Juno URL slugs
     # Note: dnb feed includes both D&B and jungle tracks
     # Note: funk-soul-jazz feed includes funk, soul, and jazz tracks
