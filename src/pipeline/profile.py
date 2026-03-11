@@ -54,8 +54,14 @@ def build_artist_profiles(tracks: list[Track]) -> dict[str, ArtistProfile]:
 
 
 def build_known_track_keys(tracks: list[Track]) -> set[str]:
-    """Return the normalised dedup keys for all known tracks."""
-    return {track.key for track in tracks}
+    """Return the normalised dedup keys for all known tracks.
+
+    Uses make_dedup_key (strips version suffixes like '(Original Mix)', feat
+    credits, etc.) so that known tracks match source items regardless of how
+    version info is appended.
+    """
+    from src.pipeline.dedup import make_dedup_key
+    return {make_dedup_key(t.artist, t.title) for t in tracks}
 
 
 # ---------------------------------------------------------------------------
