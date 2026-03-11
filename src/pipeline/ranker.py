@@ -31,6 +31,8 @@ _W_CROSS_SOURCE = 1.0      # seen on 2+ sources (more credibility)
 _W_GENRE = 0.5             # per matching genre tag
 _W_FRESH = 0.5             # released within 30 days
 _W_CHART_TOP = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
+_W_BANDCAMP = 1.0          # discovery bonus for Bandcamp (no chart data available)
+_W_HUMAN_CURATED = 1.5     # bonus for human-curated sources (e.g. Subsurface Selections)
 
 _MAX_ARTIST_SCORE = 10.0   # cap so one mega-artist doesn't dominate
 _RECURRING_THRESHOLD = 3   # play_count needed to earn the recurring bonus
@@ -142,6 +144,22 @@ def _score(
         c.signals.append(RecommendationSignal(
             code="chart_position",
             explanation=f"#{chart_pos} on the {c.source.title()} weekly chart.",
+        ))
+
+    # --- Bandcamp discovery bonus (compensates for no chart_position signal) ---
+    if c.source == "bandcamp":
+        score += _W_BANDCAMP
+        c.signals.append(RecommendationSignal(
+            code="bandcamp_discovery",
+            explanation="Bandcamp discovery — independent release outside chart sources.",
+        ))
+
+    # --- Human-curated source bonus ---
+    if c.source == "subsurface_selections":
+        score += _W_HUMAN_CURATED
+        c.signals.append(RecommendationSignal(
+            code="human_curated",
+            explanation="Hand-picked by Subsurface Selections — human editorial curation.",
         ))
 
     c.score = round(score, 2)

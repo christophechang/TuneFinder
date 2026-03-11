@@ -168,8 +168,9 @@ def _format_section_for_prompt(label: str, candidates: list[Candidate], reasons:
         key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
         reason = reasons.get(key) or c.primary_reason or "Interesting new release."
         label_str = f" [{c.label}]" if c.label else ""
+        source_tag = f" [SOURCE:{c.source.title()}]" if c.source else ""
         link_str = f" {c.link}" if c.link else ""
-        lines.append(f"  - {c.artist} — {c.title}{label_str} | {reason}{link_str}")
+        lines.append(f"  - {c.artist} — {c.title}{label_str}{source_tag} | {reason}{link_str}")
     return "\n".join(lines)
 
 
@@ -205,7 +206,9 @@ def generate_report(
         f"{_DJ_CONTEXT} "
         "Write in a concise, knowledgeable tone — like a respected record shop selector. "
         "Format for Discord markdown. Use ** for bold, ## for section headers with emojis. "
-        "Exact track format: **Artist — Title** [Label] → [Listen](<url>) "
+        "Exact track format: **Artist — Title** [Label] [Source] → [Listen](<url>) "
+        "Each track in the input has a [SOURCE:name] tag — render it as [name] in the track line, "
+        "immediately after the label bracket and before the →. "
         "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
         "Never output bare URLs. Never repeat the same URL twice for one track. "
         "Section headers: ## 🔺 Top Picks, ## 🏷️ Label Watch, ## 👁️ Artist Watch, ## 🃏 Wildcards. "
@@ -312,8 +315,9 @@ def _fallback_mix_prep_report(
         lines.append(header)
         for c in candidates:
             label_str = f" [{c.label}]" if c.label else ""
+            source_str = f" [{c.source.title()}]" if c.source else ""
             link_str = f" → [Listen](<{c.link}>)" if c.link else ""
-            lines.append(f"**{c.artist} — {c.title}**{label_str}{link_str}")
+            lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
         lines.append("")
     lines.append(_build_footer(report_id, stats))
     return _sanitize_report("\n".join(lines))
@@ -341,8 +345,9 @@ def _fallback_report(
         lines.append(header)
         for c in candidates:
             label_str = f" [{c.label}]" if c.label else ""
+            source_str = f" [{c.source.title()}]" if c.source else ""
             link_str = f" → [Listen](<{c.link}>)" if c.link else ""
-            lines.append(f"**{c.artist} — {c.title}**{label_str}{link_str}")
+            lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
         lines.append("")
 
     recommended_count = sum(len(v) for v in sections.values())

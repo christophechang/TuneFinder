@@ -2,12 +2,14 @@
 
 Weekly music discovery automation for DJs. Monitors release feeds across multiple stores and platforms, scores new tracks against your personal mix history, and posts a curated report to a Discord channel — fully automated.
 
+> **Requires [Changsta](https://changsta.com)** — TuneFinder uses the Changsta catalog API to read your published mix tracklist history and build your personal taste profile. It is designed as a companion tool to the Changsta ecosystem.
+
 ## How it works
 
 1. **Profile** — pulls your published mix tracklist catalogue from the Changsta catalog API to build an artist taste profile and a known-track exclusion set
-2. **Fetch** — scrapes new releases from Juno, Beatport, Bandcamp, Traxsource, and Resident Advisor
+2. **Fetch** — scrapes new releases from Juno, Beatport, Bandcamp, Traxsource, Resident Advisor, and Subsurface Selections
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
-4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness)
+4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
 5. **Report** — two-stage LLM pipeline: Stage 1 runs a 6-provider cascade (Mistral → Groq → Gemini → MiniMax → OpenRouter → Anthropic) to write a one-line reason per track; Stage 2 (Claude Sonnet) writes the full Discord-formatted report
 6. **Post** — sends the report to your Discord `#music-research` channel via Bot token
 
@@ -15,13 +17,28 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 
 | Source | Method | Status |
 |---|---|---|
-| Juno Download | RSS | ✅ |
-| Beatport | `__NEXT_DATA__` JSON | ✅ |
+| Juno Download | Genre top-100 track chart | ✅ |
+| Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | ✅ |
 | Bandcamp | `dig_deeper` JSON API | ✅ |
 | Traxsource | HTML scrape | ✅ |
 | Resident Advisor | `apolloState` JSON | ✅ |
+| Subsurface Selections | Newsletter HTML scrape | ✅ |
 | Boomkat | — | blocked (Cloudflare) |
 | Bleep | — | requires login |
+
+## Scoring signals
+
+| Signal | Weight | Notes |
+|---|---|---|
+| `known_artist` | ×3.0 per play_count (max 10) | Artist appears in your mix history |
+| `recurring_artist` | +2.0 | Artist has ≥3 mixes |
+| `label_match` | +2.5 | Label has released known artists |
+| `cross_source` | +1.0 | Track flagged by 2+ sources |
+| `chart_position` | +0–1.5 | Linear decay from #1 (Juno/Beatport) |
+| `human_curated` | +1.5 | Hand-picked by editorial source (Subsurface Selections) |
+| `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
+| `genre_match` | +0.5 per tag | Soft match against DJ's genre set |
+| `fresh_release` | +0.5 | Released within 30 days |
 
 ## Report sections
 
@@ -29,6 +46,8 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 - **Label Watch** — releases on labels connected to artists you play
 - **Artist Watch** — new material from artists already in your mixes
 - **Wildcards** — interesting outliers from the remaining pool
+
+Each track line includes a source tag (`[Juno]`, `[Beatport]`, `[Bandcamp]`, etc.) so you can see at a glance where each recommendation came from.
 
 ## Mix prep
 
