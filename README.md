@@ -176,12 +176,13 @@ src/
   llm.py             # Two-stage LLM cascade
   logger.py          # Structured logging setup
   fetchers/
-    catalog.py       # Changsta catalog API (mix history + known tracks)
-    juno.py          # Juno Download RSS
-    beatport.py      # Beatport __NEXT_DATA__
+    catalog.py       # SoundCloud AI Mix Recommender API (mix history + known tracks)
+    juno.py          # Juno Download genre top-100 chart
+    beatport.py      # Beatport genre top-100 chart (__NEXT_DATA__)
     bandcamp.py      # Bandcamp dig_deeper API
     traxsource.py    # Traxsource HTML scrape
     ra.py            # Resident Advisor apolloState
+    subsurface.py    # Subsurface Selections newsletter scrape
     common.py        # Shared HTTP helpers
   pipeline/
     profile.py       # Artist profile builder
