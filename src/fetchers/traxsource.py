@@ -1,15 +1,17 @@
 """
-Traxsource source fetcher — genre page scraping.
+Traxsource source fetcher — genre top-100 chart scraping.
 
-Each genre has a URL in the form /genre/{id}/{slug}. We scrape the top-tracks
+Each genre has a URL in the form /genre/{id}/{slug}/top. We scrape the top-tracks
 listing for each configured genre. The request requires full browser headers
 (Accept, Accept-Language) or the server returns 404.
 
 Track row structure:
-  div.top-item[data-trid]
-    a.com-title   — track title + link
-    a.com-artists — artist name
-    a.com-label   — label name
+  div.trk-row[data-trid]
+    .tnum-pos .tnum  — chart position number
+    .title a         — track title + link (relative href)
+    a.com-artists    — artist name(s), may be multiple
+    .label a         — label name
+    .r-date          — release date (YYYY-MM-DD)
 """
 from src.fetchers.common import get_html, make_soup, polite_sleep
 from src.logger import get_logger
@@ -22,13 +24,15 @@ _BASE = "https://www.traxsource.com"
 
 def _parse_track_row(row) -> SourceItem | None:
     try:
-        title_el = row.select_one("a.com-title")
-        artist_el = row.select_one("a.com-artists")
-        label_el = row.select_one("a.com-label")
+        title_el = row.select_one(".title a")
+        artist_els = row.select("a.com-artists")
+        label_el = row.select_one(".label a")
+        date_el = row.select_one(".r-date")
 
         title = title_el.get_text(strip=True) if title_el else ""
-        artist = artist_el.get_text(strip=True) if artist_el else ""
+        artist = ", ".join(a.get_text(strip=True) for a in artist_els) if artist_els else ""
         label = label_el.get_text(strip=True) if label_el else None
+        release_date = date_el.get_text(strip=True) if date_el else None
 
         href = title_el.get("href", "") if title_el else ""
         link = href if href.startswith("http") else f"{_BASE}{href}"
@@ -42,7 +46,7 @@ def _parse_track_row(row) -> SourceItem | None:
             title=title,
             link=link,
             label=label,
-            release_name=title,
+            release_date=release_date,
         )
     except Exception as e:
         logger.debug(f"[traxsource] Failed to parse row: {e}")
@@ -73,7 +77,7 @@ def fetch(settings) -> list[SourceItem]:
             continue
 
         soup = make_soup(html)
-        rows = soup.select("div.top-item[data-trid]")
+        rows = soup.select("div.trk-row[data-trid]")
 
         if not rows:
             logger.warning(
@@ -83,10 +87,14 @@ def fetch(settings) -> list[SourceItem]:
             continue
 
         genre_items = []
-        for row in rows:
+        for pos, row in enumerate(rows, start=1):
             parsed = _parse_track_row(row)
             if parsed:
                 parsed.genre_tags = [genre.get("name", slug)]
+                # Use explicit position from HTML if available, else fall back to enumerate
+                tnum_el = row.select_one(".tnum-pos .tnum")
+                chart_pos = int(tnum_el.get_text(strip=True)) if tnum_el else pos
+                parsed.raw_metadata["chart_position"] = chart_pos
                 genre_items.append(parsed)
 
         logger.info(f"[traxsource] {slug}: {len(genre_items)} tracks")

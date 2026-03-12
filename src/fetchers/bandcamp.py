@@ -33,6 +33,11 @@ def _tag_to_genre(tag: str) -> str:
         "house": "house",
         "techno": "techno",
         "electronic": "electronic",
+        "funk": "funk-soul-jazz",
+        "r-b-soul": "funk-soul-jazz",
+        "hip-hop-rap": "hip-hop",
+        "electronica": "electronica",
+        "lounge": "downtempo",
     }
     return mapping.get(tag, tag)
 

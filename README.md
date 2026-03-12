@@ -34,7 +34,7 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 | `recurring_artist` | +2.0 | Artist has ≥3 mixes |
 | `label_match` | +2.5 | Label has released known artists |
 | `cross_source` | +1.0 | Track flagged by 2+ sources |
-| `chart_position` | +0–1.5 | Linear decay from #1 (Juno/Beatport) |
+| `chart_position` | +0–1.5 | Linear decay from #1 (Juno/Beatport/Traxsource) |
 | `human_curated` | +1.5 | Hand-picked by editorial source (Subsurface Selections) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
 | `genre_match` | +0.5 per tag | Soft match against DJ's genre set |
@@ -57,13 +57,32 @@ When preparing a mix in a specific style, run `mix-prep <genre>` to get a focuse
 ./venv/bin/python -m musicfinder mix-prep house
 ```
 
-Valid genres: `dnb`, `breaks`, `house`, `ukg`, `uk-bass`, `electronica`, `downtempo`
+Valid genres: `dnb` · `breaks` · `house` · `ukg` · `uk-bass` · `electronica` · `downtempo` · `techno` · `funk-soul-jazz` · `hip-hop`
 
 The mix-prep report has two sections:
 - **Top Picks** — highest-scored tracks for the genre
 - **Deep Cuts** — next-tier selections worth exploring
 
 Results are posted to the Discord `#mix-prep` channel. Mix-prep uses its own history file (`data/mix_prep_history.json`) so it won't deplete your weekly discovery feed — the same track can appear in both. Re-running mix-prep for the same genre will skip tracks already surfaced in prior mix-prep sessions.
+
+## Genre coverage
+
+Each internal genre maps to one or more genre feeds on each source. Sources not listed for a genre don't contribute to that genre's results.
+
+| Genre | Juno | Beatport | Traxsource | Bandcamp |
+|---|---|---|---|---|
+| `house` | house | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house |
+| `dnb` | drumandbass | drum-bass | drum-and-bass | drum-and-bass |
+| `breaks` | breakbeat | breaks-breakbeat-uk-bass ¹ | — | breakbeat |
+| `uk-bass` | bass | breaks-breakbeat-uk-bass ¹ | — | uk-bass |
+| `ukg` | 4x4-garage | uk-garage-bassline | garage | uk-garage |
+| `electronica` | leftfield | electronica | electronica · leftfield | electronic · electronica |
+| `downtempo` | downtempo | downtempo | lounge-chill-out | downtempo · lounge |
+| `techno` | — | techno-raw-deep-hypnotic | techno | techno |
+| `funk-soul-jazz` | funk-soul-jazz | rb | soul-funk-disco | funk · r-b-soul |
+| `hip-hop` | hip-hop | hip-hop | r-and-b-hip-hop | hip-hop-rap |
+
+¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the page data are used to split them into the correct internal tags.
 
 ## Setup
 

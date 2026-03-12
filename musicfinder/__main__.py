@@ -385,7 +385,7 @@ def main():
     )
     mix_prep_parser.add_argument(
         "genre",
-        choices=["dnb", "breaks", "uk-bass", "house", "ukg", "electronica", "downtempo"],
+        choices=["dnb", "breaks", "uk-bass", "house", "ukg", "electronica", "downtempo", "techno", "funk-soul-jazz", "hip-hop"],
         help="Genre to focus on",
     )
     mix_prep_parser.add_argument(

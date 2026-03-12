@@ -34,6 +34,9 @@ _SLUG_TO_TAGS: dict[str, list[str]] = {
     "uk-garage-bassline": ["ukg"],
     "electronica": ["electronica"],
     "downtempo": ["downtempo"],
+    "techno-raw-deep-hypnotic": ["techno"],
+    "hip-hop": ["hip-hop"],
+    "rb": ["funk-soul-jazz"],
 }
 
 

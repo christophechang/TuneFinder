@@ -89,17 +89,46 @@ sources:
       - name: breaks-uk-bass
         slug: breaks-breakbeat-uk-bass
         id: 9
+      - name: techno
+        slug: techno-raw-deep-hypnotic
+        id: 92
+      - name: hip-hop
+        slug: hip-hop
+        id: 105
+      - name: funk-soul-jazz
+        slug: rb
+        id: 108
 
   traxsource:
     enabled: true
-    genre_url_pattern: "https://www.traxsource.com/genre/{id}/{slug}"
+    genre_url_pattern: "https://www.traxsource.com/genre/{id}/{slug}/top"
     genres:
       - name: dnb
         id: 31
         slug: drum-and-bass
+      # House and sub-genres — all tagged "house"
       - name: house
         id: 4
         slug: house
+      - name: house
+        id: 13
+        slug: deep-house
+      - name: house
+        id: 24
+        slug: soulful-house
+      - name: house
+        id: 18
+        slug: tech-house
+      - name: house
+        id: 12
+        slug: classic-house
+      - name: house
+        id: 16
+        slug: minimal-deep-tech
+      # Nu-disco/indie-dance — closest to house in internal taxonomy
+      - name: house
+        id: 17
+        slug: nu-disco-indie-dance
       - name: techno
         id: 20
         slug: techno
@@ -112,6 +141,15 @@ sources:
       - name: electronica
         id: 14
         slug: leftfield
+      - name: funk-soul-jazz
+        id: 3
+        slug: soul-funk-disco
+      - name: hip-hop
+        id: 6
+        slug: r-and-b-hip-hop
+      - name: downtempo
+        id: 1
+        slug: lounge-chill-out
 
   bandcamp:
     enabled: true
@@ -124,6 +162,12 @@ sources:
       - house
       - techno
       - electronic
+      - funk
+      - r-b-soul
+      - hip-hop-rap
+      - electronica
+      - lounge
+      - downtempo
 
   boomkat:
     enabled: false   # Cloudflare bot protection — cannot scrape
