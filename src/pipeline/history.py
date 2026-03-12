@@ -81,8 +81,18 @@ def append_records(new_records: list[RecommendationRecord], data_dir: str) -> No
 # ---------------------------------------------------------------------------
 
 def build_history_keys(records: list[RecommendationRecord]) -> set[str]:
-    """Return normalised keys for all previously recommended tracks."""
-    return {r.key for r in records}
+    """Return keys for all previously recommended tracks.
+
+    Includes both the raw key (as stored) and the normalised key (version
+    suffixes and feat. credits stripped) so that a track saved as
+    "Title (Original Mix)" still blocks "Title" in a future run.
+    """
+    from src.pipeline.dedup import make_dedup_key
+    keys: set[str] = set()
+    for r in records:
+        keys.add(r.key)
+        keys.add(make_dedup_key(r.artist, r.title))
+    return keys
 
 
 def load_mix_prep_history(data_dir: str) -> list[RecommendationRecord]:

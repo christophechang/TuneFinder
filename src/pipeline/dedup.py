@@ -23,6 +23,9 @@ _VERSION_RE = re.compile(
     re.IGNORECASE,
 )
 _FEAT_RE = re.compile(r"\s+(feat\.?|ft\.?|featuring)\s+.+$", re.IGNORECASE)
+# Splits multi-artist strings on common separators: " / ", " & ", " x ", " vs ", " vs. "
+# Requires whitespace around x/vs to avoid false splits inside artist names.
+_ARTIST_SEP_RE = re.compile(r"\s*/\s*|\s*&\s*|\s+(?:x|vs\.?)\s+", re.IGNORECASE)
 
 
 def normalise_title(title: str) -> str:
@@ -35,7 +38,10 @@ def normalise_title(title: str) -> str:
 def normalise_artist(artist: str) -> str:
     a = artist.strip().lower()
     a = _FEAT_RE.sub("", a)
-    return a.strip()
+    # Canonicalise multi-artist separators so "A / B", "A & B", "A x B" all
+    # produce the same key as "A, B" (the format Beatport/Traxsource use).
+    parts = [p.strip() for p in _ARTIST_SEP_RE.split(a) if p.strip()]
+    return ", ".join(parts)
 
 
 def make_dedup_key(artist: str, title: str) -> str:
