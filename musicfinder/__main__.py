@@ -298,6 +298,7 @@ def cmd_mix_prep(args):
 
     # 4. Dedup + filter + genre narrow
     source_items = deduplicate_source_items(source_items)
+    after_dedup = len(source_items)
     candidates = items_to_candidates(source_items)
     label_seed = list(candidates)
     candidates = filter_known(candidates, known_keys)
@@ -319,6 +320,7 @@ def cmd_mix_prep(args):
 
     stats = {
         "sources_fetched": sources_fetched,
+        "after_dedup": after_dedup,
         "after_genre": after_genre,
         "pool_injected": len(pool_injected),
         "fetcher_health": fetcher_health,
