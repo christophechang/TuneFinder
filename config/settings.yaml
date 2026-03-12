@@ -194,6 +194,14 @@ pipeline:
   wildcard_count: 3
   mix_prep_top_picks_count: 20
   mix_prep_deep_cuts_count: 20
+  # Tracks tagged with any excluded genre are dropped from that genre's mix-prep results.
+  # Handles cross-source tag merging where a track acquires contradictory tags (e.g. electronica + ukg).
+  # Only define exclusions for genuinely contradictory genre pairs — legitimate overlap (e.g. electronica + downtempo) is intentionally left unexcluded.
+  genre_exclusions:
+    electronica: [ukg, dnb]
+    ukg: [electronica, dnb, techno]
+    dnb: [ukg, house]
+    house: [dnb, ukg]
 
 data_dir: data
 

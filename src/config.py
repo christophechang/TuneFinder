@@ -153,6 +153,10 @@ class Settings:
     def pipeline_mix_prep_deep_cuts_count(self) -> int:
         return self._data.get("pipeline", {}).get("mix_prep_deep_cuts_count", 20)
 
+    @property
+    def pipeline_genre_exclusions(self) -> dict[str, list[str]]:
+        return self._data.get("pipeline", {}).get("genre_exclusions", {})
+
     # --- Data ---
 
     @property

@@ -263,7 +263,7 @@ def cmd_mix_prep(args):
     )
     from src.pipeline.dedup import (
         deduplicate_source_items, items_to_candidates,
-        filter_known, filter_genre,
+        filter_known, filter_genre, filter_genre_exclusions,
     )
     from src.pipeline.ranker import rank_candidates_mix_prep, all_section_candidates
     from src.pipeline.pool import load_pool, pool_to_candidates
@@ -304,16 +304,19 @@ def cmd_mix_prep(args):
     candidates = filter_known(candidates, known_keys)
     candidates = [c for c in candidates if c.key not in mix_prep_history_keys]
     candidates = filter_genre(candidates, genre)
+    candidates = filter_genre_exclusions(candidates, genre, settings.pipeline_genre_exclusions)
     after_genre = len(candidates)
 
     # Inject pool candidates for this genre
     pool_records = load_pool(settings.data_dir)
     fresh_keys = {c.key for c in candidates}
+    _pool = filter_genre(
+        pool_to_candidates([r for r in pool_records if r.key not in fresh_keys]),
+        genre,
+    )
+    _pool = filter_genre_exclusions(_pool, genre, settings.pipeline_genre_exclusions)
     pool_injected = [
-        c for c in filter_genre(
-            pool_to_candidates([r for r in pool_records if r.key not in fresh_keys]),
-            genre,
-        )
+        c for c in _pool
         if c.key not in known_keys and c.key not in mix_prep_history_keys
     ]
     candidates = candidates + pool_injected

@@ -142,6 +142,28 @@ def filter_genre(candidates: list[Candidate], genre: str) -> list[Candidate]:
     return result
 
 
+def filter_genre_exclusions(
+    candidates: list[Candidate],
+    genre: str,
+    exclusions: dict[str, list[str]],
+) -> list[Candidate]:
+    """Remove candidates that carry any tag that is mutually exclusive with the target genre.
+
+    Handles cross-source tag merging where a track may be tagged with both the
+    target genre and a contradictory one (e.g. electronica + ukg after dedup merge).
+    """
+    excluded_tags = set(exclusions.get(genre, []))
+    if not excluded_tags:
+        return candidates
+    result = [c for c in candidates if not excluded_tags.intersection(c.genre_tags)]
+    removed = len(candidates) - len(result)
+    if removed:
+        logger.info(
+            f"[dedup] Genre exclusion filter '{genre}': {removed} removed → {len(result)} remaining"
+        )
+    return result
+
+
 def filter_history(candidates: list[Candidate], history_keys: set[str]) -> list[Candidate]:
     """Remove candidates that have been previously recommended."""
     result = []
