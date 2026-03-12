@@ -57,7 +57,7 @@ When preparing a mix in a specific style, run `mix-prep <genre>` to get a focuse
 ./venv/bin/python -m musicfinder mix-prep house
 ```
 
-Valid genres: `dnb`, `breaks`, `house`, `techno`, `ukg`, `uk-bass`, `electronica`
+Valid genres: `dnb`, `breaks`, `house`, `ukg`, `uk-bass`, `electronica`, `downtempo`
 
 The mix-prep report has two sections:
 - **Top Picks** — highest-scored tracks for the genre
@@ -91,7 +91,6 @@ DISCORD_GUILD_ID=         # Your Discord server ID
 GROQ_API_KEY=             # fallback 1 — free
 GEMINI_API_KEY=           # fallback 2 — free
 OPENROUTER_API_KEY=       # fallback 3 — capped
-MISTRAL_API_KEY=          # fallback 4 (optional)
 ```
 
 ## Commands
@@ -111,6 +110,9 @@ MISTRAL_API_KEY=          # fallback 4 (optional)
 
 # Run the full pipeline and post the weekly report to Discord
 ./venv/bin/python -m musicfinder run
+
+# Dry-run (full pipeline, no Discord posts or history writes)
+./venv/bin/python -m musicfinder run --dry-run
 
 # Generate a genre-focused track list for mix preparation
 ./venv/bin/python -m musicfinder mix-prep house
@@ -182,6 +184,8 @@ src/
     traxsource.py    # Traxsource HTML scrape
     ra.py            # Resident Advisor apolloState
     subsurface.py    # Subsurface Selections newsletter scrape
+    boomkat.py       # Boomkat (disabled — Cloudflare bot protection)
+    bleep.py         # Bleep (disabled — requires login)
     common.py        # Shared HTTP helpers
   pipeline/
     profile.py       # Artist profile builder
