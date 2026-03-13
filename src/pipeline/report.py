@@ -12,11 +12,13 @@ Stage 2 (Anthropic Sonnet):
 """
 import json
 import re
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from src.llm import call_stage1, call_stage2
 from src.logger import get_logger
 from src.models import Candidate
+from src.pipeline.label_cache import load_label_profiles, save_label_profiles
 
 logger = get_logger(__name__)
 
@@ -114,6 +116,99 @@ def _enrich_reasons(candidates: list[Candidate], settings) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Label synopsis enrichment
+# ---------------------------------------------------------------------------
+
+def _enrich_label_synopses(labels: list[str], settings, data_dir: str) -> dict[str, str]:
+    """
+    Return a synopsis string for each label name.
+    Hits the cache first; only calls Stage 1 LLM for labels not yet cached.
+    Saves new entries back to cache.
+    Returns dict keyed by original label name (preserves case for display).
+    """
+    cache = load_label_profiles(data_dir)
+    result: dict[str, str] = {}
+    missing: list[str] = []
+
+    for label in labels:
+        cached = cache.get(label.lower().strip())
+        if cached:
+            result[label] = cached
+        else:
+            missing.append(label)
+
+    if missing:
+        system = (
+            "You write concise record label descriptions for a DJ's music discovery report. "
+            "For each label write one sentence (max 20 words) covering: founding city/country, "
+            "approximate founding year if known, and 2-3 key artists. Be factual and specific. "
+            "Return a valid JSON array only, no preamble."
+        )
+        prompt = (
+            f"Generate synopses for these labels:\n{json.dumps(missing, ensure_ascii=False)}\n\n"
+            'Return format: [{"label": "...", "synopsis": "..."}]'
+        )
+        try:
+            raw = call_stage1(prompt, system, settings)
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            enriched = json.loads(raw)
+            for e in enriched:
+                if "label" in e and "synopsis" in e:
+                    result[e["label"]] = e["synopsis"]
+                    cache[e["label"].lower().strip()] = e["synopsis"]
+            save_label_profiles(cache, data_dir)
+        except Exception as e:
+            logger.warning(f"[report] Label synopsis enrichment failed: {e}")
+
+    return result
+
+
+def _format_label_watch_for_prompt(
+    candidates: list[Candidate],
+    reasons: dict[str, str],
+    synopses: dict[str, str],
+) -> str:
+    """Format LABEL WATCH section grouped by label, with synopsis per label group."""
+    if not candidates:
+        return ""
+
+    by_label: dict[str, list[Candidate]] = defaultdict(list)
+    no_label: list[Candidate] = []
+    for c in candidates:
+        if c.label:
+            by_label[c.label].append(c)
+        else:
+            no_label.append(c)
+
+    lines = ["LABEL WATCH (active labels in your scene):"]
+    for label_name, label_candidates in by_label.items():
+        synopsis = synopses.get(label_name, "")
+        lines.append(f"  [LABEL: {label_name}]")
+        if synopsis:
+            lines.append(f"  [SYNOPSIS: {synopsis}]")
+        for c in label_candidates:
+            key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
+            reason = reasons.get(key) or c.primary_reason or "Interesting new release."
+            source_tag = f" [SOURCE:{c.source.title()}]" if c.source else ""
+            link_str = f" {c.link}" if c.link else ""
+            lines.append(f"    - {c.artist} — {c.title} [{label_name}]{source_tag} | {reason}{link_str}")
+
+    # Tracks with no label fall through without a sub-header
+    for c in no_label:
+        key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
+        reason = reasons.get(key) or c.primary_reason or "Interesting new release."
+        source_tag = f" [SOURCE:{c.source.title()}]" if c.source else ""
+        link_str = f" {c.link}" if c.link else ""
+        lines.append(f"  - {c.artist} — {c.title}{source_tag} | {reason}{link_str}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Stage 2 — full report
 # ---------------------------------------------------------------------------
 
@@ -182,7 +277,7 @@ def generate_report(
 ) -> str:
     """
     Generate the full Discord-formatted weekly report.
-    Calls Stage 1 to enrich reasons, then Stage 2 to write the report.
+    Calls Stage 1 to enrich reasons and label synopses, then Stage 2 to write the report.
     Returns the final report string ready to post.
     """
     all_candidates = []
@@ -192,12 +287,17 @@ def generate_report(
     # Stage 1 — enrich reasons
     reasons = _enrich_reasons(all_candidates, settings) if all_candidates else {}
 
+    # Stage 1 — enrich label synopses (cached; only calls LLM for new labels)
+    label_watch_candidates = sections.get("label_watch", [])
+    active_labels = list({c.label for c in label_watch_candidates if c.label})
+    synopses = _enrich_label_synopses(active_labels, settings, settings.data_dir) if active_labels else {}
+
     # Build structured prompt for Stage 2
     today = datetime.now(timezone.utc).strftime("%-d %B %Y")
     sections_text = "\n\n".join(filter(None, [
         _format_section_for_prompt("SUBSURFACE SELECTIONS (hand-picked by human curators — always include all)", sections.get("subsurface_picks", []), reasons),
         _format_section_for_prompt("TOP PICKS (strongest taste matches)", sections.get("top_picks", []), reasons),
-        _format_section_for_prompt("LABEL WATCH (active labels in your scene)", sections.get("label_watch", []), reasons),
+        _format_label_watch_for_prompt(label_watch_candidates, reasons, synopses),
         _format_section_for_prompt("ARTIST WATCH (new material from artists you play)", sections.get("artist_watch", []), reasons),
         _format_section_for_prompt("WILDCARDS (interesting outliers worth a listen)", sections.get("wildcards", []), reasons),
     ]))
@@ -214,6 +314,9 @@ def generate_report(
         "Never output bare URLs. Never repeat the same URL twice for one track. "
         "Section headers: ## 📬 Subsurface Selections, ## 🔺 Top Picks, ## 🏷️ Label Watch, ## 👁️ Artist Watch, ## 🃏 Wildcards. "
         "Omit a section header entirely if that section has no tracks. "
+        "In the Label Watch section, the input groups tracks by label using [LABEL: name] and [SYNOPSIS: text] tags. "
+        "For each label group: render the label name as a bold sub-header (e.g. **Ilian Tape**), "
+        "then the synopsis as an italicised line underneath, then the tracks for that label. "
         "Quality over quantity. Do not add tracks that aren't in the input. "
         "End after the last track section — do not add a summary or stats section."
     )
@@ -237,7 +340,7 @@ def generate_report(
         return report
     except Exception as e:
         logger.error(f"[report] Stage 2 failed: {e}")
-        return _fallback_report(sections, reasons, report_id, today, stats)
+        return _fallback_report(sections, reasons, report_id, today, stats, synopses)
 
 
 def generate_mix_prep_report(
@@ -331,12 +434,12 @@ def _fallback_report(
     report_id: str,
     today: str,
     stats: dict,
+    synopses: dict[str, str] | None = None,
 ) -> str:
     """Plain-text fallback report if Stage 2 fails."""
     lines = [f"**Music Finder — {today} ({report_id})**\n"]
     section_labels = {
         "top_picks": "## 🔺 Top Picks",
-        "label_watch": "## 🏷️ Label Watch",
         "artist_watch": "## 👁️ Artist Watch",
         "wildcards": "## 🃏 Wildcards",
     }
@@ -350,6 +453,25 @@ def _fallback_report(
             source_str = f" [{c.source.title()}]" if c.source else ""
             link_str = f" → [Listen](<{c.link}>)" if c.link else ""
             lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
+        lines.append("")
+
+    label_watch = sections.get("label_watch", [])
+    if label_watch:
+        lines.append("## 🏷️ Label Watch")
+        by_label: dict[str, list[Candidate]] = defaultdict(list)
+        for c in label_watch:
+            by_label[c.label or ""].append(c)
+        for label_name, label_candidates in by_label.items():
+            if label_name:
+                lines.append(f"**{label_name}**")
+                synopsis = (synopses or {}).get(label_name, "")
+                if synopsis:
+                    lines.append(f"*{synopsis}*")
+            for c in label_candidates:
+                label_str = f" [{c.label}]" if c.label else ""
+                source_str = f" [{c.source.title()}]" if c.source else ""
+                link_str = f" → [Listen](<{c.link}>)" if c.link else ""
+                lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
         lines.append("")
 
     recommended_count = sum(len(v) for v in sections.values())
