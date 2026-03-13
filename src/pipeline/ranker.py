@@ -219,6 +219,9 @@ def _assign_sections(
                 break
         return result
 
+    # Subsurface is picked first so its small curated set is never consumed by the
+    # general pool — guarantees a dedicated section regardless of competition.
+    subsurface_picks = pick(10, require_signal="human_curated")
     top_picks = pick(top_n)
     label_watch = pick(label_n, require_signal="label_match")
     artist_watch = pick(artist_n, require_signal="known_artist")
@@ -226,11 +229,12 @@ def _assign_sections(
 
     genre_summary = ", ".join(f"{g}: {n}" for g, n in sorted(genre_counts.items()))
     logger.info(
-        f"[ranker] Sections — top_picks: {len(top_picks)}, "
+        f"[ranker] Sections — subsurface: {len(subsurface_picks)}, top_picks: {len(top_picks)}, "
         f"label_watch: {len(label_watch)}, artist_watch: {len(artist_watch)}, "
         f"wildcards: {len(wildcards)} | genres: {genre_summary or 'none tagged'}"
     )
     return {
+        "subsurface_picks": subsurface_picks,
         "top_picks": top_picks,
         "label_watch": label_watch,
         "artist_watch": artist_watch,
