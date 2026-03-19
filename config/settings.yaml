@@ -11,7 +11,7 @@ discord:
 llm:
   stage1:
     provider: "minimax"
-    model: "MiniMax-M2.5"
+    model: "MiniMax-M2.7"
     max_tokens: 4096
     temperature: 0.1
     timeout_seconds: 120
@@ -22,6 +22,11 @@ llm:
     max_tokens: 4096
     temperature: 0.2
     timeout_seconds: 90
+
+  # Fallback chain for Stage 2 — tried in order if Anthropic fails (e.g. quota exhausted)
+  stage2_fallback_chain:
+    - provider: "minimax"
+      model: "MiniMax-M2.7"
 
   # Fallback chain for Stage 1 only — tried in order if primary fails
   fallback_chain:

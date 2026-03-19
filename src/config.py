@@ -112,6 +112,10 @@ class Settings:
         return self._data.get("llm", {}).get("stage2", {})
 
     @property
+    def llm_stage2_fallback_chain(self) -> list[dict]:
+        return self._data.get("llm", {}).get("stage2_fallback_chain", [])
+
+    @property
     def llm_fallback_chain(self) -> list[dict]:
         return self._data.get("llm", {}).get("fallback_chain", [])
 

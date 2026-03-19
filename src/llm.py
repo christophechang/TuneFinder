@@ -24,7 +24,7 @@ _THINK_RE = re.compile(r'<think(?:ing)?>.*?</think(?:ing)?>', re.DOTALL | re.IGN
 
 
 def _strip_thinking(text: str) -> str:
-    """Remove inline thinking blocks emitted by reasoning models (e.g. MiniMax M2.5)."""
+    """Remove inline thinking blocks emitted by reasoning models (e.g. MiniMax M2.7)."""
     return _THINK_RE.sub('', text).strip()
 
 
@@ -221,21 +221,69 @@ def call_stage1(prompt: str, system: str, settings) -> str:
 def call_stage2(prompt: str, system: str, settings) -> str:
     """
     High-quality synthesis and report writing via Anthropic Sonnet.
-    No fallback — direct Anthropic call only.
+    Falls back to stage2_fallback_chain if Anthropic fails (e.g. quota exhausted).
     """
     stage2_cfg = settings.llm_stage2
-    model = stage2_cfg.get("model", "claude-sonnet-4-6")
     max_tokens = stage2_cfg.get("max_tokens", 4096)
     temperature = stage2_cfg.get("temperature", 0.2)
     timeout = stage2_cfg.get("timeout_seconds", 90)
 
-    logger.info(f"[llm.stage2] Calling Anthropic ({model})")
-    return _call_anthropic(
-        api_key=settings.anthropic_api_key,
-        model=model,
-        system=system,
-        prompt=prompt,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-    )
+    chain = [
+        {"provider": "anthropic", "model": stage2_cfg.get("model", "claude-sonnet-4-6")}
+    ] + settings.llm_stage2_fallback_chain
+
+    last_error = None
+
+    for entry in chain:
+        provider = entry.get("provider", "")
+        model = entry.get("model", "")
+
+        try:
+            logger.info(f"[llm.stage2] Trying {provider} ({model})")
+
+            if provider == "anthropic":
+                api_key = settings.anthropic_api_key
+                if not api_key:
+                    logger.debug("[llm.stage2] Skipping anthropic — no API key set")
+                    continue
+                result = _call_anthropic(
+                    api_key=api_key,
+                    model=model,
+                    system=system,
+                    prompt=prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+
+            elif provider in _PROVIDER_BASE_URLS:
+                api_key = getattr(settings, _API_KEY_ATTRS.get(provider, ""), "")
+                if not api_key:
+                    logger.debug(f"[llm.stage2] Skipping {provider} — no API key set")
+                    continue
+                path = _PROVIDER_PATHS.get(provider, "/v1/chat/completions")
+                result = _call_openai_compat(
+                    base_url=_PROVIDER_BASE_URLS[provider],
+                    path=path,
+                    api_key=api_key,
+                    model=model,
+                    system=system,
+                    prompt=prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+
+            else:
+                logger.warning(f"[llm.stage2] Unknown provider in config: {provider} — skipping")
+                continue
+
+            logger.info(f"[llm.stage2] Success via: {provider}")
+            return result
+
+        except Exception as e:
+            logger.warning(f"[llm.stage2] {provider} failed: {e}")
+            last_error = e
+            time.sleep(1)
+
+    raise RuntimeError(f"All Stage 2 LLM providers exhausted. Last error: {last_error}")
