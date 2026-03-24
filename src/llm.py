@@ -1,15 +1,17 @@
 """
 LLM cascade pattern — two-stage.
 
-Stage 1 (cheap, fast, fallback chain):
-  Primary provider defined in llm.stage1 in settings.yaml.
-  Fallback chain defined in llm.fallback_chain — tried in order if primary fails.
-  All providers except Ollama use the OpenAI-compatible /v1/chat/completions endpoint,
+Stage 1 (extraction/classification):
+  Primary: MiniMax M2.7
+  Fallback chain: Mistral Small → Groq Llama 3.3 70B → Gemini 2.5 Flash
+  All providers use the OpenAI-compatible /v1/chat/completions endpoint,
   except Gemini which uses /chat/completions under its v1beta OpenAI-compat base URL.
   Sleep 1s between failures. Raise RuntimeError if all exhausted.
 
-Stage 2 (high quality, no fallback):
-  Anthropic only, via /v1/messages with x-api-key auth.
+Stage 2 (report generation):
+  Primary: MiniMax M2.7
+  Fallback chain: OpenRouter / DeepSeek
+  Anthropic supported as a provider but not in the default chain.
 """
 import re
 import time
@@ -220,8 +222,10 @@ def call_stage1(prompt: str, system: str, settings) -> str:
 
 def call_stage2(prompt: str, system: str, settings) -> str:
     """
-    High-quality synthesis and report writing via Anthropic Sonnet.
-    Falls back to stage2_fallback_chain if Anthropic fails (e.g. quota exhausted).
+    Report generation via cascade chain.
+    Chain order: llm.stage2 (primary) then each entry in llm.stage2_fallback_chain.
+    Providers with no API key are silently skipped.
+    Sleeps 1s between failures. Raises RuntimeError if all exhausted.
     """
     stage2_cfg = settings.llm_stage2
     max_tokens = stage2_cfg.get("max_tokens", 4096)
@@ -229,7 +233,7 @@ def call_stage2(prompt: str, system: str, settings) -> str:
     timeout = stage2_cfg.get("timeout_seconds", 90)
 
     chain = [
-        {"provider": "anthropic", "model": stage2_cfg.get("model", "claude-sonnet-4-6")}
+        {"provider": stage2_cfg.get("provider", "minimax"), "model": stage2_cfg.get("model", "MiniMax-M2.7")}
     ] + settings.llm_stage2_fallback_chain
 
     last_error = None

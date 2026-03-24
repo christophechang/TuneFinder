@@ -17,27 +17,25 @@ llm:
     timeout_seconds: 120
 
   stage2:
-    provider: "anthropic"
-    model: "claude-sonnet-4-6"
+    provider: "minimax"
+    model: "MiniMax-M2.7"
     max_tokens: 4096
     temperature: 0.2
-    timeout_seconds: 90
+    timeout_seconds: 120
 
-  # Fallback chain for Stage 2 — tried in order if Anthropic fails (e.g. quota exhausted)
+  # Fallback chain for Stage 2 — tried in order if primary fails
   stage2_fallback_chain:
-    - provider: "minimax"
-      model: "MiniMax-M2.7"
+    - provider: "openrouter"
+      model: "deepseek/deepseek-chat"
 
-  # Fallback chain for Stage 1 only — tried in order if primary fails
+  # Fallback chain for Stage 1 — tried in order if primary fails
   fallback_chain:
+    - provider: "mistral"
+      model: "mistral-small-latest"
     - provider: "groq"
       model: "llama-3.3-70b-versatile"
     - provider: "gemini"
       model: "gemini-2.5-flash"
-    - provider: "openrouter"
-      model: "deepseek/deepseek-chat"
-    - provider: "anthropic"
-      model: "claude-sonnet-4-6"
 
 sources:
 

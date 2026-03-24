@@ -10,7 +10,7 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 2. **Fetch** — scrapes new releases from Juno, Beatport, Bandcamp, Traxsource, Resident Advisor, and Subsurface Selections
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
-5. **Report** — two-stage LLM pipeline: Stage 1 runs a 5-provider cascade (MiniMax → Groq → Gemini → OpenRouter → Anthropic) to write a one-line reason per track; Stage 2 (Claude Sonnet) writes the full Discord-formatted report
+5. **Report** — two-stage LLM pipeline: Stage 1 runs a 4-provider cascade (MiniMax → Mistral Small → Groq → Gemini) to write a one-line reason per track; Stage 2 (MiniMax, fallback OpenRouter/DeepSeek) writes the full Discord-formatted report
 6. **Post** — sends the report to your Discord `#music-research` channel via Bot token
 
 ## Sources
@@ -101,15 +101,18 @@ cp .env.example .env
 
 ```
 # Required
-ANTHROPIC_API_KEY=        # Stage 2 report generation (also Stage 1 last resort)
-MINIMAX_API_KEY=          # Stage 1 primary
+MINIMAX_API_KEY=          # Stage 1 + Stage 2 primary
 DISCORD_BOT_TOKEN=        # Discord bot token
 DISCORD_GUILD_ID=         # Your Discord server ID
 
-# Optional Stage 1 fallbacks (used in order if primary fails)
-GROQ_API_KEY=             # fallback 1 — free
-GEMINI_API_KEY=           # fallback 2 — free
-OPENROUTER_API_KEY=       # fallback 3 — capped
+# Optional fallbacks (used in order if primary fails)
+MISTRAL_API_KEY=          # Stage 1 fallback 1
+GROQ_API_KEY=             # Stage 1 fallback 2 — free
+GEMINI_API_KEY=           # Stage 1 fallback 3 — free
+OPENROUTER_API_KEY=       # Stage 2 fallback 1 — capped
+
+# Optional (Anthropic supported but not in default cascade)
+ANTHROPIC_API_KEY=
 ```
 
 ## Commands
@@ -156,17 +159,23 @@ Edit `config/settings.yaml` to:
 
 ## LLM cascade
 
-Stage 1 (reason enrichment) tries providers in order, skipping any with no API key set:
+Both stages try providers in order, skipping any with no API key set.
+
+**Stage 1** (reason enrichment + label synopses):
 
 | # | Provider | Model | Cost |
 |---|---|---|---|
-| 1 | MiniMax | `MiniMax-M2.5` | paid (primary) |
-| 2 | Groq | `llama-3.3-70b-versatile` | free |
-| 3 | Gemini | `gemini-2.5-flash` | free |
-| 4 | OpenRouter | `deepseek/deepseek-chat` | capped |
-| 5 | Anthropic | `claude-sonnet-4-6` | capped (last resort) |
+| 1 | MiniMax | `MiniMax-M2.7` | paid (primary) |
+| 2 | Mistral | `mistral-small-latest` | paid |
+| 3 | Groq | `llama-3.3-70b-versatile` | free |
+| 4 | Gemini | `gemini-2.5-flash` | free |
 
-Stage 2 (report writing) always uses Anthropic Claude Sonnet directly — no fallback.
+**Stage 2** (report writing):
+
+| # | Provider | Model | Cost |
+|---|---|---|---|
+| 1 | MiniMax | `MiniMax-M2.7` | paid (primary) |
+| 2 | OpenRouter | `deepseek/deepseek-chat` | capped |
 
 ## Scheduling (macOS launchd)
 
