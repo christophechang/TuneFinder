@@ -54,7 +54,7 @@ Each track line includes a source tag (`[Juno]`, `[Beatport]`, `[Bandcamp]`, etc
 When preparing a mix in a specific style, run `mix-prep <genre>` to get a focused report of the best available tracks for that genre:
 
 ```bash
-./venv/bin/python -m musicfinder mix-prep house
+./venv/bin/python -m tunefinder mix-prep house
 ```
 
 Valid genres: `dnb` · `breaks` · `house` · `ukg` · `uk-bass` · `electronica` · `downtempo` · `techno` · `funk-soul-jazz` · `hip-hop`
@@ -119,34 +119,34 @@ ANTHROPIC_API_KEY=
 
 ```bash
 # Validate all required env vars and config
-./venv/bin/python -m musicfinder check-config
+./venv/bin/python -m tunefinder check-config
 
 # Save live API responses to fixtures/ for offline testing
-./venv/bin/python -m musicfinder save-fixtures
+./venv/bin/python -m tunefinder save-fixtures
 
 # Build artist profiles and known-track exclusion set from mix history
-./venv/bin/python -m musicfinder build-profile
+./venv/bin/python -m tunefinder build-profile
 
 # Fetch new releases from all enabled sources
-./venv/bin/python -m musicfinder fetch-sources
+./venv/bin/python -m tunefinder fetch-sources
 
 # Run the full pipeline and post the weekly report to Discord
-./venv/bin/python -m musicfinder run
+./venv/bin/python -m tunefinder run
 
 # Dry-run (full pipeline, no Discord posts or history writes)
-./venv/bin/python -m musicfinder run --dry-run
+./venv/bin/python -m tunefinder run --dry-run
 
 # Generate a genre-focused track list for mix preparation
-./venv/bin/python -m musicfinder mix-prep house
+./venv/bin/python -m tunefinder mix-prep house
 ```
 
 ## First-time setup
 
 ```bash
-./venv/bin/python -m musicfinder check-config
-./venv/bin/python -m musicfinder save-fixtures
-./venv/bin/python -m musicfinder build-profile
-./venv/bin/python -m musicfinder run
+./venv/bin/python -m tunefinder check-config
+./venv/bin/python -m tunefinder save-fixtures
+./venv/bin/python -m tunefinder build-profile
+./venv/bin/python -m tunefinder run
 ```
 
 ## Configuration
@@ -224,7 +224,7 @@ src/
     report.py        # LLM report generation (weekly + mix-prep)
   output/
     discord.py       # Discord bot client
-musicfinder/
+tunefinder/
   __main__.py        # CLI entry point
 config/
   settings.yaml      # All non-secret configuration

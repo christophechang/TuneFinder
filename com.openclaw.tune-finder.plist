@@ -8,14 +8,14 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/YOUR_ADMIN_USER/Documents/Development/MusicFinder/venv/bin/python</string>
+    <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/venv/bin/python</string>
     <string>-m</string>
-    <string>musicfinder</string>
+    <string>tunefinder</string>
     <string>run</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/YOUR_ADMIN_USER/Documents/Development/MusicFinder</string>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder</string>
 
   <key>StartCalendarInterval</key>
   <dict>
@@ -28,9 +28,9 @@
   </dict>
 
   <key>StandardOutPath</key>
-  <string>/Users/YOUR_ADMIN_USER/Documents/Development/MusicFinder/logs/launchd.log</string>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/logs/launchd.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/YOUR_ADMIN_USER/Documents/Development/MusicFinder/logs/launchd.log</string>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/logs/launchd.log</string>
 
   <key>EnvironmentVariables</key>
   <dict>

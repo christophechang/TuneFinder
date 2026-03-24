@@ -145,7 +145,7 @@ def _load_fixture_tracks(fixtures_dir: str) -> list[Track]:
 def save_fixtures(settings) -> None:
     """
     Fetch live data and save raw API responses to fixtures/ for offline testing.
-    Run once with: ./venv/bin/python -m musicfinder save-fixtures
+    Run once with: ./venv/bin/python -m tunefinder save-fixtures
     """
     os.makedirs(settings.testing_fixtures_dir, exist_ok=True)
 

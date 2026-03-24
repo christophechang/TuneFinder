@@ -6,7 +6,7 @@ from datetime import datetime
 
 def setup_logging(log_dir: str = "logs", level: int = logging.INFO) -> None:
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"musicfinder_{datetime.now().strftime('%Y%m%d')}.log")
+    log_file = os.path.join(log_dir, f"tunefinder_{datetime.now().strftime('%Y%m%d')}.log")
 
     fmt = "[%(asctime)s] [%(name)s] %(levelname)s %(message)s"
     datefmt = "%Y-%m-%d %H:%M:%S"
