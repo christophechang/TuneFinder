@@ -10,7 +10,6 @@ load_dotenv()
 logger = get_logger(__name__)
 
 _REQUIRED_ENV_VARS = [
-    "ANTHROPIC_API_KEY",
     "DISCORD_BOT_TOKEN",
     "DISCORD_GUILD_ID",
     "MISTRAL_API_KEY",
@@ -30,8 +29,6 @@ PROVIDER_ENV_VAR = {
     "gemini": "GEMINI_API_KEY",
     "minimax": "MINIMAX_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "ollama": None,
 }
 
 _CONFIG_PATH = os.path.join(
@@ -98,10 +95,6 @@ class Settings:
     @property
     def openrouter_api_key(self) -> str:
         return os.getenv("OPENROUTER_API_KEY", "")
-
-    @property
-    def anthropic_api_key(self) -> str:
-        return os.getenv("ANTHROPIC_API_KEY", "")
 
     @property
     def llm_stage1(self) -> dict:

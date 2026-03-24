@@ -26,28 +26,38 @@ def cmd_check_config(args):
         for i, e in enumerate(fallback_chain)
     ]
 
-    print("\nStage 1 LLM cascade:")
-    print(f"  {'Position':<12}  {'Provider':<12}  {'Model':<30}  {'Env Var':<22}  Status")
-    print(f"  {'-'*12}  {'-'*12}  {'-'*30}  {'-'*22}  ------")
-    for entry in cascade:
-        provider = entry["provider"]
-        model = entry["model"]
-        position = entry["position"]
-        env_var = PROVIDER_ENV_VAR.get(provider)
-        if env_var is None:
-            status = "no key needed"
-            env_var_display = "(none)"
-        elif os.getenv(env_var):
-            status = "SET"
-            env_var_display = env_var
-        else:
-            status = "MISSING"
-            env_var_display = env_var
-        print(f"  {position:<12}  {provider:<12}  {model:<30}  {env_var_display:<22}  {status}")
+    def _print_cascade(label, chain):
+        print(f"\n{label}:")
+        print(f"  {'Position':<12}  {'Provider':<12}  {'Model':<30}  {'Env Var':<22}  Status")
+        print(f"  {'-'*12}  {'-'*12}  {'-'*30}  {'-'*22}  ------")
+        for entry in chain:
+            provider = entry["provider"]
+            model = entry["model"]
+            position = entry["position"]
+            env_var = PROVIDER_ENV_VAR.get(provider)
+            if env_var is None:
+                status = "no key needed"
+                env_var_display = "(none)"
+            elif os.getenv(env_var):
+                status = "SET"
+                env_var_display = env_var
+            else:
+                status = "MISSING"
+                env_var_display = env_var
+            print(f"  {position:<12}  {provider:<12}  {model:<30}  {env_var_display:<22}  {status}")
 
-    print("\nStage 2: anthropic / claude-sonnet-4-6 (direct, no fallback)")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    print(f"  ANTHROPIC_API_KEY: {'SET' if anthropic_key else 'MISSING'}\n")
+    stage2_cfg = settings.llm_stage2
+    stage2_fallback_chain = settings.llm_stage2_fallback_chain
+    stage2_chain = [
+        {"provider": stage2_cfg.get("provider", "minimax"), "model": stage2_cfg.get("model", ""), "position": "primary"}
+    ] + [
+        {"provider": e.get("provider", ""), "model": e.get("model", ""), "position": f"fallback {i + 1}"}
+        for i, e in enumerate(stage2_fallback_chain)
+    ]
+
+    _print_cascade("Stage 1 LLM cascade (reason enrichment)", cascade)
+    _print_cascade("Stage 2 LLM cascade (report generation)", stage2_chain)
+    print("")
 
 
 def cmd_save_fixtures(args):
@@ -371,8 +381,8 @@ def cmd_mix_prep(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="musicfinder",
-        description="Music Finder Report — weekly music discovery automation",
+        prog="tunefinder",
+        description="TuneFinder — weekly music discovery automation",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("check-config", help="Validate all required env vars and config")

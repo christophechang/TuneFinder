@@ -11,7 +11,6 @@ Stage 1 (extraction/classification):
 Stage 2 (report generation):
   Primary: MiniMax M2.7
   Fallback chain: OpenRouter / DeepSeek
-  Anthropic supported as a provider but not in the default chain.
 """
 import re
 import time
@@ -49,7 +48,6 @@ _API_KEY_ATTRS = {
     "gemini": "gemini_api_key",
     "minimax": "minimax_api_key",
     "openrouter": "openrouter_api_key",
-    "anthropic": "anthropic_api_key",
 }
 
 
@@ -84,58 +82,6 @@ def _call_openai_compat(
     return _strip_thinking(content)
 
 
-def _call_ollama(
-    base_url: str,
-    model: str,
-    system: str,
-    prompt: str,
-    timeout: int,
-) -> str:
-    url = f"{base_url.rstrip('/')}/api/chat"
-    payload = {
-        "model": model,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": prompt},
-        ],
-    }
-    resp = requests.post(url, json=payload, timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()["message"]["content"]
-
-
-def _call_anthropic(
-    api_key: str,
-    model: str,
-    system: str,
-    prompt: str,
-    temperature: float,
-    max_tokens: int,
-    timeout: int,
-) -> str:
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "system": system,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    resp = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers=headers,
-        json=payload,
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
-
-
 def call_stage1(prompt: str, system: str, settings) -> str:
     """
     Cheap, fast extraction/classification via cascade chain.
@@ -162,32 +108,7 @@ def call_stage1(prompt: str, system: str, settings) -> str:
         try:
             logger.info(f"[llm.stage1] Trying {provider} ({model})")
 
-            if provider == "ollama":
-                base_url = entry.get("base_url", "http://localhost:11434")
-                result = _call_ollama(
-                    base_url=base_url,
-                    model=model,
-                    system=system,
-                    prompt=prompt,
-                    timeout=timeout,
-                )
-
-            elif provider == "anthropic":
-                api_key = settings.anthropic_api_key
-                if not api_key:
-                    logger.debug("[llm.stage1] Skipping anthropic — no API key set")
-                    continue
-                result = _call_anthropic(
-                    api_key=api_key,
-                    model=model,
-                    system=system,
-                    prompt=prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout=timeout,
-                )
-
-            elif provider in _PROVIDER_BASE_URLS:
+            if provider in _PROVIDER_BASE_URLS:
                 api_key = getattr(settings, _API_KEY_ATTRS.get(provider, ""), "")
                 if not api_key:
                     logger.debug(f"[llm.stage1] Skipping {provider} — no API key set")
@@ -245,22 +166,7 @@ def call_stage2(prompt: str, system: str, settings) -> str:
         try:
             logger.info(f"[llm.stage2] Trying {provider} ({model})")
 
-            if provider == "anthropic":
-                api_key = settings.anthropic_api_key
-                if not api_key:
-                    logger.debug("[llm.stage2] Skipping anthropic — no API key set")
-                    continue
-                result = _call_anthropic(
-                    api_key=api_key,
-                    model=model,
-                    system=system,
-                    prompt=prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout=timeout,
-                )
-
-            elif provider in _PROVIDER_BASE_URLS:
+            if provider in _PROVIDER_BASE_URLS:
                 api_key = getattr(settings, _API_KEY_ATTRS.get(provider, ""), "")
                 if not api_key:
                     logger.debug(f"[llm.stage2] Skipping {provider} — no API key set")

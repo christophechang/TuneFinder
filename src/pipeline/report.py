@@ -6,7 +6,7 @@ Stage 1 (cheap, fast):
   cascade chain (Mistral → fallback). One batch call covering all sections.
   Falls back to signal-derived reasons if Stage 1 fails.
 
-Stage 2 (Anthropic Sonnet):
+Stage 2 (MiniMax, fallback OpenRouter/DeepSeek):
   Writes the full Discord-formatted weekly report from the enriched candidates.
   One call per run.
 """
@@ -331,7 +331,7 @@ def generate_report(
     recommended_count = sum(len(v) for v in sections.values())
     footer = _build_footer(report_id, stats, recommended_count)
 
-    logger.info("[report] Calling Stage 2 (Anthropic) for report generation")
+    logger.info("[report] Calling Stage 2 for report generation")
     try:
         report = call_stage2(prompt, system, settings)
         report = _sanitize_report(report)
@@ -388,7 +388,7 @@ def generate_mix_prep_report(
 
     footer = _build_footer(report_id, stats)
 
-    logger.info(f"[report] Calling Stage 2 (Anthropic) for mix-prep report — genre: {genre}")
+    logger.info(f"[report] Calling Stage 2 for mix-prep report — genre: {genre}")
     try:
         report = call_stage2(prompt, system, settings)
         report = _sanitize_report(report)

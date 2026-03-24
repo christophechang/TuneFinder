@@ -110,9 +110,6 @@ MISTRAL_API_KEY=          # Stage 1 fallback 1
 GROQ_API_KEY=             # Stage 1 fallback 2 — free
 GEMINI_API_KEY=           # Stage 1 fallback 3 — free
 OPENROUTER_API_KEY=       # Stage 2 fallback 1 — capped
-
-# Optional (Anthropic supported but not in default cascade)
-ANTHROPIC_API_KEY=
 ```
 
 ## Commands
