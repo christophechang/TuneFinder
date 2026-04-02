@@ -103,7 +103,7 @@ sources:
         id: 108
 
   traxsource:
-    enabled: true
+    enabled: false
     genre_url_pattern: "https://www.traxsource.com/genre/{id}/{slug}/top"
     genres:
       - name: dnb

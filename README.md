@@ -20,7 +20,7 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 | Juno Download | Genre top-100 track chart | ✅ |
 | Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | ✅ |
 | Bandcamp | `dig_deeper` JSON API | ✅ |
-| Traxsource | HTML scrape | ✅ |
+| Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | ✅ |
 | Subsurface Selections | Newsletter HTML scrape | ✅ |
 | Boomkat | — | blocked (Cloudflare) |
@@ -154,6 +154,8 @@ Edit `config/settings.yaml` to:
 - Change Discord channel names
 - Swap LLM models
 
+Traxsource note: the site is currently disabled by default in [`config/settings.yaml`](/Users/christophechang/Documents/Development/TuneFinder/config/settings.yaml) because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
+
 ## LLM cascade
 
 Both stages try providers in order, skipping any with no API key set.
@@ -206,7 +208,7 @@ src/
     juno.py          # Juno Download genre top-100 chart
     beatport.py      # Beatport genre top-100 chart (__NEXT_DATA__)
     bandcamp.py      # Bandcamp dig_deeper API
-    traxsource.py    # Traxsource HTML scrape
+    traxsource.py    # Traxsource HTML scrape (currently disabled by default)
     ra.py            # Resident Advisor apolloState
     subsurface.py    # Subsurface Selections newsletter scrape
     boomkat.py       # Boomkat (disabled — Cloudflare bot protection)
