@@ -1,52 +1,18 @@
-# Claude Code Guidance For TuneFinder
+TuneFinder fetches music releases, scores them against a DJ profile, generates a report via LLM cascade, and posts to Discord. Codebase is intentionally small and script-like. Clarity and continuity over restructuring.
 
-## Project Overview
-- TuneFinder is a Python automation project that fetches music releases, scores them against a DJ profile, generates a report with an LLM cascade, and posts to Discord.
-- The codebase is intentionally small and script-like. Prefer clarity and continuity over framework-style restructuring.
+Inspect code before making assumptions. Match existing patterns. Prefer config-driven changes over hardcoded constants. No hardcoded secrets, IDs, tokens, or personal URLs. Treat `.env`, `data/`, `logs/`, `fixtures/` as important local state — do not wipe or rewrite unless asked. Do not enable disabled sources (Boomkat, Bleep) without approval. Preserve graceful degradation for missing API keys, fetch failures, and LLM fallback behavior. Networked fetchers are brittle — prefer narrow parsing updates over broad rewrites.
 
-## Repo-Specific Expectations
-- Inspect the code before making assumptions. Match existing patterns in `src/`, `tunefinder/`, and `config/`.
-- Keep changes minimal and local to the requested task.
-- Do not refactor unrelated modules just because a cleaner design is possible.
-- Prefer config-driven changes over hardcoded constants.
+Follow current style: straightforward functions, dataclasses, explicit control flow, lightweight modules. Reuse `src/fetchers/common.py` and existing pipeline utilities. Keep LLM provider logic in `src/llm.py`. Keep Discord formatting in `src/pipeline/report.py`. Be careful around recommendation history and candidate pool — regressions cause duplicate recommendations.
 
-## Important Paths
-- `tunefinder/__main__.py`: CLI commands and run orchestration
-- `src/config.py`: environment/config loading and validation
-- `src/models.py`: shared dataclasses and canonical record shapes
-- `src/fetchers/`: source-specific scraping and ingestion
-- `src/pipeline/`: ranking, deduplication, history, reporting, pool/profile logic
-- `src/llm.py`: LLM provider cascade logic
-- `config/settings.yaml`: source toggles, model config, pipeline counts, channel names
+Key paths:
+- `tunefinder/__main__.py` — CLI commands and run orchestration
+- `src/config.py` — env/config loading and validation
+- `src/models.py` — shared dataclasses and canonical record shapes
+- `src/fetchers/` — source-specific scraping and ingestion
+- `src/pipeline/` — ranking, dedup, history, reporting, pool/profile logic
+- `src/llm.py` — LLM provider cascade
+- `config/settings.yaml` — source toggles, model config, pipeline counts, channel names
 
-## How To Work Safely Here
-- Do not hardcode secrets, IDs, tokens, or personal URLs.
-- Treat `.env`, `data/`, `logs/`, and `fixtures/` as important local state. Do not wipe or rewrite them unless explicitly asked.
-- Networked fetchers are brittle by nature. For scraper fixes, prefer narrow parsing updates over broad rewrites.
-- Do not enable disabled sources like Boomkat or Bleep without explicit approval.
-- Preserve graceful degradation for missing API keys, fetch failures, and LLM fallback behavior.
+Validation: `./venv/bin/python -m tunefinder check-config` first. Use `--dry-run` for pipeline changes. Never post live Discord messages unless explicitly asked. If validation is blocked by missing credentials or side-effect risk, say so.
 
-## Implementation Preferences
-- Follow the current Python style: straightforward functions, dataclasses, explicit control flow, and lightweight modules.
-- Reuse shared helpers in `src/fetchers/common.py` and existing pipeline utilities instead of duplicating behavior.
-- Keep provider-specific LLM behavior centralized in `src/llm.py`.
-- Keep Discord formatting and sanitization logic centralized in `src/pipeline/report.py`.
-- Be especially careful around recommendation history and candidate pool behavior; regressions there can create duplicate recommendations.
-
-## Validation
-- Prefer safe validation paths first.
-- Start with:
-- `./venv/bin/python -m tunefinder check-config`
-- Use `./venv/bin/python -m tunefinder run --dry-run` for end-to-end checks when the change affects pipeline behavior.
-- Avoid commands that post live messages to Discord unless the user explicitly requests that.
-- If validation is blocked by missing credentials, network access, or side-effect risk, say so plainly.
-
-## Dependencies And Scope
-- Do not add dependencies without approval.
-- Do not introduce large abstractions, framework migrations, or broad file moves unless explicitly requested.
-- If a change affects commands, config keys, or operator workflow, update `README.md` in the same pass when appropriate.
-
-## Collaboration Notes
-- Explain non-obvious tradeoffs briefly before making high-impact changes.
-- Call out assumptions when runtime behavior cannot be verified locally.
-- Optimize for maintainability by the current repo owner, not for theoretical extensibility.
+If a change affects commands, config keys, or operator workflow, update `README.md` in the same pass.
