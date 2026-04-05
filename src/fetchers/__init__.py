@@ -8,7 +8,7 @@ by the pipeline on the same run.
 import json
 import os
 
-from src.fetchers import bandcamp, beatport, bleep, boomkat, juno, ra, subsurface, traxsource
+from src.fetchers import bandcamp, beatport, bleep, boomkat, juno, ra, traxsource
 from src.logger import get_logger
 from src.models import SourceItem
 
@@ -24,7 +24,6 @@ _FETCHERS = [
     ("boomkat", boomkat.fetch),
     ("bleep", bleep.fetch),
     ("resident_advisor", ra.fetch),
-    ("subsurface_selections", subsurface.fetch),
 ]
 
 

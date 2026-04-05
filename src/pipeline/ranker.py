@@ -32,7 +32,6 @@ _W_GENRE = 0.5             # per matching genre tag
 _W_FRESH = 0.5             # released within 30 days
 _W_CHART_TOP = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
 _W_BANDCAMP = 1.0          # discovery bonus for Bandcamp (no chart data available)
-_W_HUMAN_CURATED = 1.5     # bonus for human-curated sources (e.g. Subsurface Selections)
 
 _MAX_ARTIST_SCORE = 10.0   # cap so one mega-artist doesn't dominate
 _RECURRING_THRESHOLD = 3   # play_count needed to earn the recurring bonus
@@ -154,14 +153,6 @@ def _score(
             explanation="Bandcamp discovery — independent release outside chart sources.",
         ))
 
-    # --- Human-curated source bonus ---
-    if c.source == "subsurface_selections":
-        score += _W_HUMAN_CURATED
-        c.signals.append(RecommendationSignal(
-            code="human_curated",
-            explanation="Hand-picked by Subsurface Selections — human editorial curation.",
-        ))
-
     c.score = round(score, 2)
 
 
@@ -219,9 +210,6 @@ def _assign_sections(
                 break
         return result
 
-    # Subsurface is picked first so its small curated set is never consumed by the
-    # general pool — guarantees a dedicated section regardless of competition.
-    subsurface_picks = pick(10, require_signal="human_curated")
     top_picks = pick(top_n)
     label_watch = pick(label_n, require_signal="label_match")
     artist_watch = pick(artist_n, require_signal="known_artist")
@@ -229,12 +217,11 @@ def _assign_sections(
 
     genre_summary = ", ".join(f"{g}: {n}" for g, n in sorted(genre_counts.items()))
     logger.info(
-        f"[ranker] Sections — subsurface: {len(subsurface_picks)}, top_picks: {len(top_picks)}, "
+        f"[ranker] Sections — top_picks: {len(top_picks)}, "
         f"label_watch: {len(label_watch)}, artist_watch: {len(artist_watch)}, "
         f"wildcards: {len(wildcards)} | genres: {genre_summary or 'none tagged'}"
     )
     return {
-        "subsurface_picks": subsurface_picks,
         "top_picks": top_picks,
         "label_watch": label_watch,
         "artist_watch": artist_watch,

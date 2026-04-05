@@ -295,7 +295,6 @@ def generate_report(
     # Build structured prompt for Stage 2
     today = datetime.now(timezone.utc).strftime("%-d %B %Y")
     sections_text = "\n\n".join(filter(None, [
-        _format_section_for_prompt("SUBSURFACE SELECTIONS (hand-picked by human curators — always include all)", sections.get("subsurface_picks", []), reasons),
         _format_section_for_prompt("TOP PICKS (strongest taste matches)", sections.get("top_picks", []), reasons),
         _format_label_watch_for_prompt(label_watch_candidates, reasons, synopses),
         _format_section_for_prompt("ARTIST WATCH (new material from artists you play)", sections.get("artist_watch", []), reasons),
@@ -312,7 +311,7 @@ def generate_report(
         "immediately after the label bracket and before the →. "
         "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
         "Never output bare URLs. Never repeat the same URL twice for one track. "
-        "Section headers: ## 📬 Subsurface Selections, ## 🔺 Top Picks, ## 🏷️ Label Watch, ## 👁️ Artist Watch, ## 🃏 Wildcards. "
+        "Section headers: ## 🔺 Top Picks, ## 🏷️ Label Watch, ## 👁️ Artist Watch, ## 🃏 Wildcards. "
         "Omit a section header entirely if that section has no tracks. "
         "In the Label Watch section, the input groups tracks by label using [LABEL: name] and [SYNOPSIS: text] tags. "
         "For each label group: render the label name as a bold sub-header (e.g. **Ilian Tape**), "

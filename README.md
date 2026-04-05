@@ -7,7 +7,7 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 ## How it works
 
 1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
-2. **Fetch** — scrapes new releases from Juno, Beatport, Bandcamp, Traxsource, Resident Advisor, and Subsurface Selections
+2. **Fetch** — scrapes new releases from Juno, Beatport, Bandcamp, Traxsource, and Resident Advisor
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
 5. **Report** — two-stage LLM pipeline: Stage 1 runs a 4-provider cascade (MiniMax → Mistral Small → Groq → Gemini) to write a one-line reason per track; Stage 2 (MiniMax, fallback OpenRouter/DeepSeek) writes the full Discord-formatted report
@@ -22,7 +22,6 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 | Bandcamp | `dig_deeper` JSON API | ✅ |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | ✅ |
-| Subsurface Selections | Newsletter HTML scrape | ✅ |
 | Boomkat | — | blocked (Cloudflare) |
 | Bleep | — | requires login |
 
@@ -35,7 +34,6 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 | `label_match` | +2.5 | Label has released known artists |
 | `cross_source` | +1.0 | Track flagged by 2+ sources |
 | `chart_position` | +0–1.5 | Linear decay from #1 (Juno/Beatport/Traxsource) |
-| `human_curated` | +1.5 | Hand-picked by editorial source (Subsurface Selections) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
 | `genre_match` | +0.5 per tag | Soft match against DJ's genre set |
 | `fresh_release` | +0.5 | Released within 30 days |
@@ -210,7 +208,6 @@ src/
     bandcamp.py      # Bandcamp dig_deeper API
     traxsource.py    # Traxsource HTML scrape (currently disabled by default)
     ra.py            # Resident Advisor apolloState
-    subsurface.py    # Subsurface Selections newsletter scrape
     boomkat.py       # Boomkat (disabled — Cloudflare bot protection)
     bleep.py         # Bleep (disabled — requires login)
     common.py        # Shared HTTP helpers
