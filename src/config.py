@@ -151,6 +151,10 @@ class Settings:
         return self._data.get("pipeline", {}).get("mix_prep_deep_cuts_count", 20)
 
     @property
+    def pipeline_release_date_window_days(self) -> int | None:
+        return self._data.get("pipeline", {}).get("release_date_window_days")
+
+    @property
     def pipeline_genre_exclusions(self) -> dict[str, list[str]]:
         return self._data.get("pipeline", {}).get("genre_exclusions", {})
 

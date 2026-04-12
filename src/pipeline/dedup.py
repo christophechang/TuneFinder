@@ -164,6 +164,29 @@ def filter_genre_exclusions(
     return result
 
 
+def filter_release_date(candidates: list[Candidate], window_days: int) -> list[Candidate]:
+    """Drop candidates whose release_date is older than window_days ago.
+
+    Items with no release_date (e.g. Bandcamp) are always kept — we can't
+    confirm they're stale, so we give them the benefit of the doubt.
+    """
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=window_days)).isoformat()
+    result = []
+    removed = 0
+    for c in candidates:
+        if c.release_date is None or c.release_date >= cutoff:
+            result.append(c)
+        else:
+            removed += 1
+    if removed:
+        logger.info(
+            f"[dedup] Release date filter ({window_days}d, cutoff {cutoff}): "
+            f"{removed} removed → {len(result)} remaining"
+        )
+    return result
+
+
 def filter_history(candidates: list[Candidate], history_keys: set[str]) -> list[Candidate]:
     """Remove candidates that have been previously recommended."""
     result = []

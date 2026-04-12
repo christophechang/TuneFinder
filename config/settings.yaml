@@ -186,6 +186,14 @@ sources:
     enabled: false
 
 pipeline:
+  # Release date window applied to all sources with known dates (Juno, RA, Beatport).
+  # Bandcamp items always pass through (no date available from that source).
+  # Must match one of Juno's chart window slugs:
+  #   7   → this-week
+  #   28  → 4-weeks
+  #   56  → 8-weeks
+  #   180 → 6-months
+  release_date_window_days: 28
   max_candidates: 100
   top_picks_count: 5
   label_watch_count: 5

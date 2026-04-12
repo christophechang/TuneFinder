@@ -117,7 +117,7 @@ def cmd_run(args):
     )
     from src.pipeline.dedup import (
         deduplicate_source_items, items_to_candidates,
-        filter_known, filter_history,
+        filter_known, filter_history, filter_release_date,
     )
     from src.pipeline.ranker import rank_candidates, all_section_candidates
     from src.pipeline.pool import load_pool, pool_to_candidates, save_pool, POOL_CAP
@@ -160,6 +160,10 @@ def cmd_run(args):
     after_known = len(candidates)
     candidates = filter_history(candidates, history_keys)
     after_history = len(candidates)
+    window_days = settings.pipeline_release_date_window_days
+    if window_days:
+        candidates = filter_release_date(candidates, window_days)
+    after_release_date = len(candidates)
 
     # Inject pool candidates (skip any already present as fresh tracks)
     fresh_candidates = list(candidates)
@@ -177,6 +181,7 @@ def cmd_run(args):
         "after_dedup": after_dedup,
         "after_known": after_known,
         "after_history": after_history,
+        "after_release_date": after_release_date,
         "pool_injected": len(pool_injected),
         "fetcher_health": fetcher_health,
     }
@@ -246,11 +251,16 @@ def cmd_run(args):
     for item in source_items:
         by_source[item.source] = by_source.get(item.source, 0) + 1
     source_summary = ", ".join(f"{k}: {v}" for k, v in sorted(by_source.items()))
+    date_filter_note = (
+        f"release date filter: ≤{window_days}d (Bandcamp exempt)"
+        if window_days else "release date filter: off"
+    )
     log_msg = (
         f"**Run complete** — {report_id} | {duration}s\n"
         f"Sources: {source_summary}\n"
         f"Candidates: {sources_fetched} → {after_dedup} deduped → "
-        f"{after_known} after known filter → {after_history} after history\n"
+        f"{after_known} after known filter → {after_history} after history → "
+        f"{after_release_date} after {date_filter_note}\n"
         f"Pool: {len(pool_injected)} injected, {len(new_pool)} total (cap {POOL_CAP})\n"
         f"Recommended: {len(new_records)} tracks"
     )
@@ -273,7 +283,7 @@ def cmd_mix_prep(args):
     )
     from src.pipeline.dedup import (
         deduplicate_source_items, items_to_candidates,
-        filter_known, filter_genre, filter_genre_exclusions,
+        filter_known, filter_genre, filter_genre_exclusions, filter_release_date,
     )
     from src.pipeline.ranker import rank_candidates_mix_prep, all_section_candidates
     from src.pipeline.pool import load_pool, pool_to_candidates
@@ -315,6 +325,9 @@ def cmd_mix_prep(args):
     candidates = [c for c in candidates if c.key not in mix_prep_history_keys]
     candidates = filter_genre(candidates, genre)
     candidates = filter_genre_exclusions(candidates, genre, settings.pipeline_genre_exclusions)
+    window_days = settings.pipeline_release_date_window_days
+    if window_days:
+        candidates = filter_release_date(candidates, window_days)
     after_genre = len(candidates)
 
     # Inject pool candidates for this genre

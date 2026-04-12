@@ -18,6 +18,20 @@ from datetime import datetime, timezone
 from src.llm import call_stage1, call_stage2
 from src.logger import get_logger
 from src.models import Candidate
+
+
+def _clean_llm_json(raw: str) -> str:
+    """Strip markdown code fences and replace control characters that break json.loads."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    # Replace all control characters with a space.
+    # LLMs occasionally embed raw newlines/tabs inside string values, which is invalid JSON.
+    # Replacing with spaces is safe — JSON parsers treat spaces as whitespace between tokens.
+    raw = re.sub(r"[\x00-\x1f\x7f]", " ", raw)
+    return raw
 from src.pipeline.label_cache import load_label_profiles, save_label_profiles
 
 logger = get_logger(__name__)
@@ -97,13 +111,7 @@ def _enrich_reasons(candidates: list[Candidate], settings) -> dict[str, str]:
     )
 
     try:
-        raw = call_stage1(prompt, system, settings)
-        # Extract JSON from response — handle markdown code blocks
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
+        raw = _clean_llm_json(call_stage1(prompt, system, settings))
         enriched = json.loads(raw)
         return {
             f"{e['artist'].lower().strip()}||{e['title'].lower().strip()}": e.get("reason", "")
@@ -149,12 +157,7 @@ def _enrich_label_synopses(labels: list[str], settings, data_dir: str) -> dict[s
             'Return format: [{"label": "...", "synopsis": "..."}]'
         )
         try:
-            raw = call_stage1(prompt, system, settings)
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
+            raw = _clean_llm_json(call_stage1(prompt, system, settings))
             enriched = json.loads(raw)
             for e in enriched:
                 if "label" in e and "synopsis" in e:

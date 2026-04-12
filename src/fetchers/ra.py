@@ -48,12 +48,18 @@ def _parse_reviews(apollo: dict) -> list[SourceItem]:
         if not artist or not title:
             continue
 
+        # "date" is the review publication date in ISO format — close enough to
+        # release date for RA, which only reviews current releases.
+        raw_date = review.get("date", "")
+        release_date = raw_date[:10] if raw_date else None
+
         items.append(SourceItem(
             source="resident_advisor",
             artist=artist,
             title=title,
             link=link,
             label=label,
+            release_date=release_date,
             release_name=title,
             raw_metadata={"ra_review_id": key.split(":")[1]},
         ))
