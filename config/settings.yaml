@@ -179,7 +179,7 @@ sources:
     enabled: false   # Requires login to access new releases
 
   resident_advisor:
-    enabled: true
+    enabled: false
     releases_url: "https://ra.co/music/releases"
 
   discogs:

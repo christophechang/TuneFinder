@@ -67,7 +67,7 @@ def _parse_reviews(apollo: dict) -> list[SourceItem]:
     return items
 
 
-def fetch(settings) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("resident_advisor")
     if not cfg.get("enabled", False):
         return []

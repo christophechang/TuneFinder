@@ -313,7 +313,7 @@ def cmd_mix_prep(args):
     mix_prep_history_keys = build_history_keys(mix_prep_history)
 
     # 3. Fetch external sources
-    source_items, fetcher_health = fetch_all_sources(settings)
+    source_items, fetcher_health = fetch_all_sources(settings, target_genre=genre)
     sources_fetched = len(source_items)
 
     # 4. Dedup + filter + genre narrow

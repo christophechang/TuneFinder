@@ -388,18 +388,28 @@ def generate_mix_prep_report(
         "and track links as [Listen](<url>)."
     )
 
+    header = _build_mix_prep_header(report_id, today, genre)
     footer = _build_footer(report_id, stats)
 
     logger.info(f"[report] Calling Stage 2 for mix-prep report — genre: {genre}")
     try:
         report = call_stage2(prompt, system, settings)
         report = _sanitize_report(report)
-        report = report.rstrip() + "\n\n" + footer
+        report = header + "\n\n" + report.rstrip() + "\n\n" + footer
         logger.info(f"[report] Mix-prep report generated — {len(report)} chars")
         return report
     except Exception as e:
         logger.error(f"[report] Stage 2 failed: {e}")
         return _fallback_mix_prep_report(sections, reasons, report_id, today, genre, stats)
+
+
+def _build_mix_prep_header(report_id: str, today: str, genre: str) -> str:
+    display_genre = genre.upper() if genre == "ukg" else genre.replace("-", " ").title()
+    return "\n".join([
+        f"🎛️ {display_genre} Mix Prep Report",
+        f"Report ID: {report_id}",
+        f"Date: {today}",
+    ])
 
 
 def _fallback_mix_prep_report(
@@ -410,7 +420,7 @@ def _fallback_mix_prep_report(
     genre: str,
     stats: dict,
 ) -> str:
-    lines = [f"**Mix Prep ({genre}) — {today} ({report_id})**\n"]
+    lines = [_build_mix_prep_header(report_id, today, genre), ""]
     section_labels = {
         "top_picks": f"## 🔺 Top Picks ({genre})",
         "deep_cuts": "## 🎧 Deep Cuts",

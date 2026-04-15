@@ -69,12 +69,14 @@ def _fetch_tag(tag: str, count: int) -> list[dict]:
     return data.get("items", [])
 
 
-def fetch(settings) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("bandcamp")
     if not cfg.get("enabled", False):
         return []
 
     tags: list[str] = cfg.get("tags", [])
+    if target_genre is not None:
+        tags = [tag for tag in tags if _tag_to_genre(tag) == target_genre]
     count: int = cfg.get("count_per_tag", 20)
 
     all_items: list[SourceItem] = []

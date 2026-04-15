@@ -27,9 +27,12 @@ _FETCHERS = [
 ]
 
 
-def fetch_all_sources(settings) -> tuple[list[SourceItem], dict[str, dict]]:
+def fetch_all_sources(settings, target_genre: str | None = None) -> tuple[list[SourceItem], dict[str, dict]]:
     """
     Run all enabled fetchers and return (items, health).
+
+    If target_genre is set, fetchers may use it to narrow their source-specific
+    genre lists. Fetchers that do not support genre narrowing can ignore it.
 
     health is a dict keyed by source name:
       {"count": int, "error": str | None}
@@ -44,7 +47,7 @@ def fetch_all_sources(settings) -> tuple[list[SourceItem], dict[str, dict]]:
             logger.info(f"[sources] Skipping disabled source: {name}")
             continue
         try:
-            items = fetch_fn(settings)
+            items = fetch_fn(settings, target_genre=target_genre)
             health[name] = {"count": len(items), "error": None}
             all_items.extend(items)
         except Exception as e:

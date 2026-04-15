@@ -112,13 +112,18 @@ def _parse_track(raw: dict, fallback_tags: list[str], chart_position: int | None
     )
 
 
-def fetch(settings) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("beatport")
     if not cfg.get("enabled", False):
         return []
 
     chart_pattern = cfg.get("chart_pattern", "")
     genres: list[dict] = cfg.get("genres", [])
+    if target_genre is not None:
+        genres = [
+            genre for genre in genres
+            if target_genre in (_SLUG_TO_TAGS.get(genre.get("slug", "")) or [genre.get("name", "")])
+        ]
 
     all_items: list[SourceItem] = []
 

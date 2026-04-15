@@ -53,13 +53,15 @@ def _parse_track_row(row) -> SourceItem | None:
         return None
 
 
-def fetch(settings) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("traxsource")
     if not cfg.get("enabled", False):
         return []
 
     genre_url_pattern = cfg.get("genre_url_pattern", f"{_BASE}/genre/{{id}}/{{slug}}")
     genres: list[dict] = cfg.get("genres", [])
+    if target_genre is not None:
+        genres = [genre for genre in genres if genre.get("name") == target_genre]
 
     all_items: list[SourceItem] = []
 

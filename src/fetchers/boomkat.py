@@ -70,7 +70,7 @@ def _parse_release_card(card: Tag) -> SourceItem | None:
         return None
 
 
-def fetch(settings) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("boomkat")
     if not cfg.get("enabled", False):
         return []

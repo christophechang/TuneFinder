@@ -92,7 +92,7 @@ def _parse_track(card, genre: str, release_date: str | None = None) -> SourceIte
     )
 
 
-def fetch(settings) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("juno")
     if not cfg.get("enabled", False):
         return []
@@ -110,6 +110,12 @@ def fetch(settings) -> list[SourceItem]:
     logger.info(f"[juno] Using chart window '{window_slug}' → release_date lower bound {release_date}")
 
     genre_map: dict[str, str] = cfg.get("genre_map", {})
+    if target_genre is not None:
+        genre_map = {
+            internal_genre: juno_slug
+            for internal_genre, juno_slug in genre_map.items()
+            if internal_genre == target_genre
+        }
     all_items: list[SourceItem] = []
 
     for internal_genre, juno_slug in genre_map.items():
