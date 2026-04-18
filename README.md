@@ -162,6 +162,9 @@ OPENROUTER_API_KEY=       # Stage 2 fallback 1 — capped
 
 # Generate a genre-focused track list for mix preparation
 ./venv/bin/python -m tunefinder mix-prep house
+
+# Dry-run mix-prep (full pipeline, no Discord posts or history writes)
+./venv/bin/python -m tunefinder mix-prep house --dry-run
 ```
 
 ## Configuration
