@@ -1,13 +1,35 @@
 # TuneFinder
 
+[![GitHub release](https://img.shields.io/github/v/release/christophechang/TuneFinder)](https://github.com/christophechang/TuneFinder/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+> **Your crates, your taste.** Monitors new releases across five stores, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
+
 Weekly music discovery automation for DJs. Monitors release feeds across multiple stores and platforms, scores new tracks against your personal mix history, and posts a curated report to a Discord channel — fully automated.
 
 > **Companion tool** — TuneFinder pairs with the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to read your published mix tracklist history and build a personal taste profile. The profile drives all scoring — without it, artist and label signals won't fire.
 
+## What's new in v0.4.0
+
+- **Concurrent mix-prep fetches.** Genre sources now fetch in parallel — mix-prep runs significantly faster, especially for wide genres like `house` that span 10+ feed endpoints across stores.
+- **Configurable release date window.** New `pipeline.release_date_window_days` setting (default `28`) filters stale candidates before ranking. Juno's chart window slug derives from the same value. RA now populates `release_date` from review publication date so it benefits from the filter too.
+- **Traxsource disabled by default.** The site now presents a Cloudflare challenge that makes unattended scraping unreliable. Can be re-enabled in `config/settings.yaml`.
+
+## What's new in v0.3.0
+
+- **MiniMax M2.7 as primary across both stages.** Both Stage 1 (reason enrichment) and Stage 2 (report writing) now use MiniMax M2.7 as primary. Anthropic and Ollama providers removed from the cascade.
+- **Stage 2 fallback chain.** Stage 2 now has an explicit fallback chain (OpenRouter / DeepSeek) in `config/settings.yaml`, consistent with Stage 1.
+- **Project renamed to TuneFinder.** Previously called MusicFinder.
+
+## What's new in v0.2.0
+
+- **Label synopsis in Label Watch.** Each label now gets a one-line header synopsis (founding city, year, key artists) written by Stage 1 LLM. Synopses are cached in `data/label_profiles.json` — the LLM is only called once per new label; repeat runs read from cache at zero cost.
+- **Genre exclusion filter for mix-prep.** Tracks that pick up contradictory genre tags during cross-source dedup (e.g. a UKG track also tagged `electronica`) are filtered out of mix-prep results. Exclusion pairs are config-driven in `config/settings.yaml` so they can be tuned without code changes.
+
 ## How it works
 
 1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
-2. **Fetch** — scrapes new releases from Juno, Beatport, Bandcamp, Traxsource, and Resident Advisor
+2. **Fetch** — scrapes new releases from Juno, Beatport, and Bandcamp (Traxsource and Resident Advisor are available but disabled by default)
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
 5. **Report** — two-stage LLM pipeline: Stage 1 runs a 4-provider cascade (MiniMax → Mistral Small → Groq → Gemini) to write a one-line reason per track; Stage 2 (MiniMax, fallback OpenRouter/DeepSeek) writes the full Discord-formatted report
@@ -21,7 +43,7 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 | Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | ✅ |
 | Bandcamp | `dig_deeper` JSON API | ✅ |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
-| Resident Advisor | `apolloState` JSON | ✅ |
+| Resident Advisor | `apolloState` JSON | disabled by default |
 | Boomkat | — | blocked (Cloudflare) |
 | Bleep | — | requires login |
 
@@ -148,11 +170,13 @@ OPENROUTER_API_KEY=       # Stage 2 fallback 1 — capped
 
 Edit `config/settings.yaml` to:
 - Adjust pipeline section counts (`top_picks_count`, `label_watch_count`, etc.)
+- Set `pipeline.release_date_window_days` to control how far back the date filter looks (must be `7`, `28`, `56`, or `180` — maps to Juno chart windows)
+- Tune `pipeline.genre_exclusions` to drop tracks that pick up contradictory genre tags during cross-source dedup
 - Enable/disable individual sources
 - Change Discord channel names
 - Swap LLM models
 
-Traxsource note: the site is currently disabled by default in [`config/settings.yaml`](/Users/christophechang/Documents/Development/TuneFinder/config/settings.yaml) because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
+Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
 
 ## LLM cascade
 
@@ -217,6 +241,7 @@ src/
     ranker.py        # Scoring and section assignment
     history.py       # Recommendation history store (weekly + mix-prep)
     pool.py          # Persistent candidate pool across runs
+    label_cache.py   # Persistent label synopsis cache
     report.py        # LLM report generation (weekly + mix-prep)
   output/
     discord.py       # Discord bot client
