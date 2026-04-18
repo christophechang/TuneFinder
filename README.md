@@ -3,9 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/christophechang/TuneFinder)](https://github.com/christophechang/TuneFinder/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Your crates, your taste.** Monitors new releases across five stores, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
-
-Weekly music discovery automation for DJs. Monitors release feeds across multiple stores and platforms, scores new tracks against your personal mix history, and posts a curated report to a Discord channel — fully automated.
+> **Your crates, your taste.** Monitors new releases across Juno, Beatport, and Bandcamp, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
 
 > **Companion tool** — TuneFinder pairs with the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to read your published mix tracklist history and build a personal taste profile. The profile drives all scoring — without it, artist and label signals won't fire.
 
@@ -55,7 +53,7 @@ Weekly music discovery automation for DJs. Monitors release feeds across multipl
 | `recurring_artist` | +2.0 | Artist has ≥3 mixes |
 | `label_match` | +2.5 | Label has released known artists |
 | `cross_source` | +1.0 | Track flagged by 2+ sources |
-| `chart_position` | +0–1.5 | Linear decay from #1 (Juno/Beatport/Traxsource) |
+| `chart_position` | +0–1.5 | Linear decay from #1 (Juno/Beatport; Traxsource when enabled) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
 | `genre_match` | +0.5 per tag | Soft match against DJ's genre set |
 | `fresh_release` | +0.5 | Released within 30 days |
@@ -132,6 +130,15 @@ GEMINI_API_KEY=           # Stage 1 fallback 3 — free
 OPENROUTER_API_KEY=       # Stage 2 fallback 1 — capped
 ```
 
+## First-time setup
+
+```bash
+./venv/bin/python -m tunefinder check-config
+./venv/bin/python -m tunefinder save-fixtures
+./venv/bin/python -m tunefinder build-profile
+./venv/bin/python -m tunefinder run
+```
+
 ## Commands
 
 ```bash
@@ -155,15 +162,6 @@ OPENROUTER_API_KEY=       # Stage 2 fallback 1 — capped
 
 # Generate a genre-focused track list for mix preparation
 ./venv/bin/python -m tunefinder mix-prep house
-```
-
-## First-time setup
-
-```bash
-./venv/bin/python -m tunefinder check-config
-./venv/bin/python -m tunefinder save-fixtures
-./venv/bin/python -m tunefinder build-profile
-./venv/bin/python -m tunefinder run
 ```
 
 ## Configuration
