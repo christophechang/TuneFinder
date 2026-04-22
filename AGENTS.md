@@ -51,6 +51,7 @@
 - `./venv/bin/python -m tunefinder run --dry-run`
 - `./venv/bin/python -m tunefinder mix-prep <genre>`
 - Avoid live runs that post to Discord unless the user explicitly asks for them.
+- For user-requested live runs, let the Python CLI own the Discord output end-to-end. Do not prepend, append, or send any extra agent-written commentary to the report channel.
 - If you cannot fully verify due to missing credentials, network limits, or side-effect risk, state that clearly.
 
 ## Dependencies
