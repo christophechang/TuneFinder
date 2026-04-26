@@ -94,7 +94,9 @@ def call_stage1(prompt: str, system: str, settings) -> str:
     max_tokens = stage1_cfg.get("max_tokens", 4096)
     timeout = stage1_cfg.get("timeout_seconds", 60)
 
-    # Primary first, then fallback chain
+    # Primary first, then fallback chain.
+    # Fallback entries only specify provider+model; they inherit temperature/max_tokens/timeout
+    # from the primary config above — intentional to keep fallback config minimal.
     chain = [
         {"provider": stage1_cfg.get("provider", "mistral"), "model": stage1_cfg.get("model", "")}
     ] + settings.llm_fallback_chain
@@ -153,6 +155,7 @@ def call_stage2(prompt: str, system: str, settings) -> str:
     temperature = stage2_cfg.get("temperature", 0.2)
     timeout = stage2_cfg.get("timeout_seconds", 90)
 
+    # Fallback entries inherit temperature/max_tokens/timeout from primary — intentional.
     chain = [
         {"provider": stage2_cfg.get("provider", "minimax"), "model": stage2_cfg.get("model", "MiniMax-M2.7")}
     ] + settings.llm_stage2_fallback_chain

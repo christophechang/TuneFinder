@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from src.llm import call_stage1, call_stage2
 from src.logger import get_logger
 from src.models import Candidate
+from src.pipeline.label_cache import load_label_profiles, save_label_profiles
 
 
 def _clean_llm_json(raw: str) -> str:
@@ -32,7 +33,6 @@ def _clean_llm_json(raw: str) -> str:
     # Replacing with spaces is safe — JSON parsers treat spaces as whitespace between tokens.
     raw = re.sub(r"[\x00-\x1f\x7f]", " ", raw)
     return raw
-from src.pipeline.label_cache import load_label_profiles, save_label_profiles
 
 logger = get_logger(__name__)
 
@@ -449,7 +449,7 @@ def _fallback_report(
     synopses: dict[str, str] | None = None,
 ) -> str:
     """Plain-text fallback report if Stage 2 fails."""
-    lines = [f"**Music Finder — {today} ({report_id})**\n"]
+    lines = [f"**TuneFinder — {today} ({report_id})**\n"]
     section_labels = {
         "top_picks": "## 🔺 Top Picks",
         "artist_watch": "## 👁️ Artist Watch",
@@ -480,10 +480,10 @@ def _fallback_report(
                 if synopsis:
                     lines.append(f"*{synopsis}*")
             for c in label_candidates:
-                label_str = f" [{c.label}]" if c.label else ""
+                # label already shown as sub-header above — omit from track line
                 source_str = f" [{c.source.title()}]" if c.source else ""
                 link_str = f" → [Listen](<{c.link}>)" if c.link else ""
-                lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
+                lines.append(f"**{c.artist} — {c.title}**{source_str}{link_str}")
         lines.append("")
 
     recommended_count = sum(len(v) for v in sections.values())

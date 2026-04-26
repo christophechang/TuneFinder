@@ -107,12 +107,17 @@ def load_mix_prep_history(data_dir: str) -> list[RecommendationRecord]:
     return records
 
 
+def save_mix_prep_history(records: list[RecommendationRecord], data_dir: str) -> None:
+    os.makedirs(data_dir, exist_ok=True)
+    path = os.path.join(data_dir, _MIX_PREP_HISTORY_FILE)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump([_record_to_dict(r) for r in records], f, indent=2, ensure_ascii=False)
+    logger.info(f"[history] Saved {len(records)} mix-prep history records to {path}")
+
+
 def append_mix_prep_records(new_records: list[RecommendationRecord], data_dir: str) -> None:
     """Append newly recommended tracks to the mix-prep history file (separate from weekly history)."""
     existing = load_mix_prep_history(data_dir)
     combined = existing + new_records
-    os.makedirs(data_dir, exist_ok=True)
-    path = os.path.join(data_dir, _MIX_PREP_HISTORY_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([_record_to_dict(r) for r in combined], f, indent=2, ensure_ascii=False)
+    save_mix_prep_history(combined, data_dir)
     logger.info(f"[history] Appended {len(new_records)} mix-prep records (total: {len(combined)})")

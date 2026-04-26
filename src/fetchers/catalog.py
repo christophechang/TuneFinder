@@ -9,7 +9,7 @@ from src.models import Mix, Track, TrackRef
 
 logger = get_logger(__name__)
 
-_BASE_URL = "https://api.changsta.com"
+_DEFAULT_BASE_URL = "https://api.changsta.com"
 _MIXES_PAGE_SIZE = 50
 _TRACKS_PAGE_SIZE = 50
 _REQUEST_TIMEOUT = 30
@@ -26,9 +26,9 @@ def _get(url: str, params: dict) -> dict:
     return resp.json()
 
 
-def _paginate(path: str, page_size: int) -> list[dict]:
+def _paginate(path: str, page_size: int, base_url: str = _DEFAULT_BASE_URL) -> list[dict]:
     """Fetch all pages from a paginated endpoint and return a flat item list."""
-    url = f"{_BASE_URL}{path}"
+    url = f"{base_url}{path}"
     page = 1
     all_items: list[dict] = []
 
@@ -103,7 +103,8 @@ def fetch_all_mixes(settings) -> list[Mix]:
     if settings.testing_use_fixtures:
         return _load_fixture_mixes(settings.testing_fixtures_dir)
 
-    raw_items = _paginate("/api/catalog/mixes", _MIXES_PAGE_SIZE)
+    base_url = settings.catalog_user_url or _DEFAULT_BASE_URL
+    raw_items = _paginate("/api/catalog/mixes", _MIXES_PAGE_SIZE, base_url)
     mixes = [_parse_mix(r) for r in raw_items]
     logger.info(f"[catalog] Parsed {len(mixes)} mixes")
     return mixes
@@ -118,7 +119,8 @@ def fetch_all_tracks(settings) -> list[Track]:
     if settings.testing_use_fixtures:
         return _load_fixture_tracks(settings.testing_fixtures_dir)
 
-    raw_items = _paginate("/api/catalog/tracks", _TRACKS_PAGE_SIZE)
+    base_url = settings.catalog_user_url or _DEFAULT_BASE_URL
+    raw_items = _paginate("/api/catalog/tracks", _TRACKS_PAGE_SIZE, base_url)
     tracks = [_parse_track(r) for r in raw_items]
     logger.info(f"[catalog] Parsed {len(tracks)} unique tracks")
     return tracks
@@ -149,13 +151,14 @@ def save_fixtures(settings) -> None:
     """
     os.makedirs(settings.testing_fixtures_dir, exist_ok=True)
 
-    mixes_raw = _paginate("/api/catalog/mixes", _MIXES_PAGE_SIZE)
+    base_url = settings.catalog_user_url or _DEFAULT_BASE_URL
+    mixes_raw = _paginate("/api/catalog/mixes", _MIXES_PAGE_SIZE, base_url)
     mixes_path = os.path.join(settings.testing_fixtures_dir, "mixes.json")
     with open(mixes_path, "w", encoding="utf-8") as f:
         json.dump(mixes_raw, f, indent=2)
     logger.info(f"[catalog] Saved {len(mixes_raw)} mixes to {mixes_path}")
 
-    tracks_raw = _paginate("/api/catalog/tracks", _TRACKS_PAGE_SIZE)
+    tracks_raw = _paginate("/api/catalog/tracks", _TRACKS_PAGE_SIZE, base_url)
     tracks_path = os.path.join(settings.testing_fixtures_dir, "tracks.json")
     with open(tracks_path, "w", encoding="utf-8") as f:
         json.dump(tracks_raw, f, indent=2)

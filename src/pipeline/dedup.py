@@ -170,8 +170,8 @@ def filter_release_date(candidates: list[Candidate], window_days: int) -> list[C
     Items with no release_date (e.g. Bandcamp) are always kept — we can't
     confirm they're stale, so we give them the benefit of the doubt.
     """
-    from datetime import date, timedelta
-    cutoff = (date.today() - timedelta(days=window_days)).isoformat()
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=window_days)).isoformat()
     result = []
     removed = 0
     for c in candidates:
