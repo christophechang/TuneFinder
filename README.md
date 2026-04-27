@@ -7,6 +7,13 @@
 
 > **Companion tool** — TuneFinder pairs with the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to read your published mix tracklist history and build a personal taste profile. The profile drives all scoring — without it, artist and label signals won't fire.
 
+## What's new in v0.5.0
+
+- **Pool candidates now respect the release date window in mix-prep.** Pool-injected candidates were bypassing `filter_release_date`, allowing stale tracks to appear in mix-prep results. Fixed.
+- **UTC-aware date comparison in release date filter.** `date.today()` replaced with `datetime.now(UTC).date()` — avoids edge-case drift around midnight in non-UTC timezones.
+- **Catalog base URL is now configurable.** `catalog_user_url` in `.env` is wired as the base URL for the catalog fetcher; `_DEFAULT_BASE_URL` remains as fallback.
+- **Misc fixes.** Stale "Music Finder" brand name removed from fallback report header; duplicate label bracket removed from fallback label-watch lines; explicit `downtempo` tag mapping added to Bandcamp fetcher.
+
 ## What's new in v0.4.0
 
 - **Concurrent mix-prep fetches.** Genre sources now fetch in parallel — mix-prep runs significantly faster, especially for wide genres like `house` that span 10+ feed endpoints across stores.
