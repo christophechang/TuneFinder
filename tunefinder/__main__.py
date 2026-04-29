@@ -48,7 +48,7 @@ def cmd_check_config(args):
     stage2_cfg = settings.llm_stage2
     stage2_fallback_chain = settings.llm_stage2_fallback_chain
     stage2_chain = [
-        {"provider": stage2_cfg.get("provider", "minimax"), "model": stage2_cfg.get("model", ""), "position": "primary"}
+        {"provider": stage2_cfg.get("provider", "openrouter"), "model": stage2_cfg.get("model", ""), "position": "primary"}
     ] + [
         {"provider": e.get("provider", ""), "model": e.get("model", ""), "position": f"fallback {i + 1}"}
         for i, e in enumerate(stage2_fallback_chain)

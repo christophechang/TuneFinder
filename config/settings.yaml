@@ -10,28 +10,24 @@ discord:
 
 llm:
   stage1:
-    provider: "minimax"
-    model: "MiniMax-M2.7"
+    provider: "mistral"
+    model: "mistral-small-latest"
     max_tokens: 4096
     temperature: 0.1
     timeout_seconds: 120
 
   stage2:
-    provider: "minimax"
-    model: "MiniMax-M2.7"
+    provider: "openrouter"
+    model: "deepseek/deepseek-chat"
     max_tokens: 4096
     temperature: 0.2
     timeout_seconds: 120
 
   # Fallback chain for Stage 2 — tried in order if primary fails
-  stage2_fallback_chain:
-    - provider: "openrouter"
-      model: "deepseek/deepseek-chat"
+  stage2_fallback_chain: []
 
   # Fallback chain for Stage 1 — tried in order if primary fails
   fallback_chain:
-    - provider: "mistral"
-      model: "mistral-small-latest"
     - provider: "groq"
       model: "llama-3.3-70b-versatile"
     - provider: "gemini"

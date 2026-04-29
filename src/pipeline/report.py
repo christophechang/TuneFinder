@@ -3,10 +3,10 @@ Report generator — two-stage LLM pipeline.
 
 Stage 1 (cheap, fast):
   Enriches the reason field for each shortlisted candidate using the Stage 1
-  cascade chain (Mistral → fallback). One batch call covering all sections.
+  cascade chain. One batch call covering all sections.
   Falls back to signal-derived reasons if Stage 1 fails.
 
-Stage 2 (MiniMax, fallback OpenRouter/DeepSeek):
+Stage 2:
   Writes the full Discord-formatted weekly report from the enriched candidates.
   One call per run.
 """

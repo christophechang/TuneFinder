@@ -22,8 +22,8 @@
 
 ## What's new in v0.3.0
 
-- **MiniMax M2.7 as primary across both stages.** Both Stage 1 (reason enrichment) and Stage 2 (report writing) now use MiniMax M2.7 as primary. Anthropic and Ollama providers removed from the cascade.
-- **Stage 2 fallback chain.** Stage 2 now has an explicit fallback chain (OpenRouter / DeepSeek) in `config/settings.yaml`, consistent with Stage 1.
+- **Mistral/OpenRouter LLM setup.** Stage 1 (reason enrichment) uses Mistral Small as primary; Stage 2 (report writing) uses OpenRouter / DeepSeek as primary. Anthropic and Ollama providers removed from the cascade.
+- **LLM fallback chains are configurable.** Both stages support explicit fallback chains in `config/settings.yaml`, though the default config has no active fallbacks.
 - **Project renamed to TuneFinder.** Previously called MusicFinder.
 
 ## What's new in v0.2.0
@@ -37,7 +37,7 @@
 2. **Fetch** — scrapes new releases from Juno, Beatport, and Bandcamp (Traxsource and Resident Advisor are available but disabled by default)
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
-5. **Report** — two-stage LLM pipeline: Stage 1 runs a 4-provider cascade (MiniMax → Mistral Small → Groq → Gemini) to write a one-line reason per track; Stage 2 (MiniMax, fallback OpenRouter/DeepSeek) writes the full Discord-formatted report
+5. **Report** — two-stage LLM pipeline: Stage 1 uses Mistral Small to write a one-line reason per track; Stage 2 uses OpenRouter / DeepSeek to write the full Discord-formatted report
 6. **Post** — sends the report to your Discord `#music-research` channel via Bot token
 
 ## Sources
@@ -126,15 +126,14 @@ cp .env.example .env
 
 ```
 # Required
-MINIMAX_API_KEY=          # Stage 1 + Stage 2 primary
+MISTRAL_API_KEY=          # Stage 1 primary
+OPENROUTER_API_KEY=       # Stage 2 primary
 DISCORD_BOT_TOKEN=        # Discord bot token
 DISCORD_GUILD_ID=         # Your Discord server ID
 
-# Optional fallbacks (used in order if primary fails)
-MISTRAL_API_KEY=          # Stage 1 fallback 1
-GROQ_API_KEY=             # Stage 1 fallback 2 — free
-GEMINI_API_KEY=           # Stage 1 fallback 3 — free
-OPENROUTER_API_KEY=       # Stage 2 fallback 1 — capped
+# Optional fallbacks
+GROQ_API_KEY=             # Stage 1 fallback 1
+GEMINI_API_KEY=           # Stage 1 fallback 2
 ```
 
 ## First-time setup
@@ -194,17 +193,15 @@ Both stages try providers in order, skipping any with no API key set.
 
 | # | Provider | Model | Cost |
 |---|---|---|---|
-| 1 | MiniMax | `MiniMax-M2.7` | paid (primary) |
-| 2 | Mistral | `mistral-small-latest` | paid |
-| 3 | Groq | `llama-3.3-70b-versatile` | free |
-| 4 | Gemini | `gemini-2.5-flash` | free |
+| 1 | Mistral | `mistral-small-latest` | paid (primary) |
+| 2 | Groq | `llama-3.3-70b-versatile` | free |
+| 3 | Gemini | `gemini-2.5-flash` | free |
 
 **Stage 2** (report writing):
 
 | # | Provider | Model | Cost |
 |---|---|---|---|
-| 1 | MiniMax | `MiniMax-M2.7` | paid (primary) |
-| 2 | OpenRouter | `deepseek/deepseek-chat` | capped |
+| 1 | OpenRouter | `deepseek/deepseek-chat` | capped (primary) |
 
 ## Scheduling (macOS launchd)
 

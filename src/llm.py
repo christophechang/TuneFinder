@@ -2,15 +2,13 @@
 LLM cascade pattern — two-stage.
 
 Stage 1 (extraction/classification):
-  Primary: MiniMax M2.7
-  Fallback chain: Mistral Small → Groq Llama 3.3 70B → Gemini 2.5 Flash
+  Primary: Mistral Small
   All providers use the OpenAI-compatible /v1/chat/completions endpoint,
   except Gemini which uses /chat/completions under its v1beta OpenAI-compat base URL.
   Sleep 1s between failures. Raise RuntimeError if all exhausted.
 
 Stage 2 (report generation):
-  Primary: MiniMax M2.7
-  Fallback chain: OpenRouter / DeepSeek
+  Primary: OpenRouter / DeepSeek
 """
 import re
 import time
@@ -25,7 +23,7 @@ _THINK_RE = re.compile(r'<think(?:ing)?>.*?</think(?:ing)?>', re.DOTALL | re.IGN
 
 
 def _strip_thinking(text: str) -> str:
-    """Remove inline thinking blocks emitted by reasoning models (e.g. MiniMax M2.7)."""
+    """Remove inline thinking blocks emitted by reasoning models."""
     return _THINK_RE.sub('', text).strip()
 
 
@@ -33,7 +31,6 @@ _PROVIDER_BASE_URLS = {
     "mistral": "https://api.mistral.ai",
     "groq": "https://api.groq.com/openai",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
-    "minimax": "https://api.minimaxi.chat",
     "openrouter": "https://openrouter.ai/api",
 }
 
@@ -46,7 +43,6 @@ _API_KEY_ATTRS = {
     "mistral": "mistral_api_key",
     "groq": "groq_api_key",
     "gemini": "gemini_api_key",
-    "minimax": "minimax_api_key",
     "openrouter": "openrouter_api_key",
 }
 
@@ -157,7 +153,7 @@ def call_stage2(prompt: str, system: str, settings) -> str:
 
     # Fallback entries inherit temperature/max_tokens/timeout from primary — intentional.
     chain = [
-        {"provider": stage2_cfg.get("provider", "minimax"), "model": stage2_cfg.get("model", "MiniMax-M2.7")}
+        {"provider": stage2_cfg.get("provider", "openrouter"), "model": stage2_cfg.get("model", "deepseek/deepseek-chat")}
     ] + settings.llm_stage2_fallback_chain
 
     last_error = None

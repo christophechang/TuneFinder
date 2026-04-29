@@ -13,21 +13,16 @@ _REQUIRED_ENV_VARS = [
     "DISCORD_BOT_TOKEN",
     "DISCORD_GUILD_ID",
     "MISTRAL_API_KEY",
-]
-
-_OPTIONAL_ENV_VARS = [
-    "GROQ_API_KEY",
-    "GEMINI_API_KEY",
-    "MINIMAX_API_KEY",
     "OPENROUTER_API_KEY",
 ]
+
+_OPTIONAL_ENV_VARS = []
 
 # Maps provider name → environment variable name (for cascade config check)
 PROVIDER_ENV_VAR = {
     "mistral": "MISTRAL_API_KEY",
     "groq": "GROQ_API_KEY",
     "gemini": "GEMINI_API_KEY",
-    "minimax": "MINIMAX_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
 }
 
@@ -87,10 +82,6 @@ class Settings:
     @property
     def gemini_api_key(self) -> str:
         return os.getenv("GEMINI_API_KEY", "")
-
-    @property
-    def minimax_api_key(self) -> str:
-        return os.getenv("MINIMAX_API_KEY", "")
 
     @property
     def openrouter_api_key(self) -> str:
@@ -188,7 +179,7 @@ class Settings:
             if not os.getenv(key):
                 logger.warning(
                     f"[config] Optional env var not set: {key} "
-                    "(Stage 1 fallback chain will skip this provider)"
+                    "(configured provider will be skipped)"
                 )
 
         logger.info("[config] Validated — all required environment variables present.")
