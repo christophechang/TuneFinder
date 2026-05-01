@@ -7,6 +7,8 @@
 
 > **Companion tool** — TuneFinder pairs with the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to read your published mix tracklist history and build a personal taste profile. The profile drives all scoring — without it, artist and label signals won't fire.
 
+This project explores AI-assisted development workflows. My focus here was system design and delivery rather than idiomatic Python, which is not my primary stack.
+
 ## What's new in v0.5.0
 
 - **Pool candidates now respect the release date window in mix-prep.** Pool-injected candidates were bypassing `filter_release_date`, allowing stale tracks to appear in mix-prep results. Fixed.
