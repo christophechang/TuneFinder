@@ -46,6 +46,10 @@ _API_KEY_ATTRS = {
     "openrouter": "openrouter_api_key",
 }
 
+_PROVIDER_EXTRA_HEADERS = {
+    "openrouter": {"HTTP-Referer": "https://openclaw.local"},
+}
+
 
 def _call_openai_compat(
     base_url: str,
@@ -57,12 +61,15 @@ def _call_openai_compat(
     max_tokens: int,
     timeout: int,
     path: str = "/v1/chat/completions",
+    extra_headers: dict = None,
 ) -> str:
     url = f"{base_url.rstrip('/')}{path}"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    if extra_headers:
+        headers.update(extra_headers)
     payload = {
         "model": model,
         "temperature": temperature,
@@ -122,6 +129,7 @@ def call_stage1(prompt: str, system: str, settings) -> str:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     timeout=timeout,
+                    extra_headers=_PROVIDER_EXTRA_HEADERS.get(provider),
                 )
 
             else:

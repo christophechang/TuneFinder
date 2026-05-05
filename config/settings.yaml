@@ -32,6 +32,10 @@ llm:
       model: "llama-3.3-70b-versatile"
     - provider: "gemini"
       model: "gemini-2.5-flash"
+    - provider: "openrouter"
+      model: "openrouter/free"
+    - provider: "openrouter"
+      model: "mistralai/mistral-small"
 
 sources:
 
