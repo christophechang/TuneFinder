@@ -20,7 +20,7 @@ llm:
     provider: "openrouter"
     model: "deepseek/deepseek-chat"
     max_tokens: 4096
-    temperature: 0.2
+    temperature: 0.3
     timeout_seconds: 120
 
   # Fallback chain for Stage 2 — tried in order if primary fails
