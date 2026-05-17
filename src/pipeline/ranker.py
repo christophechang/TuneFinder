@@ -20,8 +20,26 @@ from src.pipeline.profile import _split_artists
 
 logger = get_logger(__name__)
 
-# Internal genre set — soft match only, not a hard filter
-_OUR_GENRES = {"dnb", "breaks", "uk-bass", "ukg", "house", "techno", "electronica", "electronic"}
+_GENRE_AUGMENT_MIN_ARTISTS = 3
+
+# Baseline genres — soft match only, not a hard filter. Augmented at runtime
+# by `_build_genre_set` with any catalog genre crossing the augment threshold.
+_BASELINE_GENRES = {"dnb", "breaks", "uk-bass", "ukg", "house", "techno", "electronica", "electronic"}
+
+
+def _build_genre_set(profiles_lower: dict[str, ArtistProfile]) -> set[str]:
+    """Return the curated baseline genres unioned with any catalog genre that
+    appears across `_GENRE_AUGMENT_MIN_ARTISTS` or more distinct profiles.
+    """
+    counts: dict[str, int] = {}
+    for profile in profiles_lower.values():
+        for g in profile.genres_seen:
+            counts[g] = counts.get(g, 0) + 1
+    augmented = {g for g, n in counts.items() if n >= _GENRE_AUGMENT_MIN_ARTISTS}
+    result = _BASELINE_GENRES | augmented
+    logger.info(f"[ranker] Genre set: {len(_BASELINE_GENRES)} baseline + {len(augmented - _BASELINE_GENRES)} catalog-augmented")
+    return result
+
 
 # Scoring weights
 _W_KNOWN_ARTIST = 3.0      # multiplied by play_count, per matched artist in track
@@ -63,6 +81,7 @@ def _score(
     c: Candidate,
     profiles_lower: dict[str, ArtistProfile],
     relevant_labels: set[str],
+    genres_set: set[str],
 ) -> None:
     """Mutate candidate in place: assign signals and total score."""
     score = 0.0
@@ -113,7 +132,7 @@ def _score(
         ))
 
     # --- Genre match (soft) ---
-    matching = [g for g in c.genre_tags if g in _OUR_GENRES]
+    matching = [g for g in c.genre_tags if g in genres_set]
     if matching:
         score += _W_GENRE * len(matching)
         c.signals.append(RecommendationSignal(
@@ -159,6 +178,7 @@ def _score(
 def _assign_sections(
     ranked: list[Candidate],
     settings,
+    genres_set: set[str],
 ) -> dict[str, list[Candidate]]:
     top_n = settings.pipeline_top_picks_count
     label_n = settings.pipeline_label_watch_count
@@ -194,7 +214,7 @@ def _assign_sections(
                 continue
             # Genre cap: use first specific (non-broad) genre tag; exempt if none found
             cap_genre = next(
-                (g for g in c.genre_tags if g in _OUR_GENRES and g not in _UNCAPPED_GENRES),
+                (g for g in c.genre_tags if g in genres_set and g not in _UNCAPPED_GENRES),
                 None,
             )
             if cap_genre and genre_counts.get(cap_genre, 0) >= MAX_PER_GENRE:
@@ -245,15 +265,16 @@ def rank_candidates(
     their labels. Defaults to candidates if not provided.
     """
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
+    genres_set = _build_genre_set(profiles_lower)
     relevant_labels = _build_relevant_labels(label_seed if label_seed is not None else candidates, profiles_lower)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels)
+        _score(c, profiles_lower, relevant_labels, genres_set)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
 
-    return _assign_sections(ranked, settings)
+    return _assign_sections(ranked, settings, genres_set)
 
 
 def _assign_sections_mix_prep(
@@ -307,10 +328,11 @@ def rank_candidates_mix_prep(
     with no per-genre cap — the genre has already been filtered upstream.
     """
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
+    genres_set = _build_genre_set(profiles_lower)
     relevant_labels = _build_relevant_labels(label_seed if label_seed is not None else candidates, profiles_lower)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels)
+        _score(c, profiles_lower, relevant_labels, genres_set)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
