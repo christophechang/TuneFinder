@@ -147,3 +147,39 @@ def test_generate_report_system_prompt_includes_anti_patterns(monkeypatch, sampl
     assert "no filler intro" in sys_lower
     assert "no closing summary" in sys_lower
     assert "This week:" in captured["prompt"]
+
+
+def test_generate_report_system_prompt_instructs_reason_rendering(monkeypatch):
+    captured = {}
+
+    def fake_call_stage2(prompt, system, settings):
+        captured["system"] = system
+        return "out"
+
+    monkeypatch.setattr(report_mod, "call_stage2", fake_call_stage2)
+    monkeypatch.setattr(report_mod, "call_stage1",
+                        lambda p, s, st, temperature=None: "[]")
+
+    sections = {"top_picks": [_make_candidate()]}
+    report_mod.generate_report(sections, "TEST", {}, _Settings(), profiles={})
+    sys_text = captured["system"]
+    assert "> {reason}" in sys_text
+    assert "render it verbatim on the blockquote line" in sys_text.lower()
+
+
+def test_generate_mix_prep_report_system_prompt_instructs_reason_rendering(monkeypatch):
+    captured = {}
+
+    def fake_call_stage2(prompt, system, settings):
+        captured["system"] = system
+        return "out"
+
+    monkeypatch.setattr(report_mod, "call_stage2", fake_call_stage2)
+    monkeypatch.setattr(report_mod, "call_stage1",
+                        lambda p, s, st, temperature=None: "[]")
+
+    sections = {"top_picks": [_make_candidate()]}
+    report_mod.generate_mix_prep_report(sections, "TEST", {}, "dnb", _Settings(), profiles={})
+    sys_text = captured["system"]
+    assert "> {reason}" in sys_text
+    assert "render it verbatim on the blockquote line" in sys_text.lower()

@@ -419,7 +419,10 @@ def generate_report(
         f"{_DJ_CONTEXT} "
         "Write in a concise, knowledgeable tone — like a respected record shop selector. "
         "Format for Discord markdown. Use ** for bold, ## for section headers with emojis. "
-        "Exact track format: **Artist — Title** [Label] [Source] → [Listen](<url>) "
+        "Exact track format (two lines per track, no blank line between them):\n"
+        "**Artist — Title** [Label] [Source] → [Listen](<url>)\n"
+        "> {reason}\n"
+        "The reason comes after the `|` in each input line. Render it verbatim on the blockquote line — do not rewrite, do not omit. "
         "Each track in the input has a [SOURCE:name] tag — render it as [name] in the track line, "
         "immediately after the label bracket and before the →. "
         "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
@@ -428,7 +431,7 @@ def generate_report(
         "Omit a section header entirely if that section has no tracks. "
         "In the Label Watch section, the input groups tracks by label using [LABEL: name] and [SYNOPSIS: text] tags. "
         "For each label group: render the label name as a bold sub-header (e.g. **Ilian Tape**), "
-        "then the synopsis as an italicised line underneath, then the tracks for that label. "
+        "then the synopsis as an italicised line underneath, then the tracks for that label (each with its blockquote reason). "
         "Quality over quantity. Do not add tracks that aren't in the input. "
         "End after the last track section — do not add a summary or stats section. "
         "Avoid marketing words: sonic, undeniable, journey, vibes, must-hear, perfect for, your next favorite. "
@@ -488,7 +491,10 @@ def generate_mix_prep_report(
         f"{_DJ_CONTEXT} "
         "Write in a concise, knowledgeable tone — like a respected record shop selector. "
         "Format for Discord markdown. Use ** for bold, ## for section headers with emojis. "
-        "Exact track format: **Artist — Title** [Label] → [Listen](<url>) "
+        "Exact track format (two lines per track, no blank line between them):\n"
+        "**Artist — Title** [Label] → [Listen](<url>)\n"
+        "> {reason}\n"
+        "The reason comes after the `|` in each input line. Render it verbatim on the blockquote line — do not rewrite, do not omit. "
         "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
         "Never output bare URLs. Never repeat the same URL twice for one track. "
         f"Section headers: ## 🔺 Top Picks ({genre}), ## 🎧 Deep Cuts. "
@@ -554,6 +560,10 @@ def _fallback_mix_prep_report(
             source_str = f" [{c.source.title()}]" if c.source else ""
             link_str = f" → [Listen](<{c.link}>)" if c.link else ""
             lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
+            reason_key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
+            reason = reasons.get(reason_key) or c.primary_reason
+            if reason:
+                lines.append(f"> {reason}")
         lines.append("")
     lines.append(_build_footer(report_id, stats))
     return _sanitize_report("\n".join(lines))
@@ -584,6 +594,10 @@ def _fallback_report(
             source_str = f" [{c.source.title()}]" if c.source else ""
             link_str = f" → [Listen](<{c.link}>)" if c.link else ""
             lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
+            reason_key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
+            reason = reasons.get(reason_key) or c.primary_reason
+            if reason:
+                lines.append(f"> {reason}")
         lines.append("")
 
     label_watch = sections.get("label_watch", [])
@@ -599,10 +613,13 @@ def _fallback_report(
                 if synopsis:
                     lines.append(f"*{synopsis}*")
             for c in label_candidates:
-                # label already shown as sub-header above — omit from track line
                 source_str = f" [{c.source.title()}]" if c.source else ""
                 link_str = f" → [Listen](<{c.link}>)" if c.link else ""
                 lines.append(f"**{c.artist} — {c.title}**{source_str}{link_str}")
+                reason_key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
+                reason = reasons.get(reason_key) or c.primary_reason
+                if reason:
+                    lines.append(f"> {reason}")
         lines.append("")
 
     recommended_count = sum(len(v) for v in sections.values())
