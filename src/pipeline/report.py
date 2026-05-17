@@ -279,6 +279,51 @@ def _format_label_watch_for_prompt(
 # Stage 2 — full report
 # ---------------------------------------------------------------------------
 
+def _format_weekly_stats(
+    sections: dict[str, list[Candidate]],
+    profiles: dict[str, ArtistProfile] | None,
+) -> str:
+    """Compact stats line injected into the Stage 2 prompt as soft context."""
+    all_c = [c for sec in sections.values() for c in sec]
+    if not all_c:
+        return ""
+    total = len(all_c)
+    labels = {c.label for c in all_c if c.label}
+    profiles_lower = {k.lower(): v for k, v in (profiles or {}).items()}
+    known_artists = set()
+    for c in all_c:
+        for part in _split_artists(c.artist):
+            if part.lower().strip() in profiles_lower:
+                known_artists.add(part.lower().strip())
+    genre_counts: dict[str, int] = {}
+    for c in all_c:
+        for g in c.genre_tags:
+            genre_counts[g] = genre_counts.get(g, 0) + 1
+    top_genres = [g for g, _ in sorted(genre_counts.items(), key=lambda kv: -kv[1])[:3]]
+    return (
+        f"This week: {total} tracks across {len(labels)} labels, "
+        f"{len(known_artists)} known artists. "
+        f"Top genres: {', '.join(top_genres) if top_genres else 'none tagged'}."
+    )
+
+
+def _format_mix_prep_stats(sections: dict[str, list[Candidate]]) -> str:
+    """Compact stats line for mix-prep — totals and top genres only.
+    Labels and known-artist counts are intentionally omitted (per spec): in a
+    mix-prep run the genre is fixed and the focus is the track list itself.
+    """
+    all_c = [c for sec in sections.values() for c in sec]
+    if not all_c:
+        return ""
+    total = len(all_c)
+    genre_counts: dict[str, int] = {}
+    for c in all_c:
+        for g in c.genre_tags:
+            genre_counts[g] = genre_counts.get(g, 0) + 1
+    top_genres = [g for g, _ in sorted(genre_counts.items(), key=lambda kv: -kv[1])[:3]]
+    return f"This set: {total} tracks. Top genres: {', '.join(top_genres) if top_genres else 'none tagged'}."
+
+
 def _format_fetcher_health(health: dict) -> str:
     """Format per-source fetch counts and errors for the report."""
     if not health:
@@ -385,12 +430,16 @@ def generate_report(
         "For each label group: render the label name as a bold sub-header (e.g. **Ilian Tape**), "
         "then the synopsis as an italicised line underneath, then the tracks for that label. "
         "Quality over quantity. Do not add tracks that aren't in the input. "
-        "End after the last track section — do not add a summary or stats section."
+        "End after the last track section — do not add a summary or stats section. "
+        "Avoid marketing words: sonic, undeniable, journey, vibes, must-hear, perfect for, your next favorite. "
+        "No filler intro before sections. No closing summary."
     )
 
+    stats_line = _format_weekly_stats(sections, profiles)
     prompt = (
         f"Write the weekly music discovery report for {today} (Report ID: {report_id}).\n\n"
-        f"{sections_text}\n\n"
+        + (f"{stats_line}\n\n" if stats_line else "")
+        + f"{sections_text}\n\n"
         "Format the full Discord report with ## section headers (with emojis), bold artist names, "
         "and track links as [Listen](<url>)."
     )
@@ -444,12 +493,16 @@ def generate_mix_prep_report(
         "Never output bare URLs. Never repeat the same URL twice for one track. "
         f"Section headers: ## 🔺 Top Picks ({genre}), ## 🎧 Deep Cuts. "
         "Quality over quantity. Do not add tracks that aren't in the input. "
-        "End after the last track section — do not add a summary or stats section."
+        "End after the last track section — do not add a summary or stats section. "
+        "Avoid marketing words: sonic, undeniable, journey, vibes, must-hear, perfect for, your next favorite. "
+        "No filler intro before sections. No closing summary."
     )
 
+    stats_line = _format_mix_prep_stats(sections)
     prompt = (
         f"Write the {genre} mix preparation report for {today} (Report ID: {report_id}).\n\n"
-        f"{sections_text}\n\n"
+        + (f"{stats_line}\n\n" if stats_line else "")
+        + f"{sections_text}\n\n"
         "Format the full Discord report with ## section headers (with emojis), bold artist names, "
         "and track links as [Listen](<url>)."
     )
