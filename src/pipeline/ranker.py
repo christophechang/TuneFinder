@@ -44,7 +44,9 @@ def _build_genre_set(profiles_lower: dict[str, ArtistProfile]) -> set[str]:
 # Scoring weights
 _W_KNOWN_ARTIST = 3.0      # multiplied by play_count, per matched artist in track
 _W_RECURRING = 2.0         # extra if any matched artist has play_count >= threshold
-_W_LABEL_MATCH = 2.5       # label connected to a known artist via this candidate set
+_W_LABEL_BASE = 1.5        # base bonus for any label match
+_W_LABEL_PER_ARTIST = 0.5  # per additional known artist on the label, up to cap
+_LABEL_ARTIST_CAP = 3      # max known artists on a label that contribute to the bonus
 _W_CROSS_SOURCE = 1.0      # seen on 2+ sources (more credibility)
 _W_GENRE = 0.5             # per matching genre tag
 _W_FRESH = 0.5             # released within 30 days
@@ -60,27 +62,34 @@ _CHART_SCALE = 100         # chart positions are 1–100
 def _build_relevant_labels(
     candidates: list[Candidate],
     profiles_lower: dict[str, ArtistProfile],
-) -> set[str]:
-    """
-    Derive label relevance from the candidate set: a label is relevant if
-    any release in the candidate set has a known artist on that label.
+) -> tuple[set[str], dict[str, int]]:
+    """Return (relevant_labels, label_known_artist_counts).
+
+    A label is relevant if any release on it has a known artist (matched in
+    profiles_lower). The counts dict tracks how many DISTINCT known artists in
+    the candidate set are on each label — used by the label scoring formula.
     """
     relevant: set[str] = set()
+    counts: dict[str, set[str]] = {}
     for c in candidates:
         if not c.label:
             continue
+        label_key = c.label.lower().strip()
         for part in _split_artists(c.artist):
-            if part.lower().strip() in profiles_lower:
-                relevant.add(c.label.lower().strip())
-                break
+            profile = profiles_lower.get(part.lower().strip())
+            if profile:
+                relevant.add(label_key)
+                counts.setdefault(label_key, set()).add(profile.name.lower())
+    counts_int = {k: len(v) for k, v in counts.items()}
     logger.info(f"[ranker] {len(relevant)} relevant labels derived from candidate set")
-    return relevant
+    return relevant, counts_int
 
 
 def _score(
     c: Candidate,
     profiles_lower: dict[str, ArtistProfile],
     relevant_labels: set[str],
+    label_artist_counts: dict[str, int],
     genres_set: set[str],
 ) -> None:
     """Mutate candidate in place: assign signals and total score."""
@@ -116,7 +125,10 @@ def _score(
 
     # --- Label signal ---
     if c.label and c.label.lower().strip() in relevant_labels:
-        score += _W_LABEL_MATCH
+        label_key = c.label.lower().strip()
+        known_on_label = min(label_artist_counts.get(label_key, 1), _LABEL_ARTIST_CAP)
+        label_bonus = _W_LABEL_BASE + _W_LABEL_PER_ARTIST * known_on_label
+        score += label_bonus
         c.signals.append(RecommendationSignal(
             code="label_match",
             explanation=f"{c.label} — a label you've played artists from.",
@@ -266,10 +278,12 @@ def rank_candidates(
     """
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
-    relevant_labels = _build_relevant_labels(label_seed if label_seed is not None else candidates, profiles_lower)
+    relevant_labels, label_artist_counts = _build_relevant_labels(
+        label_seed if label_seed is not None else candidates, profiles_lower
+    )
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, genres_set)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -329,10 +343,12 @@ def rank_candidates_mix_prep(
     """
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
-    relevant_labels = _build_relevant_labels(label_seed if label_seed is not None else candidates, profiles_lower)
+    relevant_labels, label_artist_counts = _build_relevant_labels(
+        label_seed if label_seed is not None else candidates, profiles_lower
+    )
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, genres_set)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")

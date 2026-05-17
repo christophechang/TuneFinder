@@ -25,3 +25,47 @@ def test_genre_set_skips_below_threshold():
     }
     gs = _build_genre_set(profiles_lower)
     assert "industrial" not in gs
+
+
+from src.pipeline.ranker import _build_relevant_labels, _score
+
+
+def _candidate(artist="A", title="T", label=None, source="s", **kw):
+    return Candidate(artist=artist, title=title, link="", source=source, label=label, **kw)
+
+
+def test_label_signal_scales_with_known_artist_count():
+    profiles_lower = {
+        "sully": ArtistProfile(name="Sully"),
+        "skee mask": ArtistProfile(name="Skee Mask"),
+        "calibre": ArtistProfile(name="Calibre"),
+    }
+    candidates = [
+        _candidate(artist="Sully", label="Ilian Tape"),
+        _candidate(artist="Skee Mask", label="Ilian Tape"),
+        _candidate(artist="Calibre", label="Ilian Tape"),
+    ]
+    _, counts = _build_relevant_labels(candidates, profiles_lower)
+    assert counts["ilian tape"] == 3
+
+    target = _candidate(artist="Unknown", title="T", label="Ilian Tape")
+    _score(target, profiles_lower, {"ilian tape"}, counts, _build_genre_set(profiles_lower))
+    assert target.score == 3.0
+
+
+def test_label_signal_base_when_one_known_artist():
+    profiles_lower = {"sully": ArtistProfile(name="Sully")}
+    candidates = [_candidate(artist="Sully", label="Astrophonica")]
+    _, counts = _build_relevant_labels(candidates, profiles_lower)
+    target = _candidate(artist="Other", title="T", label="Astrophonica")
+    _score(target, profiles_lower, {"astrophonica"}, counts, _build_genre_set(profiles_lower))
+    assert target.score == 2.0
+
+
+def test_label_signal_caps_at_three_artists():
+    profiles_lower = {f"a{i}": ArtistProfile(name=f"A{i}") for i in range(5)}
+    candidates = [_candidate(artist=f"A{i}", label="Big Label") for i in range(5)]
+    _, counts = _build_relevant_labels(candidates, profiles_lower)
+    target = _candidate(artist="X", title="T", label="Big Label")
+    _score(target, profiles_lower, {"big label"}, counts, _build_genre_set(profiles_lower))
+    assert target.score == 3.0
