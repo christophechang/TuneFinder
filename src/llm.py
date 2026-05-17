@@ -85,15 +85,19 @@ def _call_openai_compat(
     return _strip_thinking(content)
 
 
-def call_stage1(prompt: str, system: str, settings) -> str:
+def call_stage1(prompt: str, system: str, settings, temperature: float | None = None) -> str:
     """
     Cheap, fast extraction/classification via cascade chain.
     Chain order: llm.stage1 (primary) then each entry in llm.fallback_chain.
     Providers with no API key are silently skipped.
     Sleeps 1s between failures. Raises RuntimeError if all exhausted.
+
+    If `temperature` is provided, it overrides the config value for this call only.
+    Useful when one Stage 1 use case wants varied phrasing (reason enrichment) and
+    another wants conservative grounding (label synopsis).
     """
     stage1_cfg = settings.llm_stage1
-    temperature = stage1_cfg.get("temperature", 0.1)
+    effective_temperature = temperature if temperature is not None else stage1_cfg.get("temperature", 0.1)
     max_tokens = stage1_cfg.get("max_tokens", 4096)
     timeout = stage1_cfg.get("timeout_seconds", 60)
 
@@ -126,7 +130,7 @@ def call_stage1(prompt: str, system: str, settings) -> str:
                     model=model,
                     system=system,
                     prompt=prompt,
-                    temperature=temperature,
+                    temperature=effective_temperature,
                     max_tokens=max_tokens,
                     timeout=timeout,
                     extra_headers=_PROVIDER_EXTRA_HEADERS.get(provider),
