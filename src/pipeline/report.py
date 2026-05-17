@@ -19,6 +19,7 @@ from src.llm import call_stage1, call_stage2
 from src.logger import get_logger
 from src.models import ArtistProfile, Candidate
 from src.pipeline.label_cache import load_label_profiles, save_label_profiles
+from src.pipeline.profile import _split_artists
 
 
 def _clean_llm_json(raw: str) -> str:
@@ -90,32 +91,91 @@ def _enrich_reasons(
     """
     Call Stage 1 LLM to generate a punchy one-sentence reason per candidate.
     Returns dict of {artist||title: reason}. Falls back to signal text on failure.
+
+    Profiles surface concrete catalog facts (prior titles, play count) so the LLM
+    has real anchors to quote rather than paraphrasing the signal text.
     """
-    payload = [
-        {
+    profiles_lower = {k.lower(): v for k, v in (profiles or {}).items()}
+
+    def _payload_for(c: Candidate) -> dict:
+        signal_codes = [s.code for s in c.signals]
+        best_play_count = None
+        prior_titles: list[str] = []
+        if "known_artist" in signal_codes:
+            for part in _split_artists(c.artist):
+                profile = profiles_lower.get(part.lower().strip())
+                if profile:
+                    if best_play_count is None or profile.play_count > best_play_count:
+                        best_play_count = profile.play_count
+                    for t in profile.track_titles:
+                        if t and t not in prior_titles and t.lower() != c.title.lower():
+                            prior_titles.append(t)
+                            if len(prior_titles) >= 3:
+                                break
+                    if len(prior_titles) >= 3:
+                        break
+        return {
             "artist": c.artist,
             "title": c.title,
             "label": c.label or "",
-            "signals": _signal_summary(c),
+            "source": c.source,
+            "genre_tags": c.genre_tags[:5],
+            "release_date": c.release_date or "",
+            "chart_position": c.raw_metadata.get("chart_position"),
+            "cross_source_count": len(c.raw_metadata.get("seen_on_sources", [c.source])),
+            "signal_codes": signal_codes,
+            "known_artist_play_count": best_play_count,
+            "prior_titles_sample": prior_titles,
         }
-        for c in candidates
-    ]
+
+    payload = [_payload_for(c) for c in candidates]
 
     system = (
         "You write concise music discovery reasons for a DJ. "
         f"{_DJ_CONTEXT} "
-        "For each track, write one punchy sentence (max 15 words) explaining "
-        "why it fits this DJ's taste, based on the provided signals. "
-        "Be specific and musical — name drop the context where relevant. "
-        "Return a valid JSON array only, no preamble or explanation."
+        "For each track, write one sentence (max 15 words) explaining why it fits this DJ's taste. "
+        "Anchor on one concrete fact from the payload: a prior track by the artist, a genre tag, "
+        "the chart position, or the cross-source count. Use only facts present in the payload. "
+        "Avoid marketing words: sonic, undeniable, journey, vibes, must-hear, perfect for, your next favorite. "
+        "Return a valid JSON array only, no preamble."
     )
+
+    examples = [
+        {
+            "input": {
+                "artist": "Sully", "title": "Cherry", "label": "Astrophonica", "source": "beatport",
+                "genre_tags": ["breaks", "uk-bass"], "chart_position": 3, "cross_source_count": 1,
+                "signal_codes": ["known_artist", "chart_position"],
+                "known_artist_play_count": 4, "prior_titles_sample": ["Swandive", "Glasshouse"],
+            },
+            "output": {
+                "artist": "Sully", "title": "Cherry",
+                "reason": "Sully follow-up to Swandive, currently #3 on the Beatport breaks chart.",
+            },
+        },
+        {
+            "input": {
+                "artist": "Skee Mask", "title": "Pop", "label": "Ilian Tape", "source": "juno",
+                "genre_tags": ["electronica", "breaks"], "chart_position": None, "cross_source_count": 2,
+                "signal_codes": ["label_match", "genre_match"],
+                "known_artist_play_count": None, "prior_titles_sample": [],
+            },
+            "output": {
+                "artist": "Skee Mask", "title": "Pop",
+                "reason": "Ilian Tape release tagged electronica/breaks — picked up across two sources.",
+            },
+        },
+    ]
+
     prompt = (
+        "Examples:\n"
+        f"{json.dumps(examples, ensure_ascii=False)}\n\n"
         f"Generate reasons for these tracks:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
         'Return format: [{"artist": "...", "title": "...", "reason": "..."}]'
     )
 
     try:
-        raw = _clean_llm_json(call_stage1(prompt, system, settings))
+        raw = _clean_llm_json(call_stage1(prompt, system, settings, temperature=0.3))
         enriched = json.loads(raw)
         return {
             f"{e['artist'].lower().strip()}||{e['title'].lower().strip()}": e.get("reason", "")
