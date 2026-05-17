@@ -197,11 +197,14 @@ def cmd_run(args):
     # 6. Generate report
     report_text = generate_report(sections, report_id, stats, settings, profiles=profiles)
 
-    # 7. Post to Discord
-    discord = make_discord_client(settings)
+    # 7. Post to Discord (skipped in dry-run)
     if dry_run:
         report_text = "🧪 **[DRY RUN — history not updated]**\n\n" + report_text
-    discord.post_report(report_text)
+        logger.info("[run] DRY RUN — skipping Discord post. Report preview follows:")
+        logger.info("\n" + report_text)
+    else:
+        discord = make_discord_client(settings)
+        discord.post_report(report_text)
 
     # 8. Update recommendation history and rebuild candidate pool (skipped in dry-run)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -365,11 +368,14 @@ def cmd_mix_prep(args):
     # 6. Generate report
     report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles)
 
-    # 7. Post to mix-prep Discord channel
-    discord = make_discord_client(settings)
+    # 7. Post to mix-prep Discord channel (skipped in dry-run)
     if dry_run:
         report_text = "🧪 **[DRY RUN — history not updated]**\n\n" + report_text
-    discord.post(settings.discord_mix_prep_channel, report_text)
+        logger.info("[mix-prep] DRY RUN — skipping Discord post. Report preview follows:")
+        logger.info("\n" + report_text)
+    else:
+        discord = make_discord_client(settings)
+        discord.post(settings.discord_mix_prep_channel, report_text)
 
     # 8. Save to mix-prep history (skipped in dry-run)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -406,7 +412,7 @@ def main():
     run_parser = subparsers.add_parser("run", help="Run the full pipeline and post the weekly report to Discord")
     run_parser.add_argument(
         "--dry-run", action="store_true",
-        help="Run the full pipeline but skip Discord posts and history/pool writes",
+        help="Run the full pipeline, log the report preview, but skip Discord posts and history/pool writes",
     )
     mix_prep_parser = subparsers.add_parser(
         "mix-prep",
