@@ -195,7 +195,7 @@ def cmd_run(args):
     sections = rank_candidates(candidates, profiles, settings, label_seed=label_seed)
 
     # 6. Generate report
-    report_text = generate_report(sections, report_id, stats, settings)
+    report_text = generate_report(sections, report_id, stats, settings, profiles=profiles)
 
     # 7. Post to Discord
     discord = make_discord_client(settings)
@@ -363,7 +363,7 @@ def cmd_mix_prep(args):
     sections = rank_candidates_mix_prep(candidates, profiles, settings, label_seed=label_seed)
 
     # 6. Generate report
-    report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings)
+    report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles)
 
     # 7. Post to mix-prep Discord channel
     discord = make_discord_client(settings)

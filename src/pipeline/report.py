@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from src.llm import call_stage1, call_stage2
 from src.logger import get_logger
-from src.models import Candidate
+from src.models import ArtistProfile, Candidate
 from src.pipeline.label_cache import load_label_profiles, save_label_profiles
 
 
@@ -82,7 +82,11 @@ def _signal_summary(c: Candidate) -> list[str]:
     return [s.explanation for s in c.signals]
 
 
-def _enrich_reasons(candidates: list[Candidate], settings) -> dict[str, str]:
+def _enrich_reasons(
+    candidates: list[Candidate],
+    settings,
+    profiles: dict[str, ArtistProfile] | None = None,
+) -> dict[str, str]:
     """
     Call Stage 1 LLM to generate a punchy one-sentence reason per candidate.
     Returns dict of {artist||title: reason}. Falls back to signal text on failure.
@@ -277,6 +281,7 @@ def generate_report(
     report_id: str,
     stats: dict,
     settings,
+    profiles: dict[str, ArtistProfile] | None = None,
 ) -> str:
     """
     Generate the full Discord-formatted weekly report.
@@ -288,7 +293,7 @@ def generate_report(
         all_candidates.extend(candidates)
 
     # Stage 1 — enrich reasons
-    reasons = _enrich_reasons(all_candidates, settings) if all_candidates else {}
+    reasons = _enrich_reasons(all_candidates, settings, profiles=profiles) if all_candidates else {}
 
     # Stage 1 — enrich label synopses (cached; only calls LLM for new labels)
     label_watch_candidates = sections.get("label_watch", [])
@@ -351,6 +356,7 @@ def generate_mix_prep_report(
     stats: dict,
     genre: str,
     settings,
+    profiles: dict[str, ArtistProfile] | None = None,
 ) -> str:
     """
     Generate a Discord-formatted mix-prep report focused on a single genre.
@@ -360,7 +366,7 @@ def generate_mix_prep_report(
     for candidates in sections.values():
         all_candidates.extend(candidates)
 
-    reasons = _enrich_reasons(all_candidates, settings) if all_candidates else {}
+    reasons = _enrich_reasons(all_candidates, settings, profiles=profiles) if all_candidates else {}
 
     today = datetime.now(timezone.utc).strftime("%-d %B %Y")
     sections_text = "\n\n".join(filter(None, [
