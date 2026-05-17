@@ -51,6 +51,8 @@ _W_CROSS_SOURCE_PER = 0.5  # per source seen on, up to cap (only credited when l
 _CROSS_SOURCE_CAP = 4      # max source count that contributes to the bonus
 _W_RECENCY_PENALTY = 0.75  # subtract once if any matched artist was recommended in window
 _RECENCY_WEEKS = 4
+_W_POOL_AGE_PER_WEEK = 0.25  # subtracted per week since pool entry was added
+_POOL_AGE_PENALTY_MAX = 1.5  # cap total pool-age penalty
 _W_GENRE = 0.5             # per matching genre tag
 _W_FRESH = 0.5             # released within 30 days
 _W_CHART_TOP = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
@@ -196,6 +198,24 @@ def _score(
             code="bandcamp_discovery",
             explanation="Bandcamp discovery — independent release outside chart sources.",
         ))
+
+    # --- Pool age penalty ---
+    if c.pool_added_at:
+        try:
+            added = datetime.fromisoformat(c.pool_added_at)
+            if added.tzinfo is None:
+                added = added.replace(tzinfo=timezone.utc)
+            days_old = (datetime.now(timezone.utc) - added).days
+            weeks_old = max(0, days_old // 7)
+            penalty = min(_W_POOL_AGE_PER_WEEK * weeks_old, _POOL_AGE_PENALTY_MAX)
+            if penalty > 0:
+                score -= penalty
+                c.signals.append(RecommendationSignal(
+                    code="pool_age",
+                    explanation=f"Carried over from pool for {weeks_old} week{'s' if weeks_old != 1 else ''}.",
+                ))
+        except ValueError:
+            pass
 
     c.score = round(score, 2)
 

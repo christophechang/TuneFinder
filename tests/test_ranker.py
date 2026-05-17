@@ -114,3 +114,39 @@ def test_recency_penalty_skipped_when_no_known_artist_match():
     c = _candidate(artist="Unknown")
     _score(c, {}, set(), {}, _build_genre_set({}), recent_artists={"some-other-artist"})
     assert c.score == 0.0
+
+
+from datetime import datetime, timedelta, timezone
+
+
+def test_pool_age_penalty_zero_weeks_no_subtraction():
+    c = _candidate(pool_added_at=datetime.now(timezone.utc).isoformat())
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 0.0
+
+
+def test_pool_age_penalty_three_weeks():
+    added = (datetime.now(timezone.utc) - timedelta(weeks=3)).isoformat()
+    c = _candidate(pool_added_at=added)
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == -0.75
+
+
+def test_pool_age_penalty_caps_at_negative_1_point_5():
+    added = (datetime.now(timezone.utc) - timedelta(weeks=20)).isoformat()
+    c = _candidate(pool_added_at=added)
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == -1.5
+
+
+def test_pool_age_penalty_clamped_for_future_timestamp():
+    added = (datetime.now(timezone.utc) + timedelta(weeks=5)).isoformat()
+    c = _candidate(pool_added_at=added)
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 0.0
+
+
+def test_pool_age_penalty_handles_bad_iso_string():
+    c = _candidate(pool_added_at="not-a-date")
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 0.0
