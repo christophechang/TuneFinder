@@ -82,7 +82,9 @@ def save_pool(records: list[PoolRecord], data_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 def pool_to_candidates(records: list[PoolRecord]) -> list[Candidate]:
-    """Convert pool records to Candidate objects ready for scoring (score=0, signals=[])."""
+    """Convert pool records to Candidate objects ready for scoring (score=0, signals=[]).
+    Carries `added_at` onto `Candidate.pool_added_at` so the ranker can apply an age penalty.
+    """
     return [
         Candidate(
             artist=r.artist,
@@ -94,6 +96,7 @@ def pool_to_candidates(records: list[PoolRecord]) -> list[Candidate]:
             release_name=r.release_name,
             genre_tags=r.genre_tags,
             raw_metadata=r.raw_metadata,
+            pool_added_at=r.added_at or None,
         )
         for r in records
     ]
