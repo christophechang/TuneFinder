@@ -121,3 +121,42 @@ def append_mix_prep_records(new_records: list[RecommendationRecord], data_dir: s
     combined = existing + new_records
     save_mix_prep_history(combined, data_dir)
     logger.info(f"[history] Appended {len(new_records)} mix-prep records (total: {len(combined)})")
+
+
+# ---------------------------------------------------------------------------
+# Artist-level recency lookup
+# ---------------------------------------------------------------------------
+
+def recent_recommended_artists(data_dir: str, weeks: int = 4) -> set[str]:
+    """Return normalised artist strings recommended within the last `weeks` weeks
+    across BOTH weekly history (recommendation_history.json) and mix-prep history
+    (mix_prep_history.json). Both represent tracks the DJ already saw — both
+    should suppress repeats at the artist level.
+
+    Each record's artist string is split into individual artists (handles
+    "A, B" / "A feat. B" / "A & B" / "A x B") and normalised via dedup.
+    """
+    from datetime import timedelta
+    from src.pipeline.dedup import normalise_artist
+    from src.pipeline.profile import _split_artists
+
+    cutoff = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+    records = load_history(data_dir) + load_mix_prep_history(data_dir)
+
+    recent: set[str] = set()
+    for r in records:
+        if not r.recommended_at:
+            continue
+        try:
+            ts = datetime.fromisoformat(r.recommended_at)
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if ts < cutoff:
+            continue
+        for part in _split_artists(r.artist):
+            recent.add(normalise_artist(part))
+
+    logger.info(f"[history] {len(recent)} artists in {weeks}-week recency window")
+    return recent
