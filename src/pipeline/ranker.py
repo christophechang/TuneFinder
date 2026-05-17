@@ -47,7 +47,8 @@ _W_RECURRING = 2.0         # extra if any matched artist has play_count >= thres
 _W_LABEL_BASE = 1.5        # base bonus for any label match
 _W_LABEL_PER_ARTIST = 0.5  # per additional known artist on the label, up to cap
 _LABEL_ARTIST_CAP = 3      # max known artists on a label that contribute to the bonus
-_W_CROSS_SOURCE = 1.0      # seen on 2+ sources (more credibility)
+_W_CROSS_SOURCE_PER = 0.5  # per source seen on, up to cap (only credited when len >= 2)
+_CROSS_SOURCE_CAP = 4      # max source count that contributes to the bonus
 _W_GENRE = 0.5             # per matching genre tag
 _W_FRESH = 0.5             # released within 30 days
 _W_CHART_TOP = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
@@ -137,7 +138,8 @@ def _score(
     # --- Cross-source credibility ---
     seen_on = c.raw_metadata.get("seen_on_sources", [c.source])
     if len(seen_on) >= 2:
-        score += _W_CROSS_SOURCE
+        capped = min(len(seen_on), _CROSS_SOURCE_CAP)
+        score += _W_CROSS_SOURCE_PER * capped
         c.signals.append(RecommendationSignal(
             code="cross_source",
             explanation=f"Flagged by {len(seen_on)} sources: {', '.join(seen_on)}.",

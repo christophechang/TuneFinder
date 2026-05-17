@@ -69,3 +69,27 @@ def test_label_signal_caps_at_three_artists():
     target = _candidate(artist="X", title="T", label="Big Label")
     _score(target, profiles_lower, {"big label"}, counts, _build_genre_set(profiles_lower))
     assert target.score == 3.0
+
+
+def test_cross_source_two_sources_scores_1_point_0():
+    c = _candidate(raw_metadata={"seen_on_sources": ["a", "b"]})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 1.0
+
+
+def test_cross_source_three_sources_scores_1_point_5():
+    c = _candidate(raw_metadata={"seen_on_sources": ["a", "b", "c"]})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 1.5
+
+
+def test_cross_source_caps_at_four():
+    c = _candidate(raw_metadata={"seen_on_sources": ["a", "b", "c", "d", "e"]})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 2.0
+
+
+def test_cross_source_one_source_no_bonus():
+    c = _candidate(raw_metadata={"seen_on_sources": ["a"]})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 0.0
