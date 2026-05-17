@@ -103,6 +103,7 @@ class Candidate:
     is_previously_recommended: bool = False
     genre_tags: list[str] = field(default_factory=list)
     raw_metadata: dict = field(default_factory=dict)
+    pool_added_at: Optional[str] = None
 
     @property
     def key(self) -> str:
