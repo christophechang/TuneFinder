@@ -49,6 +49,8 @@ _W_LABEL_PER_ARTIST = 0.5  # per additional known artist on the label, up to cap
 _LABEL_ARTIST_CAP = 3      # max known artists on a label that contribute to the bonus
 _W_CROSS_SOURCE_PER = 0.5  # per source seen on, up to cap (only credited when len >= 2)
 _CROSS_SOURCE_CAP = 4      # max source count that contributes to the bonus
+_W_RECENCY_PENALTY = 0.75  # subtract once if any matched artist was recommended in window
+_RECENCY_WEEKS = 4
 _W_GENRE = 0.5             # per matching genre tag
 _W_FRESH = 0.5             # released within 30 days
 _W_CHART_TOP = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
@@ -92,6 +94,7 @@ def _score(
     relevant_labels: set[str],
     label_artist_counts: dict[str, int],
     genres_set: set[str],
+    recent_artists: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Mutate candidate in place: assign signals and total score."""
     score = 0.0
@@ -122,6 +125,14 @@ def _score(
             c.signals.append(RecommendationSignal(
                 code="recurring_artist",
                 explanation=f"{matched[0]} appears in {best_play_count} of your mixes.",
+            ))
+
+        # --- Artist-recency penalty ---
+        if any(normalise_artist(name) in recent_artists for name in matched):
+            score -= _W_RECENCY_PENALTY
+            c.signals.append(RecommendationSignal(
+                code="recent_recommendation",
+                explanation=f"{matched[0]} appeared in a recent report — soft down-weight.",
             ))
 
     # --- Label signal ---
@@ -278,14 +289,17 @@ def rank_candidates(
     that known artists (who are filtered out of candidates) still contribute
     their labels. Defaults to candidates if not provided.
     """
+    from src.pipeline.history import recent_recommended_artists
+
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
     relevant_labels, label_artist_counts = _build_relevant_labels(
         label_seed if label_seed is not None else candidates, profiles_lower
     )
+    recent_artists = recent_recommended_artists(settings.data_dir, weeks=_RECENCY_WEEKS)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -343,14 +357,17 @@ def rank_candidates_mix_prep(
     Same scoring as rank_candidates but uses two sections (top_picks, deep_cuts)
     with no per-genre cap — the genre has already been filtered upstream.
     """
+    from src.pipeline.history import recent_recommended_artists
+
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
     relevant_labels, label_artist_counts = _build_relevant_labels(
         label_seed if label_seed is not None else candidates, profiles_lower
     )
+    recent_artists = recent_recommended_artists(settings.data_dir, weeks=_RECENCY_WEEKS)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")

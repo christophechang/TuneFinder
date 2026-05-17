@@ -93,3 +93,24 @@ def test_cross_source_one_source_no_bonus():
     c = _candidate(raw_metadata={"seen_on_sources": ["a"]})
     _score(c, {}, set(), {}, _build_genre_set({}))
     assert c.score == 0.0
+
+
+def test_recency_penalty_applied_when_matched_artist_in_recent_set():
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower), recent_artists={"sully"})
+    # known_artist: 1 * 3.0 = 3.0; penalty -0.75 → 2.25
+    assert c.score == 2.25
+
+
+def test_recency_penalty_skipped_when_artist_not_recent():
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower), recent_artists=set())
+    assert c.score == 3.0
+
+
+def test_recency_penalty_skipped_when_no_known_artist_match():
+    c = _candidate(artist="Unknown")
+    _score(c, {}, set(), {}, _build_genre_set({}), recent_artists={"some-other-artist"})
+    assert c.score == 0.0
