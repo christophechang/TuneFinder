@@ -9,29 +9,9 @@
 
 This project explores AI-assisted development workflows. My focus here was system design and delivery rather than idiomatic Python, which is not my primary stack.
 
-## What's new in v0.5.0
+## Changelog
 
-- **Pool candidates now respect the release date window in mix-prep.** Pool-injected candidates were bypassing `filter_release_date`, allowing stale tracks to appear in mix-prep results. Fixed.
-- **UTC-aware date comparison in release date filter.** `date.today()` replaced with `datetime.now(UTC).date()` — avoids edge-case drift around midnight in non-UTC timezones.
-- **Catalog base URL is now configurable.** `catalog_user_url` in `.env` is wired as the base URL for the catalog fetcher; `_DEFAULT_BASE_URL` remains as fallback.
-- **Misc fixes.** Stale "Music Finder" brand name removed from fallback report header; duplicate label bracket removed from fallback label-watch lines; explicit `downtempo` tag mapping added to Bandcamp fetcher.
-
-## What's new in v0.4.0
-
-- **Concurrent mix-prep fetches.** Genre sources now fetch in parallel — mix-prep runs significantly faster, especially for wide genres like `house` that span 10+ feed endpoints across stores.
-- **Configurable release date window.** New `pipeline.release_date_window_days` setting (default `28`) filters stale candidates before ranking. Juno's chart window slug derives from the same value. RA now populates `release_date` from review publication date so it benefits from the filter too.
-- **Traxsource disabled by default.** The site now presents a Cloudflare challenge that makes unattended scraping unreliable. Can be re-enabled in `config/settings.yaml`.
-
-## What's new in v0.3.0
-
-- **Mistral/OpenRouter LLM setup.** Stage 1 (reason enrichment) uses Mistral Small as primary; Stage 2 (report writing) uses OpenRouter / DeepSeek as primary. Anthropic and Ollama providers removed from the cascade.
-- **LLM fallback chains are configurable.** Both stages support explicit fallback chains in `config/settings.yaml`, though the default config has no active fallbacks.
-- **Project renamed to TuneFinder.** Previously called MusicFinder.
-
-## What's new in v0.2.0
-
-- **Label synopsis in Label Watch.** Each label now gets a one-line header synopsis (founding city, year, key artists) written by Stage 1 LLM. Synopses are cached in `data/label_profiles.json` — the LLM is only called once per new label; repeat runs read from cache at zero cost.
-- **Genre exclusion filter for mix-prep.** Tracks that pick up contradictory genre tags during cross-source dedup (e.g. a UKG track also tagged `electronica`) are filtered out of mix-prep results. Exclusion pairs are config-driven in `config/settings.yaml` so they can be tuned without code changes.
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## How it works
 
@@ -60,12 +40,14 @@ This project explores AI-assisted development workflows. My focus here was syste
 |---|---|---|
 | `known_artist` | ×3.0 per play_count (max 10) | Artist appears in your mix history |
 | `recurring_artist` | +2.0 | Artist has ≥3 mixes |
-| `label_match` | +2.5 | Label has released known artists |
-| `cross_source` | +1.0 | Track flagged by 2+ sources |
+| `label_match` | +1.5 to +3.0 | Scales with how many of your known artists appear on the label (cap 3) |
+| `cross_source` | +1.0 to +2.0 | Scales with source count (cap 4) — only credited when seen on 2+ |
 | `chart_position` | +0–1.5 | Linear decay from #1 (Juno/Beatport; Traxsource when enabled) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
-| `genre_match` | +0.5 per tag | Soft match against DJ's genre set |
+| `genre_match` | +0.5 per tag | Soft match against catalog-augmented genre set |
 | `fresh_release` | +0.5 | Released within 30 days |
+| `recent_recommendation` | −0.75 | Artist appeared in weekly or mix-prep history within last 4 weeks |
+| `pool_age` | −0.25 per week (cap −1.5) | Carried over from the persistent pool — older entries lose ground |
 
 ## Report sections
 
