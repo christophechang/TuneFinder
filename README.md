@@ -31,6 +31,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | Bandcamp | `dig_deeper` JSON API | ✅ |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | disabled by default |
+| Mixupload | HTML scrape (chart + genre pages) | disabled (experimental) |
 | Boomkat | — | blocked (Cloudflare) |
 | Bleep | — | requires login |
 
@@ -42,7 +43,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | `recurring_artist` | +2.0 | Artist has ≥3 mixes |
 | `label_match` | +1.5 to +3.0 | Scales with how many of your known artists appear on the label (cap 3) |
 | `cross_source` | +1.0 to +2.0 | Scales with source count (cap 4) — only credited when seen on 2+ |
-| `chart_position` | +0–1.5 | Linear decay from #1 (Beatport; Traxsource when enabled) |
+| `chart_position` | +0–1.5 | Linear decay from #1 (Beatport, Traxsource, Mixupload when enabled) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
 | `genre_match` | +0.5 per tag | Soft match against catalog-augmented genre set |
 | `fresh_release` | +0.5 | Released within 30 days |
@@ -78,18 +79,18 @@ Results are posted to the Discord `#mix-prep` channel. Mix-prep uses its own his
 
 Each internal genre maps to one or more genre feeds on each source. Sources not listed for a genre don't contribute to that genre's results.
 
-| Genre | Beatport | Traxsource | Bandcamp |
-|---|---|---|---|
-| `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house |
-| `dnb` | drum-bass | drum-and-bass | drum-and-bass |
-| `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat |
-| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass |
-| `ukg` | uk-garage-bassline | garage | uk-garage |
-| `electronica` | electronica | electronica · leftfield | electronic · electronica |
-| `downtempo` | downtempo | lounge-chill-out | downtempo · lounge |
-| `techno` | techno-raw-deep-hypnotic | techno | techno |
-| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul |
-| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap |
+| Genre | Beatport | Traxsource | Bandcamp | Mixupload |
+|---|---|---|---|---|
+| `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house | style/house · style-part/deep-house · style-part/tech-house · style-part/progressive-house |
+| `dnb` | drum-bass | drum-and-bass | drum-and-bass | style/dnb |
+| `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat | style/breaks |
+| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass/tracks |
+| `ukg` | uk-garage-bassline | garage | uk-garage | style-part/uk-garage |
+| `electronica` | electronica | electronica · leftfield | electronic · electronica | style-part/electronica |
+| `downtempo` | downtempo | lounge-chill-out | downtempo · lounge | style-part/downtempo |
+| `techno` | techno-raw-deep-hypnotic | techno | techno | style/techno |
+| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul | — |
+| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap | style/hip-hop |
 
 ¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the page data are used to split them into the correct internal tags.
 
