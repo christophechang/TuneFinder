@@ -2,6 +2,13 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.6.1 — 2026-06-03
+
+### Maintenance
+
+- **Juno Download disabled.** The site shut down on 2026-06-01. Source toggled `enabled: false` in `config/settings.yaml`. All Juno tracks purged from `candidate_pool.json` (−295), `recommendation_history.json` (−15), and `source_items.json` (−900).
+- **README updated.** Removed Juno from active sources table, genre feed table, tagline, and signal descriptions. Marked as disabled with shutdown note.
+
 ## v0.6.0
 
 ### Ranker

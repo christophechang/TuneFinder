@@ -40,7 +40,7 @@ llm:
 sources:
 
   juno:
-    enabled: true
+    enabled: false   # Site shut down June 2026
     # Maps internal genre names to Juno URL slugs
     # Note: dnb feed includes both D&B and jungle tracks
     # Note: funk-soul-jazz feed includes funk, soul, and jazz tracks

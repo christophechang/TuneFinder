@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/christophechang/TuneFinder)](https://github.com/christophechang/TuneFinder/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Your crates, your taste.** Monitors new releases across Juno, Beatport, and Bandcamp, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
+> **Your crates, your taste.** Monitors new releases across Beatport and Bandcamp, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
 
 > **Companion tool** — TuneFinder pairs with the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to read your published mix tracklist history and build a personal taste profile. The profile drives all scoring — without it, artist and label signals won't fire.
 
@@ -16,7 +16,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 ## How it works
 
 1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
-2. **Fetch** — scrapes new releases from Juno, Beatport, and Bandcamp (Traxsource and Resident Advisor are available but disabled by default)
+2. **Fetch** — scrapes new releases from Beatport and Bandcamp (Traxsource and Resident Advisor are available but disabled by default)
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
 5. **Report** — two-stage LLM pipeline: Stage 1 uses Mistral Small to write a one-line reason per track; Stage 2 uses OpenRouter / DeepSeek to write the full Discord-formatted report
@@ -26,7 +26,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 | Source | Method | Status |
 |---|---|---|
-| Juno Download | Genre top-100 track chart | ✅ |
+| Juno Download | Genre top-100 track chart | disabled (site shut down June 2026) |
 | Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | ✅ |
 | Bandcamp | `dig_deeper` JSON API | ✅ |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
@@ -42,7 +42,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | `recurring_artist` | +2.0 | Artist has ≥3 mixes |
 | `label_match` | +1.5 to +3.0 | Scales with how many of your known artists appear on the label (cap 3) |
 | `cross_source` | +1.0 to +2.0 | Scales with source count (cap 4) — only credited when seen on 2+ |
-| `chart_position` | +0–1.5 | Linear decay from #1 (Juno/Beatport; Traxsource when enabled) |
+| `chart_position` | +0–1.5 | Linear decay from #1 (Beatport; Traxsource when enabled) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
 | `genre_match` | +0.5 per tag | Soft match against catalog-augmented genre set |
 | `fresh_release` | +0.5 | Released within 30 days |
@@ -56,7 +56,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 - **Artist Watch** — new material from artists already in your mixes
 - **Wildcards** — interesting outliers from the remaining pool
 
-Each track line includes a source tag (`[Juno]`, `[Beatport]`, `[Bandcamp]`, etc.) so you can see at a glance where each recommendation came from.
+Each track line includes a source tag (`[Beatport]`, `[Bandcamp]`, etc.) so you can see at a glance where each recommendation came from.
 
 ## Mix prep
 
@@ -78,18 +78,18 @@ Results are posted to the Discord `#mix-prep` channel. Mix-prep uses its own his
 
 Each internal genre maps to one or more genre feeds on each source. Sources not listed for a genre don't contribute to that genre's results.
 
-| Genre | Juno | Beatport | Traxsource | Bandcamp |
-|---|---|---|---|---|
-| `house` | house | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house |
-| `dnb` | drumandbass | drum-bass | drum-and-bass | drum-and-bass |
-| `breaks` | breakbeat | breaks-breakbeat-uk-bass ¹ | — | breakbeat |
-| `uk-bass` | bass | breaks-breakbeat-uk-bass ¹ | — | uk-bass |
-| `ukg` | 4x4-garage | uk-garage-bassline | garage | uk-garage |
-| `electronica` | leftfield | electronica | electronica · leftfield | electronic · electronica |
-| `downtempo` | downtempo | downtempo | lounge-chill-out | downtempo · lounge |
-| `techno` | — | techno-raw-deep-hypnotic | techno | techno |
-| `funk-soul-jazz` | funk-soul-jazz | rb | soul-funk-disco | funk · r-b-soul |
-| `hip-hop` | hip-hop | hip-hop | r-and-b-hip-hop | hip-hop-rap |
+| Genre | Beatport | Traxsource | Bandcamp |
+|---|---|---|---|
+| `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house |
+| `dnb` | drum-bass | drum-and-bass | drum-and-bass |
+| `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat |
+| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass |
+| `ukg` | uk-garage-bassline | garage | uk-garage |
+| `electronica` | electronica | electronica · leftfield | electronic · electronica |
+| `downtempo` | downtempo | lounge-chill-out | downtempo · lounge |
+| `techno` | techno-raw-deep-hypnotic | techno | techno |
+| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul |
+| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap |
 
 ¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the page data are used to split them into the correct internal tags.
 
@@ -161,7 +161,7 @@ GEMINI_API_KEY=           # Stage 1 fallback 2
 
 Edit `config/settings.yaml` to:
 - Adjust pipeline section counts (`top_picks_count`, `label_watch_count`, etc.)
-- Set `pipeline.release_date_window_days` to control how far back the date filter looks (must be `7`, `28`, `56`, or `180` — maps to Juno chart windows)
+- Set `pipeline.release_date_window_days` to control how far back the date filter looks (`7`, `28`, `56`, or `180` days)
 - Tune `pipeline.genre_exclusions` to drop tracks that pick up contradictory genre tags during cross-source dedup
 - Enable/disable individual sources
 - Change Discord channel names
@@ -216,7 +216,7 @@ src/
   logger.py          # Structured logging setup
   fetchers/
     catalog.py       # SoundCloud AI Mix Recommender API (mix history + known tracks)
-    juno.py          # Juno Download genre top-100 chart
+    juno.py          # Juno Download genre top-100 chart (disabled — site shut down June 2026)
     beatport.py      # Beatport genre top-100 chart (__NEXT_DATA__)
     bandcamp.py      # Bandcamp dig_deeper API
     traxsource.py    # Traxsource HTML scrape (currently disabled by default)
