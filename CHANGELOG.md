@@ -2,6 +2,12 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.6.3 — 2026-06-04
+
+### Fixes
+
+- **Bandcamp fetcher restored.** Bandcamp deprecated `hub/2/dig_deeper` (returned `{"error":true,"error_message":"bad function"}`). Migrated to `discover/1/discover_web` — the endpoint used by the new Vue SPA discover page. Payload now uses `category_id` (format filter), `tag_norm_names` (tag array), `slice`, `cursor`, and `include_result_types`. Response shape changed from `items[]` to `results[]`; artist extracted from `album_artist` or `band_name`; link comes directly from `item_url` (stripped of `?from=discover_page` suffix); `release_date` now populated from the response. All 13 configured tags fetch correctly (260 tracks per run).
+
 ## v0.6.2 — 2026-06-04
 
 ### Sources
