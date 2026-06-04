@@ -210,6 +210,48 @@ sources:
       - tf_tag: uk-bass
         genre: UKBass     # no chart page — uses /genres/{slug}/tracks
 
+  volumo:
+    enabled: true
+    # API token is optional — browsing works unauthenticated
+    # Set VOLUMO_API_KEY in .env for authenticated requests (future use)
+    sort: purchase              # 'purchase' avoids corrupted-date catalog entries
+    curation: curated           # Volumo-vetted releases only; omit key entirely for all releases
+    lookback_days: 28
+    limit_per_genre: 50
+    genres:
+      # house sub-genres — all tagged "house"
+      - name: house
+        id: 12                  # House
+      - name: house
+        id: 4                   # Deep House
+      - name: house
+        id: 21                  # Tech House
+      - name: house
+        id: 20                  # Soulful House
+      - name: house
+        id: 10                  # Funky / Jackin' House
+      - name: house
+        id: 15                  # Melodic House / Techno
+      - name: house
+        id: 19                  # Progressive House
+      - name: house
+        id: 1                   # Afro House
+      # standalone genres
+      - name: dnb
+        id: 6                   # Drum and Bass
+      - name: techno
+        id: 22                  # Techno (Raw, Deep, Dub)
+      - name: techno
+        id: 23                  # Techno (Peak Time)
+      - name: breaks
+        id: 3                   # Breaks / Breakbeat
+      - name: ukg
+        id: 25                  # UK Garage / 2-Step
+      - name: electronica
+        id: 8                   # Electronica
+      - name: downtempo
+        id: 18                  # Organic House / Downtempo
+
   discogs:
     enabled: false
 

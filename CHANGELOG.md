@@ -2,6 +2,13 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.6.4 — 2026-06-04
+
+### Sources
+
+- **Volumo enabled.** New source fetching curated new releases via the Volumo REST API (`/api/v1/albums`). Uses `sort=purchase` to avoid corrupted-date catalog entries. One request per internal TuneFinder tag with all Volumo genre IDs batched into a single call (e.g. all 8 house sub-genre IDs in one request). Pagination capped at 3 pages (150 albums) per tag. `curation: curated` restricts to Volumo-vetted releases only. `release_start_at` validated against a year-range guard (2020 ≤ year ≤ current+1) before use; falls back to album `first_live` timestamp if invalid; track skipped if both are invalid. Authentication via `VOLUMO_API_KEY` env var (optional — unauthenticated browsing returns full catalog data). Rich metadata captured: BPM, key signature, ISRC, catalog number, duration. 24 unit tests added.
+- **Genres covered:** house (all 8 sub-genres), dnb, techno (raw + peak-time), breaks, ukg, electronica, downtempo.
+
 ## v0.6.3 — 2026-06-04
 
 ### Fixes

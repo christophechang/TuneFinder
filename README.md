@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/christophechang/TuneFinder)](https://github.com/christophechang/TuneFinder/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Your crates, your taste.** Monitors new releases across Beatport and Bandcamp, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
+> **Your crates, your taste.** Monitors new releases across Beatport, Bandcamp, Volumo, and Mixupload, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
 
 > **Companion tool** — TuneFinder pairs with the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to read your published mix tracklist history and build a personal taste profile. The profile drives all scoring — without it, artist and label signals won't fire.
 
@@ -16,7 +16,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 ## How it works
 
 1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
-2. **Fetch** — scrapes new releases from Beatport and Bandcamp (Traxsource and Resident Advisor are available but disabled by default)
+2. **Fetch** — scrapes new releases from Beatport, Bandcamp, Volumo, and Mixupload (Traxsource and Resident Advisor are available but disabled by default)
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
 5. **Report** — two-stage LLM pipeline: Stage 1 uses Mistral Small to write a one-line reason per track; Stage 2 uses OpenRouter / DeepSeek to write the full Discord-formatted report
@@ -28,10 +28,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 |---|---|---|
 | Juno Download | Genre top-100 track chart | disabled (site shut down June 2026) |
 | Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | ✅ |
-| Bandcamp | `dig_deeper` JSON API | ✅ |
+| Bandcamp | `discover_web` JSON API | ✅ |
+| Volumo | REST API (`/api/v1/albums`) | ✅ |
+| Mixupload | HTML scrape (chart + genre pages) | ✅ |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | disabled by default |
-| Mixupload | HTML scrape (chart + genre pages) | ✅ |
 | Boomkat | — | blocked (Cloudflare) |
 | Bleep | — | requires login |
 
@@ -79,18 +80,18 @@ Results are posted to the Discord `#mix-prep` channel. Mix-prep uses its own his
 
 Each internal genre maps to one or more genre feeds on each source. Sources not listed for a genre don't contribute to that genre's results.
 
-| Genre | Beatport | Traxsource | Bandcamp | Mixupload |
-|---|---|---|---|---|
-| `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house | style/house · style-part/deep-house · style-part/tech-house · style-part/progressive-house |
-| `dnb` | drum-bass | drum-and-bass | drum-and-bass | style/dnb |
-| `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat | style/breaks |
-| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass/tracks |
-| `ukg` | uk-garage-bassline | garage | uk-garage | style-part/uk-garage |
-| `electronica` | electronica | electronica · leftfield | electronic · electronica | style-part/electronica |
-| `downtempo` | downtempo | lounge-chill-out | downtempo · lounge | style-part/downtempo |
-| `techno` | techno-raw-deep-hypnotic | techno | techno | style/techno |
-| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul | — |
-| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap | style/hip-hop |
+| Genre | Beatport | Traxsource | Bandcamp | Mixupload | Volumo |
+|---|---|---|---|---|---|
+| `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house | style/house · style-part/deep-house · style-part/tech-house · style-part/progressive-house | house · deep-house · tech-house · soulful-house · funky-house · melodic-house-techno · progressive-house · afro-house |
+| `dnb` | drum-bass | drum-and-bass | drum-and-bass | style/dnb | drum-and-bass |
+| `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat | style/breaks | breaks-breakbeat |
+| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass/tracks | — |
+| `ukg` | uk-garage-bassline | garage | uk-garage | style-part/uk-garage | uk-garage-2-step |
+| `electronica` | electronica | electronica · leftfield | electronic · electronica | style-part/electronica | electronica |
+| `downtempo` | downtempo | lounge-chill-out | downtempo · lounge | style-part/downtempo | organic-house-downtempo |
+| `techno` | techno-raw-deep-hypnotic | techno | techno | style/techno | techno-raw-deep-dub · techno-peak-time |
+| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul | — | — |
+| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap | style/hip-hop | — |
 
 ¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the page data are used to split them into the correct internal tags.
 
@@ -119,6 +120,9 @@ DISCORD_GUILD_ID=         # Your Discord server ID
 # Optional fallbacks
 GROQ_API_KEY=             # Stage 1 fallback 1
 GEMINI_API_KEY=           # Stage 1 fallback 2
+
+# Sources (optional)
+VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without this
 ```
 
 ## First-time setup
@@ -219,7 +223,9 @@ src/
     catalog.py       # SoundCloud AI Mix Recommender API (mix history + known tracks)
     juno.py          # Juno Download genre top-100 chart (disabled — site shut down June 2026)
     beatport.py      # Beatport genre top-100 chart (__NEXT_DATA__)
-    bandcamp.py      # Bandcamp dig_deeper API
+    bandcamp.py      # Bandcamp discover_web API
+    volumo.py        # Volumo REST API (/api/v1/albums)
+    mixupload.py     # Mixupload HTML scrape (chart + genre pages)
     traxsource.py    # Traxsource HTML scrape (currently disabled by default)
     ra.py            # Resident Advisor apolloState
     boomkat.py       # Boomkat (disabled — Cloudflare bot protection)
