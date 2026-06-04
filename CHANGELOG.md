@@ -2,6 +2,13 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.6.2 — 2026-06-04
+
+### Sources
+
+- **Mixupload enabled.** Chart pages fetch via plain GET with `?date-month=MM.YYYY` parameter (not `?period=month` — that returns empty). Genre pages use `/genres/{slug}/page1` pagination. Artist name extracted from the second `<div>` inside `h3.for-sharing a` (the `.made a` uploader link is unreliable — can point to a label account). 19 tests added.
+- **12 targets configured.** House (4 charts), techno, D&B, breaks, hip-hop, electronica, downtempo, UKG, and UK bass (`/genres/UKBass/page1`). Electronica and downtempo may return 0 tracks early in the month when charts are sparse.
+
 ## v0.6.1 — 2026-06-03
 
 ### Maintenance

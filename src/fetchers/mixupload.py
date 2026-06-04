@@ -11,8 +11,8 @@ logger = get_logger(__name__)
 
 _SOURCE = "mixupload"
 _BASE = "https://mixupload.com"
-_CHART_URL = _BASE + "/charts/track/{chart}?period={period}"
-_GENRE_TRACKS_URL = _BASE + "/genres/{genre}/tracks"
+_CHART_URL = _BASE + "/charts/track/{chart}?date-month={date_month}"
+_GENRE_TRACKS_URL = _BASE + "/genres/{genre}/page1"
 
 # Maps lowercase Mixupload genre slugs → canonical TF tags.
 # Covers both hyphenated and camelcase slug variants found in track card hrefs.
@@ -85,7 +85,7 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
         return []
 
     targets: list[dict] = cfg.get("targets", [])
-    period: str = cfg.get("period", "month")
+    date_month: str = datetime.now().strftime("%m.%Y")
 
     active = [t for t in targets
               if target_genre is None or t["tf_tag"] == target_genre]
@@ -96,7 +96,7 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
     for target in active:
         tf_tag = target["tf_tag"]
         if "chart" in target:
-            url = _CHART_URL.format(chart=target["chart"], period=period)
+            url = _CHART_URL.format(chart=target["chart"], date_month=date_month)
             is_chart = True
         else:
             url = _GENRE_TRACKS_URL.format(genre=target["genre"])
@@ -105,9 +105,9 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
         try:
             html = get_html(url)
             if is_chart:
-                fetched = _parse_chart_tracks(html, tf_tag, period)
+                fetched = _parse_chart_tracks(html, tf_tag, date_month)
             else:
-                fetched = _parse_genre_tracks(html, tf_tag)
+                fetched = _parse_chart_tracks(html, tf_tag)
             logger.info(f"[mixupload] {url}: {len(fetched)} tracks")
             items.extend(fetched)
         except Exception as e:
@@ -123,14 +123,17 @@ def _parse_chart_tracks(html: str, genre_tag: str, period: str | None = None) ->
     results = []
 
     for card in soup.select(".holder-player"):
-        artist_el = card.select_one(".made a")
         title_link = card.select_one("h3.for-sharing a")
-        if not artist_el or not title_link:
+        if not title_link:
             continue
 
-        # The <a> contains two <div>s: first is the track title, second is artist name
+        # The <a> contains two <div>s: first is the track title, second is artist name.
+        # .made a is the uploader (may be a label account) — unreliable for artist.
         divs = title_link.select("div")
         title = divs[0].get_text(strip=True) if divs else title_link.get_text(strip=True)
+        artist = divs[1].get_text(strip=True) if len(divs) > 1 else title_link.get_text(strip=True)
+        if not artist:
+            continue
 
         link_path = title_link.get("href", "")
         link = _BASE + link_path if link_path.startswith("/") else link_path
@@ -170,7 +173,7 @@ def _parse_chart_tracks(html: str, genre_tag: str, period: str | None = None) ->
         if chart_pos is not None:
             raw["chart_position"] = chart_pos
         if period is not None:
-            raw["chart_period"] = period
+            raw["chart_period"] = "month"
         if key is not None:
             raw["key"] = key
         if dl is not None:
@@ -180,7 +183,7 @@ def _parse_chart_tracks(html: str, genre_tag: str, period: str | None = None) ->
 
         results.append(SourceItem(
             source=_SOURCE,
-            artist=artist_el.get_text(strip=True),
+            artist=artist,
             title=title,
             link=link,
             label=None,  # not present in chart card layout
@@ -192,39 +195,6 @@ def _parse_chart_tracks(html: str, genre_tag: str, period: str | None = None) ->
 
     return results
 
-
-def _parse_genre_tracks(html: str, genre_tag: str) -> list[SourceItem]:
-    """Parse the genre/tracks page layout which uses li.gallery-cell containers."""
-    soup = make_soup(html)
-    results = []
-
-    for card in soup.select("li.gallery-cell"):
-        title_el = card.select_one("div.title")
-        author_el = card.select_one("div.author")
-        if not title_el or not author_el:
-            continue
-
-        # Track link is on the .btn-share element
-        link_el = card.select_one(".btn-share")
-        link_path = link_el.get("href", "") if link_el else ""
-        link = _BASE + link_path if link_path.startswith("/") else link_path
-
-        # Genre is inferred from the chart target tag only (no genre links in this layout)
-        tags: set[str] = {genre_tag}
-
-        results.append(SourceItem(
-            source=_SOURCE,
-            artist=author_el.get_text(strip=True),
-            title=title_el.get_text(strip=True),
-            link=link,
-            label=None,
-            release_date=None,
-            release_name=None,
-            genre_tags=sorted(tags),
-            raw_metadata={"bpm": None},
-        ))
-
-    return results
 
 
 def _parse_headphone_count(stat_el) -> Optional[int]:

@@ -69,6 +69,8 @@ def test_fetch_genre_tracks_mode_no_chart_position():
 
     assert len(items) == 1
     assert items[0].source == "mixupload"
+    assert items[0].artist == "UKBass Artist"
+    assert items[0].title == "Some Track (Original Mix)"
     assert "uk-bass" in items[0].genre_tags
     assert "chart_position" not in items[0].raw_metadata
 
@@ -81,19 +83,22 @@ def test_fetch_genre_tracks_url_uses_genres_path():
             mixupload.fetch(settings)
 
     called_url = mock_get.call_args[0][0]
-    assert "/genres/UKBass/tracks" in called_url
-    assert "period" not in called_url  # period filter not applied to genre/tracks
+    assert "/genres/UKBass/page1" in called_url
+    assert "date-month" not in called_url  # date filter not applied to genre pages
 
 
 def test_fetch_chart_url_exact():
-    settings = _make_settings(period="month", targets=[{"tf_tag": "house", "chart": "style/house"}])
+    settings = _make_settings(targets=[{"tf_tag": "house", "chart": "style/house"}])
     with patch("src.fetchers.mixupload.get_html") as mock_get:
         mock_get.return_value = _fake_html("mixupload_chart_house.html")
         with patch("src.fetchers.mixupload.polite_sleep"):
             mixupload.fetch(settings)
 
     called_url = mock_get.call_args[0][0]
-    assert called_url == "https://mixupload.com/charts/track/style/house?period=month"
+    assert called_url.startswith("https://mixupload.com/charts/track/style/house?date-month=")
+    # date-month format is MM.YYYY e.g. 06.2026
+    import re as _re
+    assert _re.search(r"date-month=\d{2}\.\d{4}", called_url)
 
 
 def test_fetch_target_genre_filters():

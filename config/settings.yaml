@@ -183,8 +183,7 @@ sources:
     releases_url: "https://ra.co/music/releases"
 
   mixupload:
-    enabled: false        # JS-rendered — requires Playwright or auth cookies; plain HTTP fetch returns empty
-    period: month         # today | month — applies to chart URLs only
+    enabled: true
     targets:
       - tf_tag: house
         chart: style/house

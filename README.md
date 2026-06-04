@@ -31,7 +31,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | Bandcamp | `dig_deeper` JSON API | ✅ |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | disabled by default |
-| Mixupload | HTML scrape (chart + genre pages) | disabled (experimental) |
+| Mixupload | HTML scrape (chart + genre pages) | ✅ |
 | Boomkat | — | blocked (Cloudflare) |
 | Bleep | — | requires login |
 
