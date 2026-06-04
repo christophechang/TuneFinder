@@ -16,7 +16,7 @@ _REQUIRED_ENV_VARS = [
     "OPENROUTER_API_KEY",
 ]
 
-_OPTIONAL_ENV_VARS = []
+_OPTIONAL_ENV_VARS: list[str] = []
 
 # Maps provider name → environment variable name (for cascade config check)
 PROVIDER_ENV_VAR = {

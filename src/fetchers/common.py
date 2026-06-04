@@ -33,6 +33,13 @@ def get_html(url: str, extra_headers: dict = None, timeout: int = _DEFAULT_TIMEO
     return resp.text
 
 
+def post_html(url: str, data: dict, extra_headers: dict = None, timeout: int = _DEFAULT_TIMEOUT) -> str:
+    headers = {**_HEADERS, **(extra_headers or {})}
+    resp = requests.post(url, data=data, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    return resp.text
+
+
 def parse_rss(url: str) -> list[dict]:
     """
     Fetch and parse an RSS 2.0 feed. Returns a list of item dicts.

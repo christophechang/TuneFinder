@@ -186,9 +186,10 @@ def _score(
     if chart_pos and isinstance(chart_pos, int) and 1 <= chart_pos <= _CHART_SCALE:
         chart_bonus = _W_CHART_TOP * (1 - (chart_pos - 1) / _CHART_SCALE)
         score += chart_bonus
+        chart_period = c.raw_metadata.get("chart_period", "weekly")
         c.signals.append(RecommendationSignal(
             code="chart_position",
-            explanation=f"#{chart_pos} on the {c.source.title()} weekly chart.",
+            explanation=f"#{chart_pos} on the {c.source.title()} {chart_period} chart.",
         ))
 
     # --- Bandcamp discovery bonus (compensates for no chart_position signal) ---

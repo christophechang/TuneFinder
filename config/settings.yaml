@@ -182,6 +182,34 @@ sources:
     enabled: false
     releases_url: "https://ra.co/music/releases"
 
+  mixupload:
+    enabled: true
+    targets:
+      - tf_tag: house
+        chart: style/house
+      - tf_tag: house
+        chart: style-part/deep-house
+      - tf_tag: house
+        chart: style-part/tech-house
+      - tf_tag: house
+        chart: style-part/progressive-house
+      - tf_tag: techno
+        chart: style/techno
+      - tf_tag: dnb
+        chart: style/dnb
+      - tf_tag: breaks
+        chart: style/breaks
+      - tf_tag: hip-hop
+        chart: style/hip-hop
+      - tf_tag: electronica
+        chart: style-part/electronica
+      - tf_tag: downtempo
+        chart: style-part/downtempo
+      - tf_tag: ukg
+        chart: style-part/uk-garage
+      - tf_tag: uk-bass
+        genre: UKBass     # no chart page — uses /genres/{slug}/tracks
+
   discogs:
     enabled: false
 

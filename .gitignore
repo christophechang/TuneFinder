@@ -16,6 +16,7 @@ build/
 data/
 logs/
 fixtures/
+!tests/fixtures/
 
 # Claude Code session files
 .claude/
