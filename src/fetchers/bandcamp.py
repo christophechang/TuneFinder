@@ -1,8 +1,9 @@
 """
-Bandcamp source fetcher — dig_deeper JSON API.
+Bandcamp source fetcher — discover/1/discover_web API.
 
-Uses Bandcamp's internal tag discovery API at /api/hub/2/dig_deeper to get
-the newest releases per tag. Returns albums and tracks sorted by new.
+Uses Bandcamp's internal discover API to get newest releases per tag.
+The old hub/2/dig_deeper endpoint is defunct; this uses the current
+discover_web endpoint discovered from the Vue SPA JS bundle.
 """
 import requests
 
@@ -12,9 +13,9 @@ from src.models import SourceItem
 
 logger = get_logger(__name__)
 
-_DIG_DEEPER_URL = "https://bandcamp.com/api/hub/2/dig_deeper"
+_DISCOVER_URL = "https://bandcamp.com/api/discover/1/discover_web"
 _HEADERS = {
-    "Content-Type": "application/json",
+    "Content-Type": "application/json; charset=UTF-8",
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -43,31 +44,28 @@ def _tag_to_genre(tag: str) -> str:
     return mapping.get(tag, tag)
 
 
-def _make_link(item: dict) -> str:
-    subdomain = item.get("subdomain") or ""
-    custom_domain = item.get("custom_domain") or ""
-    slug = item.get("slug_text") or ""
-    item_type = item.get("item_type", "a")  # "a" = album, "t" = track
-    path_type = "track" if item_type == "t" else "album"
-    domain = custom_domain if custom_domain else f"{subdomain}.bandcamp.com"
-    return f"https://{domain}/{path_type}/{slug}" if subdomain or custom_domain else ""
+def _clean_url(url: str) -> str:
+    return url.split("?")[0] if url else ""
 
 
 def _fetch_tag(tag: str, count: int) -> list[dict]:
     payload = {
-        "tag": tag,
-        "cursor": "*",
-        "filters": {"format": "all", "location": 0, "sort": "new", "tags": [tag]},
-        "count": count,
-        "page": 1,
+        "category_id": 0,
+        "tag_norm_names": [tag],
+        "geoname_id": 0,
+        "slice": "new",
+        "time_facet_id": None,
+        "cursor": None,
+        "size": count,
+        "include_result_types": ["a"],
     }
     headers = {**_HEADERS, "Referer": f"https://bandcamp.com/discover/{tag}"}
-    resp = requests.post(_DIG_DEEPER_URL, json=payload, headers=headers, timeout=_TIMEOUT)
+    resp = requests.post(_DISCOVER_URL, json=payload, headers=headers, timeout=_TIMEOUT)
     resp.raise_for_status()
     data = resp.json()
-    if data.get("error"):
-        raise ValueError(data.get("error_message", "Bandcamp API error"))
-    return data.get("items", [])
+    if data.get("__api_special__") == "exception":
+        raise ValueError(data.get("error_type", "Bandcamp API error"))
+    return data.get("results", [])
 
 
 def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
@@ -95,7 +93,7 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
         tag_items = []
 
         for item in raw_items:
-            artist = item.get("artist") or item.get("band_name") or ""
+            artist = item.get("album_artist") or item.get("band_name") or ""
             title = item.get("title") or ""
             if not artist or not title:
                 continue
@@ -104,9 +102,9 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
                 source="bandcamp",
                 artist=artist,
                 title=title,
-                link=_make_link(item),
+                link=_clean_url(item.get("item_url", "")),
                 label=None,
-                release_date=None,
+                release_date=item.get("release_date"),
                 release_name=title,
                 genre_tags=[genre],
                 raw_metadata={"bandcamp_tag": tag, "item_type": item.get("item_type")},
