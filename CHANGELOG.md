@@ -2,6 +2,12 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.6.5 — 2026-06-06
+
+### Sources
+
+- **Volumo genre coverage extended.** Added `uk-bass` (Bass House / Future House, id 2), `funk-soul-jazz` (Nu-Disco / Soul / Funk, id 17), and `hip-hop` (Soul / R&B / Hip-Hop, id 29) — loose-fit mappings to the closest available Volumo genres, mirroring the tag coverage of other sources. README genre-coverage table updated to match.
+
 ## v0.6.4 — 2026-06-04
 
 ### Sources

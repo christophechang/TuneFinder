@@ -85,15 +85,17 @@ Each internal genre maps to one or more genre feeds on each source. Sources not 
 | `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house | style/house · style-part/deep-house · style-part/tech-house · style-part/progressive-house | house · deep-house · tech-house · soulful-house · funky-house · melodic-house-techno · progressive-house · afro-house |
 | `dnb` | drum-bass | drum-and-bass | drum-and-bass | style/dnb | drum-and-bass |
 | `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat | style/breaks | breaks-breakbeat |
-| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass/tracks | — |
+| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass/tracks | bass-house-future-house ² |
 | `ukg` | uk-garage-bassline | garage | uk-garage | style-part/uk-garage | uk-garage-2-step |
 | `electronica` | electronica | electronica · leftfield | electronic · electronica | style-part/electronica | electronica |
 | `downtempo` | downtempo | lounge-chill-out | downtempo · lounge | style-part/downtempo | organic-house-downtempo |
 | `techno` | techno-raw-deep-hypnotic | techno | techno | style/techno | techno-raw-deep-dub · techno-peak-time |
-| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul | — | — |
-| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap | style/hip-hop | — |
+| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul | — | nu-disco-soul-funk ² |
+| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap | style/hip-hop | soul-rb-hip-hop ² |
 
 ¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the page data are used to split them into the correct internal tags.
+
+² Loose-fit mapping — closest available Volumo genre to the internal tag, not an exact match.
 
 ## Setup
 

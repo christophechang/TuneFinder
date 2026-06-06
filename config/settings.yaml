@@ -251,6 +251,13 @@ sources:
         id: 8                   # Electronica
       - name: downtempo
         id: 18                  # Organic House / Downtempo
+      # loose-fit mappings — closest available Volumo genre
+      - name: uk-bass
+        id: 2                   # Bass House / Future House
+      - name: funk-soul-jazz
+        id: 17                  # Nu-Disco / Soul / Funk
+      - name: hip-hop
+        id: 29                  # Soul / R&B / Hip-Hop
 
   discogs:
     enabled: false
