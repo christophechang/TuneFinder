@@ -2,6 +2,12 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.6.6 — 2026-06-09
+
+### Fixes
+
+- **Volumo compilation album filtering.** Tracks on compilation albums were being tagged with the wrong genre when the album matched a genre query but individual tracks belonged to a different genre. For example, a Tech House track on a compilation with `album.genres: [2, 21]` would appear in `uk-bass` results because genre 2 (Bass House) was in the album's genre list. Fix: `_parse_track` now compares each track's `track.genre_id` against the queried genre ID set and drops mismatches. Tracks with no `genre_id` field are unchanged (no regression). `volumo_genre_id` added to `raw_metadata`. 5 tests added; pre-existing flaky assertion in `test_duplicate_genre_ids_deduplicated` fixed.
+
 ## v0.6.5 — 2026-06-06
 
 ### Sources

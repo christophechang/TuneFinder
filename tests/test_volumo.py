@@ -1,3 +1,4 @@
+import urllib.parse
 from unittest.mock import MagicMock, patch
 
 from src.fetchers import volumo
@@ -161,7 +162,9 @@ def test_duplicate_genre_ids_deduplicated():
 
     assert mock_get.call_count == 1
     url = mock_get.call_args[0][0]
-    assert url.count("12") == 1
+    import json as _json
+    filter_str = urllib.parse.unquote(urllib.parse.urlparse(url).query.split("filter=")[1].split("&")[0])
+    assert _json.loads(filter_str)["genres"] == [12]
 
 
 # ---------------------------------------------------------------------------
@@ -334,3 +337,65 @@ def test_slugify_basic():
 def test_slugify_collapses_doubles():
     assert volumo._slugify("A  B") == "a-b"
     assert volumo._slugify("A--B") == "a-b"
+
+
+# ---------------------------------------------------------------------------
+# Track-level genre_id filtering (compilation album guard)
+# ---------------------------------------------------------------------------
+
+def test_track_with_matching_genre_id_is_included():
+    """Track whose genre_id matches the queried genre passes through."""
+    settings = _make_settings(genres=[{"name": "uk-bass", "id": 2}])
+    track = {**_track(), "genre_id": 2}
+    with patch("src.fetchers.volumo._get_json") as mock_get:
+        mock_get.return_value = [_album(tracks=[track])]
+        items = volumo.fetch(settings)
+
+    assert len(items) == 1
+    assert items[0].genre_tags == ["uk-bass"]
+
+
+def test_track_with_mismatched_genre_id_is_excluded():
+    """Compilation album: track genre_id 21 (tech house) in a genre-2 query is dropped."""
+    settings = _make_settings(genres=[{"name": "uk-bass", "id": 2}])
+    tech_house_track = {**_track(track_id=6234149, title="Perfect Love"), "genre_id": 21}
+    album = _album(tracks=[tech_house_track])
+    with patch("src.fetchers.volumo._get_json") as mock_get:
+        mock_get.return_value = [album]
+        items = volumo.fetch(settings)
+
+    assert items == []
+
+
+def test_track_without_genre_id_is_included():
+    """Track with no genre_id field (API omits it) should not be filtered out."""
+    settings = _make_settings(genres=[{"name": "house", "id": 12}])
+    track = {k: v for k, v in _track().items() if k != "genre_id"}  # ensure absent
+    with patch("src.fetchers.volumo._get_json") as mock_get:
+        mock_get.return_value = [_album(tracks=[track])]
+        items = volumo.fetch(settings)
+
+    assert len(items) == 1
+
+
+def test_genre_id_stored_in_raw_metadata():
+    settings = _make_settings(genres=[{"name": "uk-bass", "id": 2}])
+    track = {**_track(), "genre_id": 2}
+    with patch("src.fetchers.volumo._get_json") as mock_get:
+        mock_get.return_value = [_album(tracks=[track])]
+        items = volumo.fetch(settings)
+
+    assert items[0].raw_metadata["volumo_genre_id"] == 2
+
+
+def test_compilation_album_partial_match():
+    """Compilation with two tracks: one matching genre, one not — only matching survives."""
+    settings = _make_settings(genres=[{"name": "uk-bass", "id": 2}])
+    bass_track = {**_track(track_id=1, title="Bass Track"), "genre_id": 2}
+    tech_track = {**_track(track_id=2, title="Tech Track"), "genre_id": 21}
+    with patch("src.fetchers.volumo._get_json") as mock_get:
+        mock_get.return_value = [_album(tracks=[bass_track, tech_track])]
+        items = volumo.fetch(settings)
+
+    assert len(items) == 1
+    assert items[0].title == "Bass Track"

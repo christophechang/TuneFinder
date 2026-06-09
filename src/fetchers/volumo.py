@@ -102,10 +102,19 @@ def _parse_artist(artists: list) -> str:
     return ", ".join(names)
 
 
-def _parse_track(track: dict, album: dict, tag: str) -> SourceItem | None:
+def _parse_track(track: dict, album: dict, tag: str, genre_ids: set[int]) -> SourceItem | None:
     track_id = track.get("id")
     title = (track.get("title") or "").strip()
     if not track_id or not title:
+        return None
+
+    # Album-level genre filter can include tracks from other genres on compilation albums.
+    # Reject any track whose own genre_id isn't one we actually queried for this tag.
+    track_genre_id = track.get("genre_id")
+    if track_genre_id is not None and track_genre_id not in genre_ids:
+        logger.debug(
+            f"[volumo] skipping track {track_id} '{title}': genre_id={track_genre_id} not in {tag} genres {genre_ids}"
+        )
         return None
 
     artist = _parse_artist(track.get("artists") or [])
@@ -144,6 +153,7 @@ def _parse_track(track: dict, album: dict, tag: str) -> SourceItem | None:
             "duration_ms": track.get("duration"),
             "label_name": label,
             "label_id": label_id,
+            "volumo_genre_id": track_genre_id,
         },
     )
 
@@ -208,9 +218,10 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
             albums = data if isinstance(data, list) else (data.get("data") or data.get("items") or [])
             page += 1
 
+            genre_ids_set = set(genre_ids)
             for album in albums:
                 for track in (album.get("tracks") or []):
-                    item = _parse_track(track, album, tag)
+                    item = _parse_track(track, album, tag, genre_ids_set)
                     if item:
                         tag_items.append(item)
 
