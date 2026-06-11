@@ -184,6 +184,21 @@ def test_pool_age_penalty_handles_bad_iso_string():
     assert c.score == 0.0
 
 
+# --- Commit 2: genre_match capped at 2 tags ---
+
+def test_genre_match_three_tags_capped_at_two():
+    # 3 matching non-exempt tags → 2 * 0.5 = 1.0, not 1.5
+    c = _candidate(genre_tags=["house", "techno", "dnb"])
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 1.0
+
+
+def test_genre_match_one_tag_unchanged():
+    c = _candidate(genre_tags=["house"])
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.score == 0.5
+
+
 # --- Commit 1: electronic excluded from scoring ---
 
 def test_electronic_only_no_genre_score():

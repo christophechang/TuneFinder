@@ -58,6 +58,7 @@ _RECENCY_WEEKS = 4
 _W_POOL_AGE_PER_WEEK = 0.25  # subtracted per week since pool entry was added
 _POOL_AGE_PENALTY_MAX = 1.5  # cap total pool-age penalty
 _W_GENRE = 0.5             # per matching genre tag
+_GENRE_MATCH_CAP = 2       # cross-source dedup unions tags; cap prevents same popularity fact paid twice
 _W_FRESH = 0.5             # released within 30 days
 _W_CHART_TOP = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
 _W_BANDCAMP = 1.0          # discovery bonus for Bandcamp (no chart data available)
@@ -170,7 +171,7 @@ def _score(
     # --- Genre match (soft) ---
     matching = [g for g in c.genre_tags if g in genres_set and g not in _SCORING_EXEMPT_GENRES]
     if matching:
-        score += _W_GENRE * len(matching)
+        score += _W_GENRE * min(len(matching), _GENRE_MATCH_CAP)
         c.signals.append(RecommendationSignal(
             code="genre_match",
             explanation=f"Tagged: {', '.join(matching[:3])}.",
