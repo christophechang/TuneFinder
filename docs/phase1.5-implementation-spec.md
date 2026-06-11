@@ -8,7 +8,7 @@ Five small, data-independent scoring fixes. Each is wrong at any weights (consta
 
 **Out of scope (do not touch):** all scoring weight constants (`_W_*`, existing caps, `_RECURRING_THRESHOLD`) — the new `_GENRE_MATCH_CAP` introduced by Commit 2 is the one deliberate exception; the recency penalty; the Bandcamp bonus; `src/pipeline/reasons.py` and `report.py` (Phase 1 snapshots must pass unchanged); dedup; fetchers; anything under `data/`, `fixtures/`, `.env`.
 
-Work on `develop`. The checkout may be sitting on `main` — switch before Step 0: `git checkout develop && git pull origin develop && git merge main`. The merge is currently a fast-forward: the v0.6.6 volumo hotfix (`src/fetchers/volumo.py` + tests) exists only on `main`, so unmerged `develop` gives a stale baseline and a suite that doesn't match production. Execute commits in order; each leaves the suite green.
+Work on `develop`. The checkout may be sitting on `main` — switch before Step 0: `git fetch origin && git checkout develop && git pull --ff-only origin develop && git merge --ff-only origin/main`. Merge `origin/main`, not local `main` — local may be stale. If the `--ff-only` merge refuses, the branches have diverged since this spec was written — stop and ask. The merge is currently a fast-forward: the v0.6.6 volumo hotfix (`src/fetchers/volumo.py` + tests) exists only on `main`, so unmerged `develop` gives a stale baseline and a suite that doesn't match production. Execute commits in order; each leaves the suite green.
 
 ---
 
