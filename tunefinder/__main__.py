@@ -69,7 +69,7 @@ def cmd_fetch_sources(args):
 def cmd_run(args):
     import time
     from src.fetchers.catalog import fetch_all_tracks
-    from src.fetchers import fetch_all_sources, save_source_items
+    from src.fetchers import fetch_all_sources, save_source_items, archive_source_items
     from src.pipeline.profile import (
         build_artist_profiles, build_known_track_keys,
         save_known_tracks, save_artist_profiles,
@@ -111,6 +111,7 @@ def cmd_run(args):
     # 3. Fetch external sources
     source_items, fetcher_health = fetch_all_sources(settings)
     save_source_items(source_items, settings.data_dir)
+    archive_source_items(source_items, settings.data_dir, report_id)
     sources_fetched = len(source_items)
 
     # 4. Dedup + filter
