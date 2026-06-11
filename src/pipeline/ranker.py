@@ -65,7 +65,7 @@ _W_BANDCAMP = 1.0          # discovery bonus for Bandcamp (no chart data availab
 
 _MAX_ARTIST_SCORE = 10.0   # cap so one mega-artist doesn't dominate
 _RECURRING_THRESHOLD = 3   # play_count needed to earn the recurring bonus
-_FRESH_DAYS = 30
+_FRESH_DAYS = 7  # genuinely just-out; inside a 28-day-filtered corpus, 30 was a constant
 _CHART_SCALE = 100         # chart positions are 1–100
 
 

@@ -184,6 +184,24 @@ def test_pool_age_penalty_handles_bad_iso_string():
     assert c.score == 0.0
 
 
+# --- Commit 3: fresh_release threshold 7 days ---
+
+def test_fresh_release_10_days_no_signal():
+    rel = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%d")
+    c = _candidate(release_date=rel)
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert not any(s.code == "fresh_release" for s in c.signals)
+    assert c.score == 0.0
+
+
+def test_fresh_release_5_days_signal_and_score():
+    rel = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
+    c = _candidate(release_date=rel)
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert any(s.code == "fresh_release" for s in c.signals)
+    assert c.score == 0.5
+
+
 # --- Commit 2: genre_match capped at 2 tags ---
 
 def test_genre_match_three_tags_capped_at_two():
