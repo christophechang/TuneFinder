@@ -111,6 +111,11 @@ class RecommendationRecord:
     source: str
     recommended_at: str  # ISO date string
     report_id: str       # e.g. "2026-W10"
+    track_no: Optional[int] = None
+    signal_codes: list[str] = field(default_factory=list)
+    genre_tags: list[str] = field(default_factory=list)
+    score: Optional[float] = None
+    label: Optional[str] = None
 
     @property
     def key(self) -> str:

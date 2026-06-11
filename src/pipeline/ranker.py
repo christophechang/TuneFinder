@@ -415,13 +415,3 @@ def rank_candidates_mix_prep(
     return _assign_sections_mix_prep(ranked, settings), label_artist_names
 
 
-def all_section_candidates(sections: dict[str, list[Candidate]]) -> list[Candidate]:
-    """Flatten all section candidates into a single list for history recording."""
-    seen: set[int] = set()
-    result = []
-    for candidates in sections.values():
-        for c in candidates:
-            if id(c) not in seen:
-                result.append(c)
-                seen.add(id(c))
-    return result

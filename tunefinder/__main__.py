@@ -81,9 +81,9 @@ def cmd_run(args):
         deduplicate_source_items, items_to_candidates,
         filter_known, filter_history, filter_release_date,
     )
-    from src.pipeline.ranker import rank_candidates, all_section_candidates
+    from src.pipeline.ranker import rank_candidates
     from src.pipeline.pool import load_pool, pool_to_candidates, save_pool, POOL_CAP
-    from src.pipeline.report import generate_report
+    from src.pipeline.report import generate_report, report_order
     from src.output.discord import make_discord_client
     from src.models import RecommendationRecord, PoolRecord
     from datetime import datetime, timezone
@@ -172,7 +172,7 @@ def cmd_run(args):
 
     # 8. Update recommendation history and rebuild candidate pool (skipped in dry-run)
     now_iso = datetime.now(timezone.utc).isoformat()
-    recommended = all_section_candidates(sections)
+    recommended = report_order(sections)
     new_records = [
         RecommendationRecord(
             artist=c.artist,
@@ -181,8 +181,13 @@ def cmd_run(args):
             source=c.source,
             recommended_at=now_iso,
             report_id=report_id,
+            track_no=i,
+            signal_codes=[s.code for s in c.signals],
+            genre_tags=c.genre_tags,
+            score=c.score,
+            label=c.label,
         )
-        for c in recommended
+        for i, c in enumerate(recommended, start=1)
     ]
     recommended_keys = {c.key for c in recommended}
     existing_added_at = {r.key: r.added_at for r in pool_records}
@@ -251,9 +256,9 @@ def cmd_mix_prep(args):
         deduplicate_source_items, items_to_candidates,
         filter_known, filter_genre, filter_genre_exclusions, filter_release_date,
     )
-    from src.pipeline.ranker import rank_candidates_mix_prep, all_section_candidates
+    from src.pipeline.ranker import rank_candidates_mix_prep
     from src.pipeline.pool import load_pool, pool_to_candidates
-    from src.pipeline.report import generate_mix_prep_report
+    from src.pipeline.report import generate_mix_prep_report, report_order
     from src.output.discord import make_discord_client
     from src.models import RecommendationRecord
     from datetime import datetime, timezone
@@ -342,7 +347,7 @@ def cmd_mix_prep(args):
 
     # 8. Save to mix-prep history (skipped in dry-run)
     now_iso = datetime.now(timezone.utc).isoformat()
-    recommended = all_section_candidates(sections)
+    recommended = report_order(sections)
     new_records = [
         RecommendationRecord(
             artist=c.artist,
@@ -351,8 +356,13 @@ def cmd_mix_prep(args):
             source=c.source,
             recommended_at=now_iso,
             report_id=report_id,
+            track_no=i,
+            signal_codes=[s.code for s in c.signals],
+            genre_tags=c.genre_tags,
+            score=c.score,
+            label=c.label,
         )
-        for c in recommended
+        for i, c in enumerate(recommended, start=1)
     ]
     if not dry_run:
         append_mix_prep_records(new_records, settings.data_dir)

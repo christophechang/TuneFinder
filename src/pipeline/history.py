@@ -30,6 +30,11 @@ def _record_to_dict(r: RecommendationRecord) -> dict:
         "source": r.source,
         "recommended_at": r.recommended_at,
         "report_id": r.report_id,
+        "track_no": r.track_no,
+        "signal_codes": r.signal_codes,
+        "genre_tags": r.genre_tags,
+        "score": r.score,
+        "label": r.label,
     }
 
 
@@ -41,6 +46,11 @@ def _dict_to_record(d: dict) -> RecommendationRecord:
         source=d["source"],
         recommended_at=d.get("recommended_at", ""),
         report_id=d.get("report_id", ""),
+        track_no=d.get("track_no"),
+        signal_codes=d.get("signal_codes", []),
+        genre_tags=d.get("genre_tags", []),
+        score=d.get("score"),
+        label=d.get("label"),
     )
 
 
