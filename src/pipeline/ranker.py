@@ -26,6 +26,10 @@ _GENRE_AUGMENT_MIN_ARTISTS = 3
 # by `_build_genre_set` with any catalog genre crossing the augment threshold.
 _BASELINE_GENRES = {"dnb", "breaks", "uk-bass", "ukg", "house", "techno", "electronica", "electronic"}
 
+# Too broad to be evidence of taste fit — nearly every track carries it.
+# Stays in _BASELINE_GENRES (genre-set augmentation + cap exemption); excluded from scoring only.
+_SCORING_EXEMPT_GENRES = {"electronic"}
+
 
 def _build_genre_set(profiles_lower: dict[str, ArtistProfile]) -> set[str]:
     """Return the curated baseline genres unioned with any catalog genre that
@@ -164,7 +168,7 @@ def _score(
         ))
 
     # --- Genre match (soft) ---
-    matching = [g for g in c.genre_tags if g in genres_set]
+    matching = [g for g in c.genre_tags if g in genres_set and g not in _SCORING_EXEMPT_GENRES]
     if matching:
         score += _W_GENRE * len(matching)
         c.signals.append(RecommendationSignal(

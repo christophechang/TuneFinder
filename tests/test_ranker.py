@@ -182,3 +182,22 @@ def test_pool_age_penalty_handles_bad_iso_string():
     c = _candidate(pool_added_at="not-a-date")
     _score(c, {}, set(), {}, _build_genre_set({}))
     assert c.score == 0.0
+
+
+# --- Commit 1: electronic excluded from scoring ---
+
+def test_electronic_only_no_genre_score():
+    c = _candidate(genre_tags=["electronic"])
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert not any(s.code == "genre_match" for s in c.signals)
+    assert c.score == 0.0
+
+
+def test_electronic_with_house_scores_house_only():
+    c = _candidate(genre_tags=["house", "electronic"])
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    genre_sigs = [s for s in c.signals if s.code == "genre_match"]
+    assert len(genre_sigs) == 1
+    assert "house" in genre_sigs[0].explanation
+    assert "electronic" not in genre_sigs[0].explanation
+    assert c.score == 0.5
