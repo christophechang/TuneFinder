@@ -304,8 +304,7 @@ def cmd_mix_prep(args):
         genre,
     )
     _pool = filter_genre_exclusions(_pool, genre, settings.pipeline_genre_exclusions)
-    if window_days:
-        _pool = filter_release_date(_pool, window_days)
+    # Pool injection is deliberately exempt from the release-date window (same as the weekly run) — the pool-age penalty handles staleness. See docs/scoring-review.md §2.5.
     pool_injected = [
         c for c in _pool
         if c.key not in known_keys and c.key not in mix_prep_history_keys
