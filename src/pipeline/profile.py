@@ -97,7 +97,6 @@ def _profile_to_dict(p: ArtistProfile) -> dict:
         "name": p.name,
         "play_count": p.play_count,
         "genres_seen": p.genres_seen,
-        "associated_labels": p.associated_labels,
         "track_titles": p.track_titles,
     }
 
@@ -107,7 +106,6 @@ def _dict_to_profile(d: dict) -> ArtistProfile:
         name=d["name"],
         play_count=d.get("play_count", 0),
         genres_seen=d.get("genres_seen", []),
-        associated_labels=d.get("associated_labels", []),
         track_titles=d.get("track_titles", []),
     )
 

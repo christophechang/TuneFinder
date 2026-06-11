@@ -114,10 +114,6 @@ class Settings:
     # --- Pipeline ---
 
     @property
-    def pipeline_max_candidates(self) -> int:
-        return self._data.get("pipeline", {}).get("max_candidates", 100)
-
-    @property
     def pipeline_top_picks_count(self) -> int:
         return self._data.get("pipeline", {}).get("top_picks_count", 5)
 

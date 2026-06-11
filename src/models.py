@@ -50,17 +50,7 @@ class ArtistProfile:
     name: str
     play_count: int = 0
     genres_seen: list[str] = field(default_factory=list)
-    associated_labels: list[str] = field(default_factory=list)
     track_titles: list[str] = field(default_factory=list)
-
-
-@dataclass
-class LabelRelevance:
-    name: str
-    score: float = 0.0
-    associated_artists: list[str] = field(default_factory=list)
-    recent_release_count: int = 0
-    source_evidence: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -99,8 +89,6 @@ class Candidate:
     release_name: Optional[str] = None
     signals: list[RecommendationSignal] = field(default_factory=list)
     score: float = 0.0
-    is_known: bool = False
-    is_previously_recommended: bool = False
     genre_tags: list[str] = field(default_factory=list)
     raw_metadata: dict = field(default_factory=dict)
     pool_added_at: Optional[str] = None
