@@ -67,15 +67,18 @@ _CHART_SCALE = 100         # chart positions are 1–100
 def _build_relevant_labels(
     candidates: list[Candidate],
     profiles_lower: dict[str, ArtistProfile],
-) -> tuple[set[str], dict[str, int]]:
-    """Return (relevant_labels, label_known_artist_counts).
+) -> tuple[set[str], dict[str, int], dict[str, list[str]]]:
+    """Return (relevant_labels, label_known_artist_counts, label_artist_names).
 
     A label is relevant if any release on it has a known artist (matched in
     profiles_lower). The counts dict tracks how many DISTINCT known artists in
     the candidate set are on each label — used by the label scoring formula.
+    label_artist_names holds all display names (sorted) per label key; truncation
+    to 3 happens at render time.
     """
     relevant: set[str] = set()
     counts: dict[str, set[str]] = {}
+    names: dict[str, set[str]] = {}
     for c in candidates:
         if not c.label:
             continue
@@ -85,9 +88,11 @@ def _build_relevant_labels(
             if profile:
                 relevant.add(label_key)
                 counts.setdefault(label_key, set()).add(profile.name.lower())
+                names.setdefault(label_key, set()).add(profile.name)
     counts_int = {k: len(v) for k, v in counts.items()}
+    label_artist_names = {k: sorted(v) for k, v in names.items()}
     logger.info(f"[ranker] {len(relevant)} relevant labels derived from candidate set")
-    return relevant, counts_int
+    return relevant, counts_int, label_artist_names
 
 
 def _score(
@@ -181,7 +186,7 @@ def _score(
         except ValueError:
             pass
 
-    # --- Chart position (Juno and any other source that sets chart_position) ---
+    # --- Chart position (any source that sets chart_position, e.g. Beatport) ---
     chart_pos = c.raw_metadata.get("chart_position")
     if chart_pos and isinstance(chart_pos, int) and 1 <= chart_pos <= _CHART_SCALE:
         chart_bonus = _W_CHART_TOP * (1 - (chart_pos - 1) / _CHART_SCALE)
@@ -300,10 +305,12 @@ def rank_candidates(
     profiles: dict[str, ArtistProfile],
     settings,
     label_seed: list[Candidate] | None = None,
-) -> dict[str, list[Candidate]]:
+) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score all candidates, assign signals, sort, and split into report sections.
-    Returns a dict with keys: top_picks, label_watch, artist_watch, wildcards.
+    Returns (sections, label_artist_names).
+    sections keys: top_picks, label_watch, artist_watch, wildcards.
+    label_artist_names: {label_key: sorted list of display names}.
 
     label_seed: pre-filter candidates used for label relevance derivation.
     Pass the full source candidate list before filter_known/filter_history so
@@ -314,7 +321,7 @@ def rank_candidates(
 
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
-    relevant_labels, label_artist_counts = _build_relevant_labels(
+    relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
         label_seed if label_seed is not None else candidates, profiles_lower
     )
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=_RECENCY_WEEKS)
@@ -325,7 +332,7 @@ def rank_candidates(
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
 
-    return _assign_sections(ranked, settings, genres_set)
+    return _assign_sections(ranked, settings, genres_set), label_artist_names
 
 
 def _assign_sections_mix_prep(
@@ -372,9 +379,10 @@ def rank_candidates_mix_prep(
     profiles: dict[str, ArtistProfile],
     settings,
     label_seed: list[Candidate] | None = None,
-) -> dict[str, list[Candidate]]:
+) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score and section candidates for a mix-prep run.
+    Returns (sections, label_artist_names).
     Same scoring as rank_candidates but uses two sections (top_picks, deep_cuts)
     with no per-genre cap — the genre has already been filtered upstream.
     """
@@ -382,7 +390,7 @@ def rank_candidates_mix_prep(
 
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
-    relevant_labels, label_artist_counts = _build_relevant_labels(
+    relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
         label_seed if label_seed is not None else candidates, profiles_lower
     )
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=_RECENCY_WEEKS)
@@ -393,7 +401,7 @@ def rank_candidates_mix_prep(
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
 
-    return _assign_sections_mix_prep(ranked, settings)
+    return _assign_sections_mix_prep(ranked, settings), label_artist_names
 
 
 def all_section_candidates(sections: dict[str, list[Candidate]]) -> list[Candidate]:

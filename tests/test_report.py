@@ -1,81 +1,34 @@
-import src.pipeline.report as report_mod
+"""Tests for the deterministic report renderer (src/pipeline/report.py)."""
+from datetime import date
+
+import pytest
+
 from src.models import ArtistProfile, Candidate, RecommendationSignal
+from src.pipeline.report import (
+    _format_weekly_stats,
+    _format_mix_prep_stats,
+    generate_report,
+    generate_mix_prep_report,
+)
+
+TODAY = date(2026, 6, 11)
 
 
-class _Settings:
-    def __init__(self):
-        self.data_dir = "data"
-
-
-def _make_candidate(artist="Sully", title="Cherry", signals=None, **kw):
+def _c(artist="A", title="T", source="beatport", label=None, link="", signals=None,
+       genre_tags=None, release_date=None, raw_metadata=None):
     return Candidate(
-        artist=artist, title=title, link="", source="beatport",
-        signals=signals or [],
-        **kw,
+        artist=artist, title=title, link=link, source=source, label=label,
+        release_date=release_date, genre_tags=genre_tags or [],
+        signals=[RecommendationSignal(code=s, explanation="") for s in (signals or [])],
+        raw_metadata=raw_metadata or {},
     )
 
 
-def test_enrich_reasons_includes_prior_titles_for_known_artist(monkeypatch, sample_profiles):
-    captured = {}
-
-    def fake_call_stage1(prompt, system, settings, temperature=None):
-        captured["prompt"] = prompt
-        captured["temperature"] = temperature
-        return "[]"
-
-    monkeypatch.setattr(report_mod, "call_stage1", fake_call_stage1)
-
-    cand = _make_candidate(
-        artist="Sully",
-        title="Cherry",
-        label="Astrophonica",
-        genre_tags=["breaks"],
-        raw_metadata={"chart_position": 3, "seen_on_sources": ["beatport"]},
-        signals=[RecommendationSignal(code="known_artist", explanation="x")],
-    )
-    report_mod._enrich_reasons([cand], _Settings(), profiles=sample_profiles)
-
-    assert captured["temperature"] == 0.3
-    assert "Swandive" in captured["prompt"]
-    assert "Glasshouse" in captured["prompt"]
-    assert '"prior_titles_sample"' in captured["prompt"]
-
-
-def test_enrich_reasons_empty_prior_titles_for_unknown_artist(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(report_mod, "call_stage1",
-                        lambda p, s, st, temperature=None: captured.setdefault("prompt", p) or "[]")
-    cand = _make_candidate(artist="Nobody", title="Unknown", signals=[])
-    report_mod._enrich_reasons([cand], _Settings(), profiles={})
-    assert '"prior_titles_sample": []' in captured["prompt"]
-
-
-def test_enrich_reasons_includes_cross_source_count(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(report_mod, "call_stage1",
-                        lambda p, s, st, temperature=None: captured.setdefault("prompt", p) or "[]")
-    cand = _make_candidate(raw_metadata={"seen_on_sources": ["a", "b", "c"]})
-    report_mod._enrich_reasons([cand], _Settings(), profiles={})
-    assert '"cross_source_count": 3' in captured["prompt"]
-
-
-def test_enrich_reasons_system_prompt_lists_anti_patterns(monkeypatch):
-    captured = {}
-
-    def fake(prompt, system, settings, temperature=None):
-        captured["system"] = system
-        return "[]"
-
-    monkeypatch.setattr(report_mod, "call_stage1", fake)
-    cand = _make_candidate()
-    report_mod._enrich_reasons([cand], _Settings(), profiles={})
-    sys_lower = captured["system"].lower()
-    for banned in ["sonic", "undeniable", "journey", "vibes", "must-hear", "perfect for"]:
-        assert banned in sys_lower
-
+# ---------------------------------------------------------------------------
+# Preserved stats tests (verbatim from original)
+# ---------------------------------------------------------------------------
 
 def test_format_weekly_stats_summarises_sections(sample_profiles):
-    from src.pipeline.report import _format_weekly_stats
     sections = {
         "top_picks": [
             Candidate(artist="Sully", title="T1", link="", source="s", label="L1",
@@ -96,13 +49,11 @@ def test_format_weekly_stats_summarises_sections(sample_profiles):
 
 
 def test_format_weekly_stats_empty_returns_empty_string():
-    from src.pipeline.report import _format_weekly_stats
     assert _format_weekly_stats({}, None) == ""
     assert _format_weekly_stats({"top_picks": []}, None) == ""
 
 
 def test_format_mix_prep_stats_omits_labels_and_known_artists():
-    from src.pipeline.report import _format_mix_prep_stats
     sections = {
         "top_picks": [
             Candidate(artist="A", title="T1", link="", source="s", label="L1",
@@ -120,66 +71,246 @@ def test_format_mix_prep_stats_omits_labels_and_known_artists():
 
 
 def test_format_mix_prep_stats_empty():
-    from src.pipeline.report import _format_mix_prep_stats
     assert _format_mix_prep_stats({}) == ""
 
 
-def test_generate_report_system_prompt_includes_anti_patterns(monkeypatch, sample_profiles):
-    captured = {}
+# ---------------------------------------------------------------------------
+# Renderer tests
+# ---------------------------------------------------------------------------
 
-    def fake_call_stage2(prompt, system, settings):
-        captured["system"] = system
-        captured["prompt"] = prompt
-        return "Body of report"
-
-    def fake_call_stage1(prompt, system, settings, temperature=None):
-        return "[]"
-
-    monkeypatch.setattr(report_mod, "call_stage2", fake_call_stage2)
-    monkeypatch.setattr(report_mod, "call_stage1", fake_call_stage1)
-
-    sections = {"top_picks": [_make_candidate()]}
-    report_mod.generate_report(sections, "TEST", {}, _Settings(), profiles=sample_profiles)
-
-    sys_lower = captured["system"].lower()
-    assert "sonic" in sys_lower
-    assert "undeniable" in sys_lower
-    assert "no filler intro" in sys_lower
-    assert "no closing summary" in sys_lower
-    assert "This week:" in captured["prompt"]
+def test_empty_section_omitted():
+    sections = {"top_picks": [_c("X", "T")], "wildcards": []}
+    report = generate_report(sections, "TEST", {}, object(), today=TODAY)
+    assert "## 🔺 Top Picks" in report
+    assert "## 🃏 Wildcards" not in report
 
 
-def test_generate_report_system_prompt_instructs_reason_rendering(monkeypatch):
-    captured = {}
-
-    def fake_call_stage2(prompt, system, settings):
-        captured["system"] = system
-        return "out"
-
-    monkeypatch.setattr(report_mod, "call_stage2", fake_call_stage2)
-    monkeypatch.setattr(report_mod, "call_stage1",
-                        lambda p, s, st, temperature=None: "[]")
-
-    sections = {"top_picks": [_make_candidate()]}
-    report_mod.generate_report(sections, "TEST", {}, _Settings(), profiles={})
-    sys_text = captured["system"]
-    assert "> {reason}" in sys_text
-    assert "render it verbatim on the blockquote line" in sys_text.lower()
+def test_continuous_numbering_across_sections():
+    sections = {
+        "top_picks": [_c("A", "T1"), _c("B", "T2")],
+        "wildcards": [_c("C", "T3")],
+    }
+    report = generate_report(sections, "TEST", {}, object(), today=TODAY)
+    assert "1. **A" in report
+    assert "2. **B" in report
+    assert "3. **C" in report
 
 
-def test_generate_mix_prep_report_system_prompt_instructs_reason_rendering(monkeypatch):
-    captured = {}
+def test_label_watch_grouping_and_italic_artist_line():
+    label_artists = {"ilian tape": ["Calibre", "Skee Mask"]}
+    c = _c("Newcomer", "Track", "volumo", label="Ilian Tape", link="https://example.com",
+           signals=["label_match"])
+    sections = {"label_watch": [c]}
+    report = generate_report(sections, "TEST", {}, object(),
+                             label_artists=label_artists, today=TODAY)
+    assert "**Ilian Tape**" in report
+    assert "*2 of your artists release here: Calibre, Skee Mask*" in report
 
-    def fake_call_stage2(prompt, system, settings):
-        captured["system"] = system
-        return "out"
 
-    monkeypatch.setattr(report_mod, "call_stage2", fake_call_stage2)
-    monkeypatch.setattr(report_mod, "call_stage1",
-                        lambda p, s, st, temperature=None: "[]")
+def test_label_watch_four_artists_true_count_with_first_three():
+    label_artists = {"big label": ["A", "B", "C", "D"]}
+    c = _c("X", "T", "volumo", label="Big Label", signals=["label_match"])
+    sections = {"label_watch": [c]}
+    report = generate_report(sections, "TEST", {}, object(),
+                             label_artists=label_artists, today=TODAY)
+    # True count (4), first 3 names, ellipsis
+    assert "4 of your artists" in report
+    assert "A, B, C, …" in report
+    # D should not appear as a name in the artist line
+    assert "D" not in report.split("**Big Label**")[1].split("\n")[1]
 
-    sections = {"top_picks": [_make_candidate()]}
-    report_mod.generate_mix_prep_report(sections, "TEST", {}, "dnb", _Settings(), profiles={})
-    sys_text = captured["system"]
-    assert "> {reason}" in sys_text
-    assert "render it verbatim on the blockquote line" in sys_text.lower()
+
+def test_label_watch_no_names_omits_artist_line():
+    c = _c("X", "T", "volumo", label="Mystery Label", signals=["label_match"])
+    sections = {"label_watch": [c]}
+    report = generate_report(sections, "TEST", {}, object(),
+                             label_artists={}, today=TODAY)
+    assert "**Mystery Label**" in report
+    assert "of your artists" not in report
+
+
+def test_no_label_track_no_label_bracket():
+    c = _c("X", "T", "beatport", label=None)
+    sections = {"wildcards": [c]}
+    report = generate_report(sections, "TEST", {}, object(), today=TODAY)
+    assert "[None]" not in report
+    assert "**X — T**" in report
+
+
+def test_no_link_no_listen():
+    c = _c("X", "T", "volumo", link="")
+    sections = {"wildcards": [c]}
+    report = generate_report(sections, "TEST", {}, object(), today=TODAY)
+    assert "Listen" not in report
+    assert "→" not in report
+
+
+def test_sanitiser_applied_to_output():
+    # A bare URL in a reason would get stripped by _sanitize_report
+    c = _c("X", "T", "volumo", link="https://volumo.com/track/abc",
+           raw_metadata={"seen_on_sources": ["volumo", "beatport"]},
+           signals=["cross_source"])
+    sections = {"wildcards": [c]}
+    report = generate_report(sections, "TEST", {}, object(), today=TODAY)
+    # Ensure all links in report are in angle-bracket form
+    import re
+    bare_url_re = re.compile(r'(?<![(<])(https?://\S+)(?![)>])')
+    assert not bare_url_re.search(report)
+
+
+def test_profile_path_produces_artist_grounded_reason():
+    profiles = {"calibre": ArtistProfile(name="Calibre", play_count=6,
+                                          track_titles=["Shifting"])}
+    c = _c("Calibre", "New One", "beatport", signals=["known_artist"])
+    sections = {"artist_watch": [c]}
+    report = generate_report(sections, "TEST", {}, object(),
+                             profiles={"Calibre": profiles["calibre"]}, today=TODAY)
+    # Should produce an artist-grounded reason (You play / plays in your mix history)
+    assert "Calibre" in report
+    assert ("6 plays" in report or "You play" in report or "follow-up" in report)
+
+
+# ---------------------------------------------------------------------------
+# Snapshot tests
+# ---------------------------------------------------------------------------
+
+def _make_weekly_fixture():
+    profiles = {
+        "Calibre": ArtistProfile(name="Calibre", play_count=8, genres_seen=["dnb"],
+                                  track_titles=["Shifting", "Gravitas"]),
+        "Sully": ArtistProfile(name="Sully", play_count=4, genres_seen=["breaks"],
+                                track_titles=["Swandive"]),
+    }
+    c1 = _c("Calibre", "New Dawn", "beatport", label="Signature",
+            link="https://beatport.com/track/new-dawn/1",
+            signals=["known_artist", "chart_position"],
+            genre_tags=["dnb"], release_date="2026-06-08",
+            raw_metadata={"chart_position": 3})
+    c2 = _c("Skee Mask", "Idealism", "beatport",
+            link="https://beatport.com/track/idealism/2",
+            signals=["chart_position"],
+            genre_tags=["electronica"], release_date="2026-06-06",
+            raw_metadata={"chart_position": 7})
+    c3 = _c("Pola & Bryson", "Somewhere", "volumo", label="Metalheadz",
+            link="https://volumo.com/track/somewhere",
+            signals=["label_match"],
+            genre_tags=["dnb"], release_date="2026-06-05")
+    c4 = _c("Sully", "Glasshouse", "bandcamp",
+            link="https://bandcamp.com/track/glasshouse",
+            signals=["known_artist"],
+            genre_tags=["breaks"], release_date="2026-06-09")
+    c5 = _c("Unknown Producer", "Deep Space", "volumo",
+            link="", signals=[], genre_tags=["house"])
+    return profiles, {
+        "top_picks": [c1, c2],
+        "label_watch": [c3],
+        "artist_watch": [c4],
+        "wildcards": [c5],
+    }
+
+
+def _make_mix_prep_fixture():
+    profiles = {
+        "Calibre": ArtistProfile(name="Calibre", play_count=8, genres_seen=["dnb"],
+                                  track_titles=["Shifting", "Gravitas"]),
+    }
+    mp1 = _c("Calibre", "Soul On Fire", "beatport", label="Signature",
+             link="https://beatport.com/track/soul/3",
+             signals=["known_artist", "chart_position"],
+             genre_tags=["dnb"], release_date="2026-06-07",
+             raw_metadata={"chart_position": 1})
+    mp2 = _c("Zero T", "Cascade", "volumo", label="Hospital",
+             link="https://volumo.com/track/cascade",
+             signals=["genre_match"],
+             genre_tags=["dnb"], release_date="2026-06-03")
+    return profiles, {"top_picks": [mp1], "deep_cuts": [mp2]}
+
+
+_WEEKLY_SNAPSHOT = (
+    "**TuneFinder — 11 June 2026 (2026-W24)**\n"
+    "*This week: 5 tracks across 2 labels, 2 known artists. Top genres: dnb, electronica, breaks.*\n"
+    "\n"
+    "## 🔺 Top Picks\n"
+    "1. **Calibre — New Dawn** [Signature] [Beatport] → [Listen](<https://beatport.com/track/new-dawn/1>)\n"
+    "> Calibre again — #3 on Beatport dnb; you've played Shifting.\n"
+    "2. **Skee Mask — Idealism** [Beatport] → [Listen](<https://beatport.com/track/idealism/2>)\n"
+    "> #7 on the Beatport electronica chart this week.\n"
+    "\n"
+    "## 🏷️ Label Watch\n"
+    "**Metalheadz**\n"
+    "*2 of your artists release here: Calibre, Sully*\n"
+    "3. **Pola & Bryson — Somewhere** [Metalheadz] [Volumo] → [Listen](<https://volumo.com/track/somewhere>)\n"
+    "> Metalheadz — Calibre, Sully release here; you play them all.\n"
+    "\n"
+    "## 👁️ Artist Watch\n"
+    "4. **Sully — Glasshouse** [Bandcamp] → [Listen](<https://bandcamp.com/track/glasshouse>)\n"
+    "> Sully follow-up to Swandive — 4 plays in your mix history.\n"
+    "\n"
+    "## 🃏 Wildcards\n"
+    "5. **Unknown Producer — Deep Space** [Volumo]\n"
+    "> New release via Volumo.\n"
+    "\n"
+    "## ⚙️ Processing Summary\n"
+    "📥 Sources fetched: **100**\n"
+    "🔀 After dedup: **80**\n"
+    "🎵 After known-track filter: **60**\n"
+    "📋 After history filter: **55**\n"
+    "♻️ Pool injected: **5**\n"
+    "🎯 Tracks in report: **5**\n"
+    "`Report ID: 2026-W24`"
+)
+
+_MIX_PREP_SNAPSHOT = (
+    "🎛️ Dnb Mix Prep Report\n"
+    "Report ID: 2026-W24-mix-prep-dnb\n"
+    "Date: 11 June 2026\n"
+    "\n"
+    "*This set: 2 tracks. Top genres: dnb.*\n"
+    "\n"
+    "## 🔺 Top Picks (dnb)\n"
+    "1. **Calibre — Soul On Fire** [Signature] [Beatport] → [Listen](<https://beatport.com/track/soul/3>)\n"
+    "> You play Calibre (Shifting) — now #1 on the Beatport dnb chart.\n"
+    "\n"
+    "## 🎧 Deep Cuts\n"
+    "2. **Zero T — Cascade** [Hospital] [Volumo] → [Listen](<https://volumo.com/track/cascade>)\n"
+    "> Fresh dnb on Hospital, out 8 days ago.\n"
+    "\n"
+    "## ⚙️ Processing Summary\n"
+    "📥 Sources fetched: **50**\n"
+    "🔀 After dedup: **40**\n"
+    "🎚️ After genre filter: **20**\n"
+    "♻️ Pool injected: **2**\n"
+    "`Report ID: 2026-W24-mix-prep-dnb`"
+)
+
+
+def test_weekly_snapshot():
+    profiles, sections = _make_weekly_fixture()
+    label_artists = {
+        "signature": ["Calibre", "Sully"],
+        "metalheadz": ["Calibre", "Sully"],
+    }
+    result = generate_report(
+        sections, "2026-W24",
+        {"sources_fetched": 100, "after_dedup": 80, "after_known": 60,
+         "after_history": 55, "after_release_date": 40, "pool_injected": 5},
+        object(),
+        profiles=profiles,
+        label_artists=label_artists,
+        today=TODAY,
+    )
+    assert result == _WEEKLY_SNAPSHOT
+
+
+def test_mix_prep_snapshot():
+    profiles, sections = _make_mix_prep_fixture()
+    result = generate_mix_prep_report(
+        sections, "2026-W24-mix-prep-dnb",
+        {"sources_fetched": 50, "after_dedup": 40, "after_genre": 20, "pool_injected": 2},
+        "dnb",
+        object(),
+        profiles=profiles,
+        label_artists={"signature": ["Calibre"]},
+        today=TODAY,
+    )
+    assert result == _MIX_PREP_SNAPSHOT

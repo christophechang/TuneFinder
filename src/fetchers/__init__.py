@@ -5,10 +5,11 @@ fetch_all_sources() runs all enabled fetchers and returns the combined
 list of SourceItems. Results are saved to data/source_items.json for use
 by the pipeline on the same run.
 """
+import gzip
 import json
 import os
 
-from src.fetchers import bandcamp, beatport, bleep, boomkat, juno, mixupload, ra, traxsource, volumo
+from src.fetchers import bandcamp, beatport, bleep, boomkat, mixupload, ra, traxsource, volumo
 from src.logger import get_logger
 from src.models import SourceItem
 
@@ -17,7 +18,6 @@ logger = get_logger(__name__)
 _SOURCE_ITEMS_FILE = "source_items.json"
 
 _FETCHERS = [
-    ("juno", juno.fetch),
     ("beatport", beatport.fetch),
     ("bandcamp", bandcamp.fetch),
     ("traxsource", traxsource.fetch),
@@ -102,6 +102,29 @@ def save_source_items(items: list[SourceItem], data_dir: str) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump([_item_to_dict(i) for i in items], f, indent=2, ensure_ascii=False)
     logger.info(f"[sources] Saved {len(items)} source items to {path}")
+
+
+_ARCHIVE_RETAIN = 26
+
+
+def archive_source_items(items: list[SourceItem], data_dir: str, report_id: str) -> None:
+    """Write a gzip'd snapshot of source items for the week, then prune oldest beyond 26."""
+    archive_dir = os.path.join(data_dir, "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    path = os.path.join(archive_dir, f"source_items_{report_id}.json.gz")
+    payload = json.dumps([_item_to_dict(i) for i in items], ensure_ascii=False).encode("utf-8")
+    with gzip.open(path, "wb") as f:
+        f.write(payload)
+
+    # Prune oldest files beyond the retention limit (by mtime)
+    gz_files = sorted(
+        [os.path.join(archive_dir, fn) for fn in os.listdir(archive_dir) if fn.endswith(".json.gz")],
+        key=os.path.getmtime,
+    )
+    retained = gz_files[-_ARCHIVE_RETAIN:]
+    for old in gz_files[:-_ARCHIVE_RETAIN]:
+        os.remove(old)
+    logger.info(f"[sources] Archived {len(items)} items → {path}; retained {len(retained)} snapshots")
 
 
 def load_source_items(data_dir: str) -> list[SourceItem]:

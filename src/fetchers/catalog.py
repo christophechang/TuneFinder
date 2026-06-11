@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 
 import requests
@@ -8,6 +9,12 @@ from src.logger import get_logger
 from src.models import Mix, Track, TrackRef
 
 logger = get_logger(__name__)
+
+_NUMBER_PREFIX_RE = re.compile(r"^\s*\d{1,3}[.)]\s+")
+
+
+def _clean_artist(name: str) -> str:
+    return _NUMBER_PREFIX_RE.sub("", name)
 
 _DEFAULT_BASE_URL = "https://api.changsta.com"
 _MIXES_PAGE_SIZE = 50
@@ -60,11 +67,15 @@ def _paginate(path: str, page_size: int, base_url: str = _DEFAULT_BASE_URL) -> l
 # Parsers
 # ---------------------------------------------------------------------------
 
-def _parse_mix(raw: dict) -> Mix:
-    tracklist = [
-        TrackRef(artist=t["artist"], title=t["title"])
-        for t in raw.get("tracklist", [])
-    ]
+def _parse_mix(raw: dict) -> tuple[Mix, int]:
+    strips = 0
+    tracklist = []
+    for t in raw.get("tracklist", []):
+        raw_artist = t["artist"]
+        cleaned = _clean_artist(raw_artist)
+        if cleaned != raw_artist:
+            strips += 1
+        tracklist.append(TrackRef(artist=cleaned, title=t["title"]))
     return Mix(
         id=raw.get("id", ""),
         title=raw.get("title", ""),
@@ -77,22 +88,26 @@ def _parse_mix(raw: dict) -> Mix:
         moods=raw.get("moods") or [],
         published_at=raw.get("publishedAt", ""),
         tracklist=tracklist,
-    )
+    ), strips
 
 
-def _parse_track(raw: dict) -> Track:
+def _parse_track(raw: dict) -> tuple[Track, int]:
+    raw_artist = raw.get("artist", "")
+    cleaned = _clean_artist(raw_artist)
+    strips = 1 if cleaned != raw_artist else 0
     return Track(
-        artist=raw.get("artist", ""),
+        artist=cleaned,
         title=raw.get("title", ""),
         recurrence_count=raw.get("recurrenceCount", 1),
         genres_seen=raw.get("genresSeen") or [],
-    )
+    ), strips
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
+# Currently uncalled — retained deliberately for Phase 3 (BPM/energy-aware mix-prep). See docs/improvement-plan.md §5.
 def fetch_all_mixes(settings) -> list[Mix]:
     """
     Fetch all published mixes with full tracklists.
@@ -105,7 +120,11 @@ def fetch_all_mixes(settings) -> list[Mix]:
 
     base_url = settings.catalog_user_url or _DEFAULT_BASE_URL
     raw_items = _paginate("/api/catalog/mixes", _MIXES_PAGE_SIZE, base_url)
-    mixes = [_parse_mix(r) for r in raw_items]
+    pairs = [_parse_mix(r) for r in raw_items]
+    mixes = [m for m, _ in pairs]
+    total_strips = sum(s for _, s in pairs)
+    if total_strips:
+        logger.info(f"[catalog] Stripped numbering prefix from {total_strips} artist names")
     logger.info(f"[catalog] Parsed {len(mixes)} mixes")
     return mixes
 
@@ -121,7 +140,11 @@ def fetch_all_tracks(settings) -> list[Track]:
 
     base_url = settings.catalog_user_url or _DEFAULT_BASE_URL
     raw_items = _paginate("/api/catalog/tracks", _TRACKS_PAGE_SIZE, base_url)
-    tracks = [_parse_track(r) for r in raw_items]
+    pairs = [_parse_track(r) for r in raw_items]
+    tracks = [t for t, _ in pairs]
+    total_strips = sum(s for _, s in pairs)
+    if total_strips:
+        logger.info(f"[catalog] Stripped numbering prefix from {total_strips} artist names")
     logger.info(f"[catalog] Parsed {len(tracks)} unique tracks")
     return tracks
 
@@ -134,14 +157,24 @@ def _load_fixture_mixes(fixtures_dir: str) -> list[Mix]:
     path = os.path.join(fixtures_dir, "mixes.json")
     logger.info(f"[catalog] Loading mixes fixture: {path}")
     with open(path, "r", encoding="utf-8") as f:
-        return [_parse_mix(r) for r in json.load(f)]
+        pairs = [_parse_mix(r) for r in json.load(f)]
+    mixes = [m for m, _ in pairs]
+    total_strips = sum(s for _, s in pairs)
+    if total_strips:
+        logger.info(f"[catalog] Stripped numbering prefix from {total_strips} artist names")
+    return mixes
 
 
 def _load_fixture_tracks(fixtures_dir: str) -> list[Track]:
     path = os.path.join(fixtures_dir, "tracks.json")
     logger.info(f"[catalog] Loading tracks fixture: {path}")
     with open(path, "r", encoding="utf-8") as f:
-        return [_parse_track(r) for r in json.load(f)]
+        pairs = [_parse_track(r) for r in json.load(f)]
+    tracks = [t for t, _ in pairs]
+    total_strips = sum(s for _, s in pairs)
+    if total_strips:
+        logger.info(f"[catalog] Stripped numbering prefix from {total_strips} artist names")
+    return tracks
 
 
 def save_fixtures(settings) -> None:
