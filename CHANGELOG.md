@@ -2,6 +2,20 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.8.0 — 2026-06-11
+
+### Feedback capture & ops hardening (Phase 2a)
+
+Minor bump: two new CLI commands (`mark`, `stats`) and a backward-compatible extension to the history record schema. Full context: `docs/improvement-plan.md` §5 Phase 2.
+
+- **Canonical report ordering (`report_order`).** `src/pipeline/report.py` now exports `report_order(sections)`, which returns candidates in exact rendered-number order — Label Watch expands with the same first-occurrence label grouping the renderer uses. `generate_report` is refactored to call `_group_label_watch` internally. Enables `mark <n>` track-number resolution.
+- **History records now persist track number, signals, genres, and score.** `RecommendationRecord` gains `track_no`, `signal_codes`, `genre_tags`, `score`, and `label` (all optional, old files load with defaults). `history.py` serialisation extended symmetrically. `cmd_run` and `cmd_mix_prep` build records via `report_order` + `enumerate`; `all_section_candidates` deleted from `ranker.py`.
+- **`tunefinder mark <selector> <outcome>` command.** Records an outcome (`bought` | `liked` | `skip` | `own`) against a recommended track. Selector is a track number (latest weekly report only) or `"Artist - Title"` (searches weekly then mix-prep history by dedup-key). Marks are append-only. Works without Discord env vars.
+- **`tunefinder stats` command.** Aggregates `feedback.json` by signal code, source, genre, and report ID. Segmented weekly vs mix-prep; positive rate excludes `own`; `own` reported as identity-gap signal. Works without Discord env vars.
+- **Bounded retry with jitter in `common.py`.** `get_html`/`post_html` now retry up to 3 times on `Timeout`, `ConnectionError`, and HTTP 5xx/429. Other 4xx (403/404) raise immediately. Backoffs: 2 s and 5 s + ≤0.5 s jitter. Fetcher POSTs are read-only search queries — retrying is safe.
+- **Per-source anomaly alerts.** `src/pipeline/source_health.py` persists per-source fetch counts to `data/source_health.json` (rolling 26 entries). `cmd_run` detects errors, zero-count sources, and drops below 50 % of the trailing-4-run mean (configurable via `alerts.source_drop_threshold_pct` and `alerts.min_history_runs`). Anomalies post to the alert channel; dry-run logs only.
+- **Dry-run alert leak fixed.** The no-candidates branches in `cmd_run` and `cmd_mix_prep` previously called `post_alert` unconditionally — a `--dry-run` with zero candidates would post a live Discord alert. Both are now guarded with `if not dry_run`.
+
 ## v0.7.1 — 2026-06-11
 
 ### Scoring hygiene (Phase 1.5)

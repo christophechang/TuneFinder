@@ -155,7 +155,22 @@ VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without th
 
 # Dry-run mix-prep (full pipeline, no Discord posts or history writes)
 ./venv/bin/python -m tunefinder mix-prep house --dry-run
+
+# Record an outcome for a recommended track (no Discord env vars needed)
+./venv/bin/python -m tunefinder mark 3 bought          # by track number (latest weekly report)
+./venv/bin/python -m tunefinder mark "Calibre - New Dawn" liked   # by "Artist - Title"
+./venv/bin/python -m tunefinder mark 7 own             # own = already had it (identity-gap miss)
+
+# Show feedback statistics
+./venv/bin/python -m tunefinder stats
 ```
+
+### mark / stats notes
+
+- `mark <n>` resolves against the **latest weekly report only**. Track numbers are stored from the first weekly run after v0.8.0 deploys — earlier reports have no stored numbers, use `"Artist - Title"` instead.
+- `"Artist - Title"` searches weekly history first, then mix-prep history, matching by normalised dedup key (so `"Calibre - New Dawn"` finds a record stored as `"Calibre — New Dawn (Original Mix)"`).
+- Outcomes: `bought` | `liked` | `skip` | `own`. `own` means "I already had this" — flagged as a known-track-filter miss, excluded from positive-rate calculations.
+- Marks are append-only; `stats` uses the latest entry per (history, key).
 
 ## Configuration
 
@@ -166,6 +181,8 @@ Edit `config/settings.yaml` to:
 - Tune `pipeline.genre_exclusions` to drop tracks that pick up contradictory genre tags during cross-source dedup
 - Enable/disable individual sources
 - Change Discord channel names
+- `alerts.source_drop_threshold_pct` (default `50`) — alert when a source's count falls below this % of its trailing-4-run average
+- `alerts.min_history_runs` (default `2`) — prior runs required per source before drop detection activates (cold-start guard)
 
 Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
 
@@ -207,17 +224,24 @@ src/
     bleep.py         # Bleep (disabled — requires login)
     common.py        # Shared HTTP helpers
   pipeline/
-    profile.py       # Artist profile builder
-    dedup.py         # Normalisation and deduplication
-    ranker.py        # Scoring and section assignment
-    history.py       # Recommendation history store (weekly + mix-prep)
-    pool.py          # Persistent candidate pool across runs
-    reasons.py       # Deterministic reason composer
-    report.py        # Deterministic report renderer (weekly + mix-prep)
+    profile.py         # Artist profile builder
+    dedup.py           # Normalisation and deduplication
+    ranker.py          # Scoring and section assignment
+    history.py         # Recommendation history store (weekly + mix-prep)
+    pool.py            # Persistent candidate pool across runs
+    reasons.py         # Deterministic reason composer
+    report.py          # Deterministic report renderer (weekly + mix-prep)
+    feedback.py        # Outcome marking and stats aggregation
+    source_health.py   # Per-source run health persistence and anomaly detection
   output/
     discord.py       # Discord bot client
 tunefinder/
   __main__.py        # CLI entry point
 config/
   settings.yaml      # All non-secret configuration
+data/
+  recommendation_history.json   # Weekly recommendation records (gitignored)
+  mix_prep_history.json         # Mix-prep recommendation records (gitignored)
+  feedback.json                 # Outcome marks (append-only, gitignored)
+  source_health.json            # Per-source run health for anomaly detection (gitignored)
 ```
