@@ -2,6 +2,34 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.7.0 — 2026-06-11
+
+### Report generation (deterministic — LLM stages removed)
+
+- **LLM pipeline replaced with deterministic renderer.** `src/pipeline/reasons.py` composes one-sentence reasons from candidate data (artist play count, prior titles, chart position, cross-source count, label/artist facts, genre tags, days since release). `src/pipeline/report.py` renders the Discord-formatted report directly from those reasons — no HTTP calls, no JSON parse failures, no cascade exhaustion. Rationale and trade-offs: `docs/improvement-plan.md` §2.
+- **Snapshot tests guard exact output.** Weekly and mix-prep report snapshots frozen in `tests/test_report.py`. Update them deliberately, never casually.
+- **Required env vars reduced to Discord only.** `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, and `GEMINI_API_KEY` no longer required or used. `check-config` prints "Report generation: deterministic (no LLM)".
+- **Continuous track numbering across all report sections.** Track numbers never reset between sections — enables the future `mark` command.
+- **Label Watch shows artist-fact lines.** "*{n} of your artists release here: {names}*" derived from catalog data, never LLM recall.
+- **Removed:** `src/llm.py`, `src/pipeline/label_cache.py`, `tests/test_llm.py`, `llm:` block in `config/settings.yaml`.
+
+### Genre mapping cleanup
+
+- **Volumo loose-fit mappings removed.** `uk-bass` (Bass House / Future House, id 2), `funk-soul-jazz` (Nu-Disco / Soul / Funk, id 17), and `hip-hop` (Soul / R&B / Hip-Hop, id 29) unmapped — Volumo has no true-fit genre for them. `downtempo` (Organic House / Downtempo, id 18) retained. See `docs/improvement-plan.md` §3.
+
+### Sources
+
+- **Juno deleted.** Site permanently shut down June 2026. Fetcher and config block removed; git history preserves the code.
+- **Weekly source snapshots archived.** `archive_source_items()` in `src/fetchers/__init__.py` writes `data/archive/source_items_{report_id}.json.gz` after each run (both live and dry-run). Retention: 26 most-recent snapshots by mtime. Enables future offline replay/backtesting.
+
+### Dead code removal
+
+- `pipeline.max_candidates` config key and `Settings.pipeline_max_candidates` property removed (loaded but never consumed).
+- `LabelRelevance` dataclass, `Candidate.is_known`, `Candidate.is_previously_recommended`, and `ArtistProfile.associated_labels` removed (all zero-usage).
+- `sources.discogs` config block removed (no fetcher exists).
+- `trafilatura` and `schedule` removed from `requirements.txt` (neither imported anywhere).
+- Artist numbering-prefix guard added to `src/fetchers/catalog.py` — strips `^\d{1,3}[.)]\s+` from artist names at parse time to prevent dirty keys like `"15. zero t||sonic bionic"`.
+
 ## v0.6.5 — 2026-06-06
 
 ### Sources

@@ -2,7 +2,7 @@
 
 ## Purpose
 - TuneFinder is a Python 3.11+ automation app for weekly music discovery.
-- It fetches releases from multiple external sources, ranks them against a DJ taste profile, generates an LLM-written report, and posts to Discord.
+- It fetches releases from multiple external sources, ranks them against a DJ taste profile, generates a deterministic report, and posts to Discord.
 - Prefer small, targeted changes that preserve the existing pipeline shape and CLI workflow.
 
 ## Architecture
@@ -11,7 +11,6 @@
 - `src/models.py` contains the core dataclasses shared across fetchers and pipeline stages.
 - `src/fetchers/` contains one module per source. Keep source-specific scraping logic isolated to its own module.
 - `src/pipeline/` contains profile building, deduplication, ranking, history, pool management, and report generation.
-- `src/llm.py` owns the provider cascade logic. Keep provider-specific behavior centralized here.
 - `src/output/discord.py` handles Discord posting. Avoid mixing posting logic into pipeline modules.
 
 ## Working Style
@@ -33,11 +32,10 @@
 - When a source is blocked or disabled, do not force-enable it without explicit instruction.
 - Fail gracefully on external errors and keep logging informative.
 
-## LLM And Reporting
-- Keep the two-stage report pipeline intact unless the task explicitly asks to redesign it.
-- Stage 1 enriches reasons; Stage 2 writes the final report. Avoid duplicating cascade logic outside `src/llm.py`.
+## Reporting
+- Report rendering is deterministic — reasons composed in `src/pipeline/reasons.py`, Discord-formatted layout in `src/pipeline/report.py`. No LLM or network calls.
 - Maintain Discord-safe formatting behavior in `src/pipeline/report.py`, especially link sanitization and embed suppression.
-- If changing prompts or report formatting, preserve deterministic fallbacks when LLM calls fail.
+- Snapshot tests in `tests/test_report.py` guard exact output. Update them deliberately, never casually.
 
 ## Data Safety
 - Recommendation history and pool files prevent repeat recommendations. Be careful with any logic touching `src/pipeline/history.py` or pool persistence.

@@ -1,5 +1,7 @@
 # Volumo Source Spike — 2026-06-04
 
+> **Erratum (2026-06-11):** audio previews on Volumo DO work, contrary to §8 below — confirmed by manual testing.
+
 ## 1. Recommended Verdict
 
 **Fit for purpose** as a curated new-release source for house, DnB, techno, breaks, UKG, and electronica. API is live, returns rich metadata, and works without authentication. Primary limitation: no audio previews (paid store). Suitable as a disabled-by-default experimental source pending a follow-up implementation task.

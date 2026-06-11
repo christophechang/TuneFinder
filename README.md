@@ -19,7 +19,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 2. **Fetch** — scrapes new releases from Beatport, Bandcamp, Volumo, and Mixupload (Traxsource and Resident Advisor are available but disabled by default)
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
-5. **Report** — two-stage LLM pipeline: Stage 1 uses Mistral Small to write a one-line reason per track; Stage 2 uses OpenRouter / DeepSeek to write the full Discord-formatted report
+5. **Report** — deterministic renderer: reasons composed from catalog facts (play count, prior titles, chart position, label/artist data) in `src/pipeline/reasons.py`; Discord-formatted report built in `src/pipeline/report.py`
 6. **Post** — sends the report to your Discord `#music-research` channel via Bot token
 
 ## Sources
@@ -28,7 +28,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 |---|---|---|
 | Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | ✅ |
 | Bandcamp | `discover_web` JSON API | ✅ |
-| Volumo | REST API (`/api/v1/albums`) | ✅ |
+| Volumo | REST API (`/api/v1/albums`) | ✅ (audio previews work) |
 | Mixupload | HTML scrape (chart + genre pages) | ✅ |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | disabled by default |
@@ -111,14 +111,8 @@ cp .env.example .env
 
 ```
 # Required
-MISTRAL_API_KEY=          # Stage 1 primary
-OPENROUTER_API_KEY=       # Stage 2 primary
 DISCORD_BOT_TOKEN=        # Discord bot token
 DISCORD_GUILD_ID=         # Your Discord server ID
-
-# Optional fallbacks
-GROQ_API_KEY=             # Stage 1 fallback 1
-GEMINI_API_KEY=           # Stage 1 fallback 2
 
 # Sources (optional)
 VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without this
@@ -169,27 +163,8 @@ Edit `config/settings.yaml` to:
 - Tune `pipeline.genre_exclusions` to drop tracks that pick up contradictory genre tags during cross-source dedup
 - Enable/disable individual sources
 - Change Discord channel names
-- Swap LLM models
 
 Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
-
-## LLM cascade
-
-Both stages try providers in order, skipping any with no API key set.
-
-**Stage 1** (reason enrichment + label synopses):
-
-| # | Provider | Model | Cost |
-|---|---|---|---|
-| 1 | Mistral | `mistral-small-latest` | paid (primary) |
-| 2 | Groq | `llama-3.3-70b-versatile` | free |
-| 3 | Gemini | `gemini-2.5-flash` | free |
-
-**Stage 2** (report writing):
-
-| # | Provider | Model | Cost |
-|---|---|---|---|
-| 1 | OpenRouter | `deepseek/deepseek-chat` | capped (primary) |
 
 ## Scheduling (macOS launchd)
 
@@ -216,7 +191,6 @@ launchctl start com.openclaw.tune-finder
 src/
   config.py          # Settings loader (YAML + env vars)
   models.py          # Dataclasses — Track, Candidate, etc.
-  llm.py             # Two-stage LLM cascade
   logger.py          # Structured logging setup
   fetchers/
     catalog.py       # SoundCloud AI Mix Recommender API (mix history + known tracks)
@@ -235,8 +209,8 @@ src/
     ranker.py        # Scoring and section assignment
     history.py       # Recommendation history store (weekly + mix-prep)
     pool.py          # Persistent candidate pool across runs
-    label_cache.py   # Persistent label synopsis cache
-    report.py        # LLM report generation (weekly + mix-prep)
+    reasons.py       # Deterministic reason composer
+    report.py        # Deterministic report renderer (weekly + mix-prep)
   output/
     discord.py       # Discord bot client
 tunefinder/
