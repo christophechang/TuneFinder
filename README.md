@@ -45,8 +45,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | `cross_source` | +1.0 to +2.0 | Scales with source count (cap 4) — only credited when seen on 2+ |
 | `chart_position` | +0–1.5 | Linear decay from #1 (Beatport, Traxsource, Mixupload when enabled) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
-| `genre_match` | +0.5 per tag | Soft match against catalog-augmented genre set |
-| `fresh_release` | +0.5 | Released within 30 days |
+| `genre_match` | +0.5 per tag (cap 2) | Soft match against catalog-augmented genre set; `electronic` excluded (too broad); capped at 2 tags to prevent cross-source tag inflation |
+| `fresh_release` | +0.5 | Released within 7 days |
 | `recent_recommendation` | −0.75 | Artist appeared in weekly or mix-prep history within last 4 weeks |
 | `pool_age` | −0.25 per week (cap −1.5) | Carried over from the persistent pool — older entries lose ground |
 
@@ -74,6 +74,8 @@ The mix-prep report has two sections:
 - **Deep Cuts** — next-tier selections worth exploring
 
 Results are posted to the Discord `#mix-prep` channel. Mix-prep uses its own history file (`data/mix_prep_history.json`) so it won't deplete your weekly discovery feed — the same track can appear in both. Re-running mix-prep for the same genre will skip tracks already surfaced in prior mix-prep sessions.
+
+Pool candidates injected into mix-prep are exempt from the release-date window (same as the weekly run). The pool-age penalty handles staleness; mix-prep benefits most from older pool gems.
 
 ## Genre coverage
 

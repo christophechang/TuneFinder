@@ -2,6 +2,18 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.7.1 — 2026-06-11
+
+### Scoring hygiene (Phase 1.5)
+
+Five scoring fixes that are wrong at any weight values — no weight re-tuning; that is Phase 2. Full rationale in `docs/scoring-review.md`.
+
+- **`electronic` excluded from genre scoring.** `electronic` fires on nearly every track, making it a constant (+0.5) rather than a signal. It remains in `_BASELINE_GENRES` for genre-set augmentation and section cap exemption; it is excluded from the score calculation only.
+- **`genre_match` capped at 2 tags.** Cross-source dedup unions genre tags, so a popular track could accumulate many tags and earn a large uncapped bonus. Cap at 2 prevents the same popularity fact being paid multiple times alongside `cross_source`.
+- **`fresh_release` threshold tightened to 7 days.** The weekly corpus is date-filtered to ≤28 days, so the previous 30-day threshold fired on every dated track — a constant, not a signal. Tracks 8–28 days old still score normally on other signals.
+- **Per-section score floor (`section_min_score: 1.0`).** Sections now skip candidates below the configured floor; thin weeks ship thin reports rather than filling slots with low-signal picks. Set to `0` to restore pre-v0.7.1 behaviour. Configurable in `config/settings.yaml`.
+- **Mix-prep pool injection exempt from release-date window.** Weekly run already injected pool candidates without the window; mix-prep applied it inconsistently. Both modes are now consistent: the pool-age penalty handles staleness.
+
 ## v0.7.0 — 2026-06-11
 
 ### Report generation (deterministic — LLM stages removed)
