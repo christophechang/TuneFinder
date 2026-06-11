@@ -372,7 +372,106 @@ def cmd_mix_prep(args):
           + (" (DRY RUN — no writes)" if dry_run else ""))
 
 
+def cmd_mark(args):
+    from src.pipeline.feedback import (
+        OUTCOMES, load_feedback, append_feedback, resolve_selector, FeedbackEntry,
+    )
+    from src.pipeline.history import load_history, load_mix_prep_history
+    from src.pipeline.dedup import make_dedup_key
+    from datetime import datetime, timezone
+
+    settings = load_settings()
+    logger = get_logger(__name__)
+
+    weekly = load_history(settings.data_dir)
+    mix_prep = load_mix_prep_history(settings.data_dir)
+
+    try:
+        record, history_name = resolve_selector(args.selector, weekly, mix_prep)
+    except LookupError as exc:
+        print(f"Error: {exc}")
+        raise SystemExit(1)
+
+    entry_key = make_dedup_key(record.artist, record.title)
+    existing = load_feedback(settings.data_dir)
+
+    # Check for a previous outcome on the same (history, key)
+    prev = [e for e in existing if e.history == history_name and e.key == entry_key]
+    if prev:
+        latest_prev = max(prev, key=lambda e: e.marked_at)
+        print(f"Note: previously marked as {latest_prev.outcome!r} — appending new mark.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    entry = FeedbackEntry(
+        key=entry_key,
+        artist=record.artist,
+        title=record.title,
+        outcome=args.outcome,
+        marked_at=now_iso,
+        report_id=record.report_id,
+        track_no=record.track_no,
+        history=history_name,
+    )
+    append_feedback(entry, settings.data_dir)
+
+    # Derive week label for confirmation
+    try:
+        dt = datetime.fromisoformat(record.recommended_at)
+        year, week, _ = dt.isocalendar()
+        week_label = f"{year}-W{week:02d}"
+    except Exception:
+        week_label = record.report_id
+
+    track_label = f"#{record.track_no} " if record.track_no is not None else ""
+    print(f"Marked {track_label}{record.artist} — {record.title} as {args.outcome} ({week_label})")
+    logger.info(f"[mark] {history_name}/{entry_key} → {args.outcome}")
+
+
+def cmd_stats(args):
+    from src.pipeline.feedback import load_feedback, summarise_feedback
+    from src.pipeline.history import load_history, load_mix_prep_history
+
+    settings = load_settings()
+
+    entries = load_feedback(settings.data_dir)
+    if not entries:
+        print("No feedback recorded yet — mark tracks with `tunefinder mark`")
+        return
+
+    weekly = load_history(settings.data_dir)
+    mix_prep = load_mix_prep_history(settings.data_dir)
+    stats = summarise_feedback(weekly, mix_prep, entries)
+
+    for hist_name, label in (("weekly", "Weekly"), ("mix_prep", "Mix-Prep")):
+        bucket = stats.get(hist_name, {})
+        if not bucket:
+            continue
+        print(f"\n=== {label} ===")
+        print(f"Recommended: {bucket['recommended']}  |  "
+              f"Marked: {bucket['marked']}  |  "
+              f"Coverage: {bucket['coverage_pct']}%  |  "
+              f"Positive rate: {bucket['positive_rate']}%")
+        own = bucket.get("own_count", 0)
+        if own:
+            print(f"Own (identity-gap misses): {own}")
+
+        def _print_section(title: str, d: dict) -> None:
+            if not d:
+                return
+            print(f"\n  {title}:")
+            for name, counts in sorted(d.items(), key=lambda kv: -kv[1]["marked"]):
+                pos = counts["positive"]
+                tot = counts["marked"]
+                print(f"    {name}: {tot} marked, {pos} positive")
+
+        _print_section("By signal", bucket.get("by_signal", {}))
+        _print_section("By source", bucket.get("by_source", {}))
+        _print_section("By genre", bucket.get("by_genre", {}))
+        _print_section("By report", bucket.get("by_report", {}))
+
+
 def main():
+    from src.pipeline.feedback import OUTCOMES
     parser = argparse.ArgumentParser(
         prog="tunefinder",
         description="TuneFinder — weekly music discovery automation",
@@ -400,6 +499,17 @@ def main():
         "--dry-run", action="store_true",
         help="Run the full pipeline but skip Discord posts and history writes",
     )
+    mark_parser = subparsers.add_parser("mark", help="Record an outcome for a recommended track")
+    mark_parser.add_argument(
+        "selector",
+        help="Track number (from latest weekly report) or \"Artist - Title\"",
+    )
+    mark_parser.add_argument(
+        "outcome",
+        choices=list(OUTCOMES),
+        help="Outcome to record",
+    )
+    subparsers.add_parser("stats", help="Show feedback statistics")
 
     args = parser.parse_args()
 
@@ -419,6 +529,10 @@ def main():
         cmd_run(args)
     elif args.command == "mix-prep":
         cmd_mix_prep(args)
+    elif args.command == "mark":
+        cmd_mark(args)
+    elif args.command == "stats":
+        cmd_stats(args)
 
 
 if __name__ == "__main__":
