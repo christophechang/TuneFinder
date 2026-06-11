@@ -229,6 +229,12 @@ pipeline:
     dnb: [ukg, house]
     house: [dnb, ukg]
 
+alerts:
+  # Alert when a source's count falls below this % of its trailing-4-run average.
+  source_drop_threshold_pct: 50
+  # Prior runs required per source before drop detection activates.
+  min_history_runs: 2
+
 data_dir: data
 
 testing:

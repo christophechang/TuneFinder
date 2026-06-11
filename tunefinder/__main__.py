@@ -84,6 +84,7 @@ def cmd_run(args):
     from src.pipeline.ranker import rank_candidates
     from src.pipeline.pool import load_pool, pool_to_candidates, save_pool, POOL_CAP
     from src.pipeline.report import generate_report, report_order
+    from src.pipeline.source_health import append_run_health, load_run_health, detect_anomalies
     from src.output.discord import make_discord_client
     from src.models import RecommendationRecord, PoolRecord
     from datetime import datetime, timezone
@@ -113,6 +114,22 @@ def cmd_run(args):
     save_source_items(source_items, settings.data_dir)
     archive_source_items(source_items, settings.data_dir, report_id)
     sources_fetched = len(source_items)
+
+    # 3b. Anomaly detection — load prior health before appending current run
+    prior_health_runs = load_run_health(settings.data_dir)
+    anomalies = detect_anomalies(
+        fetcher_health, prior_health_runs,
+        settings.alerts_source_drop_threshold_pct,
+        settings.alerts_min_history_runs,
+    )
+    if not dry_run:
+        append_run_health(fetcher_health, settings.data_dir, report_id)
+        if anomalies:
+            discord_early = make_discord_client(settings)
+            discord_early.post_alert("\n".join(anomalies))
+    else:
+        for msg in anomalies:
+            logger.warning(f"[run] ANOMALY (dry-run, not posted): {msg}")
 
     # 4. Dedup + filter
     source_items = deduplicate_source_items(source_items)
@@ -151,8 +168,11 @@ def cmd_run(args):
 
     if not candidates:
         logger.warning("[run] No candidates remaining after filtering — nothing to report")
-        discord = make_discord_client(settings)
-        discord.post_alert(f"Run {report_id}: no candidates after filtering. Check sources.")
+        if not dry_run:
+            discord = make_discord_client(settings)
+            discord.post_alert(f"Run {report_id}: no candidates after filtering. Check sources.")
+        else:
+            logger.warning(f"[run] ALERT (dry-run, not posted): Run {report_id}: no candidates after filtering. Check sources.")
         return
 
     # 5. Rank and split into sections
@@ -326,8 +346,11 @@ def cmd_mix_prep(args):
 
     if not candidates:
         logger.warning(f"[mix-prep] No {genre} candidates after filtering — nothing to report")
-        discord = make_discord_client(settings)
-        discord.post_alert(f"Mix-prep {report_id}: no candidates found for genre '{genre}'. Check sources.")
+        if not dry_run:
+            discord = make_discord_client(settings)
+            discord.post_alert(f"Mix-prep {report_id}: no candidates found for genre '{genre}'. Check sources.")
+        else:
+            logger.warning(f"[mix-prep] ALERT (dry-run, not posted): Mix-prep {report_id}: no candidates found for genre '{genre}'. Check sources.")
         return
 
     # 5. Rank and section

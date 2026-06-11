@@ -105,6 +105,16 @@ class Settings:
     def pipeline_genre_exclusions(self) -> dict[str, list[str]]:
         return self._data.get("pipeline", {}).get("genre_exclusions", {})
 
+    # --- Alerts ---
+
+    @property
+    def alerts_source_drop_threshold_pct(self) -> int:
+        return int(self._data.get("alerts", {}).get("source_drop_threshold_pct", 50))
+
+    @property
+    def alerts_min_history_runs(self) -> int:
+        return int(self._data.get("alerts", {}).get("min_history_runs", 2))
+
     # --- Data ---
 
     @property
