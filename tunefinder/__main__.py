@@ -192,7 +192,7 @@ def cmd_run(args):
         return
 
     # 5. Rank and split into sections
-    sections = rank_candidates(candidates, profiles, settings, label_seed=label_seed)
+    sections, _label_artists = rank_candidates(candidates, profiles, settings, label_seed=label_seed)
 
     # 6. Generate report
     report_text = generate_report(sections, report_id, stats, settings, profiles=profiles)
@@ -363,7 +363,7 @@ def cmd_mix_prep(args):
         return
 
     # 5. Rank and section
-    sections = rank_candidates_mix_prep(candidates, profiles, settings, label_seed=label_seed)
+    sections, _label_artists = rank_candidates_mix_prep(candidates, profiles, settings, label_seed=label_seed)
 
     # 6. Generate report
     report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles)

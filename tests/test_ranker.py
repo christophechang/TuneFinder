@@ -45,7 +45,7 @@ def test_label_signal_scales_with_known_artist_count():
         _candidate(artist="Skee Mask", label="Ilian Tape"),
         _candidate(artist="Calibre", label="Ilian Tape"),
     ]
-    _, counts = _build_relevant_labels(candidates, profiles_lower)
+    _, counts, names = _build_relevant_labels(candidates, profiles_lower)
     assert counts["ilian tape"] == 3
 
     target = _candidate(artist="Unknown", title="T", label="Ilian Tape")
@@ -56,7 +56,7 @@ def test_label_signal_scales_with_known_artist_count():
 def test_label_signal_base_when_one_known_artist():
     profiles_lower = {"sully": ArtistProfile(name="Sully")}
     candidates = [_candidate(artist="Sully", label="Astrophonica")]
-    _, counts = _build_relevant_labels(candidates, profiles_lower)
+    _, counts, _ = _build_relevant_labels(candidates, profiles_lower)
     target = _candidate(artist="Other", title="T", label="Astrophonica")
     _score(target, profiles_lower, {"astrophonica"}, counts, _build_genre_set(profiles_lower))
     assert target.score == 2.0
@@ -65,10 +65,42 @@ def test_label_signal_base_when_one_known_artist():
 def test_label_signal_caps_at_three_artists():
     profiles_lower = {f"a{i}": ArtistProfile(name=f"A{i}") for i in range(5)}
     candidates = [_candidate(artist=f"A{i}", label="Big Label") for i in range(5)]
-    _, counts = _build_relevant_labels(candidates, profiles_lower)
+    _, counts, _ = _build_relevant_labels(candidates, profiles_lower)
     target = _candidate(artist="X", title="T", label="Big Label")
     _score(target, profiles_lower, {"big label"}, counts, _build_genre_set(profiles_lower))
     assert target.score == 3.0
+
+
+# --- label_artist_names tests ---
+
+def test_label_artist_names_two_artists_sorted():
+    profiles_lower = {
+        "calibre": ArtistProfile(name="Calibre"),
+        "amit": ArtistProfile(name="Amit"),
+    }
+    candidates = [
+        _candidate(artist="Calibre", label="Signature"),
+        _candidate(artist="Amit", label="Signature"),
+    ]
+    _, _, names = _build_relevant_labels(candidates, profiles_lower)
+    assert names["signature"] == ["Amit", "Calibre"]
+
+
+def test_label_artist_names_four_artists_no_cap():
+    profiles_lower = {f"artist{i}": ArtistProfile(name=f"Artist{i}") for i in range(4)}
+    candidates = [_candidate(artist=f"Artist{i}", label="Big Label") for i in range(4)]
+    _, _, names = _build_relevant_labels(candidates, profiles_lower)
+    assert len(names["big label"]) == 4
+
+
+def test_label_artist_names_unknown_artist_absent():
+    profiles_lower = {"known": ArtistProfile(name="Known")}
+    candidates = [
+        _candidate(artist="Known", label="Good Label"),
+        _candidate(artist="Unknown", label="Good Label"),
+    ]
+    _, _, names = _build_relevant_labels(candidates, profiles_lower)
+    assert names["good label"] == ["Known"]
 
 
 def test_cross_source_two_sources_scores_1_point_0():
