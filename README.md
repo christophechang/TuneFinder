@@ -160,6 +160,7 @@ VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without th
 Edit `config/settings.yaml` to:
 - Adjust pipeline section counts (`top_picks_count`, `label_watch_count`, etc.)
 - Set `pipeline.release_date_window_days` to control how far back the date filter looks (`7`, `28`, `56`, or `180` days)
+- Set `pipeline.section_min_score` to require a minimum score before a track occupies a report slot (sections may run short on thin weeks; `0` disables the floor)
 - Tune `pipeline.genre_exclusions` to drop tracks that pick up contradictory genre tags during cross-source dedup
 - Enable/disable individual sources
 - Change Discord channel names

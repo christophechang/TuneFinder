@@ -184,6 +184,50 @@ def test_pool_age_penalty_handles_bad_iso_string():
     assert c.score == 0.0
 
 
+# --- Commit 4: per-section score floor ---
+
+from src.pipeline.ranker import _assign_sections, _assign_sections_mix_prep
+
+
+class _MockSettings:
+    pipeline_top_picks_count = 5
+    pipeline_label_watch_count = 5
+    pipeline_artist_watch_count = 5
+    pipeline_wildcard_count = 3
+    pipeline_mix_prep_top_picks_count = 5
+    pipeline_mix_prep_deep_cuts_count = 5
+    pipeline_section_min_score = 1.0
+
+
+def _scored_candidate(score, artist="X", title="T", source="s", **kw):
+    c = _candidate(artist=artist, title=title, source=source, **kw)
+    c.score = score
+    return c
+
+
+def test_section_floor_skips_below_threshold():
+    ranked = [_scored_candidate(0.5)]
+    sections = _assign_sections(ranked, _MockSettings(), _build_genre_set({}))
+    assert sections["top_picks"] == []
+    assert sections["wildcards"] == []
+
+
+def test_section_floor_zero_reproduces_old_behaviour():
+    class _NoFloor(_MockSettings):
+        pipeline_section_min_score = 0.0
+
+    ranked = [_scored_candidate(0.5)]
+    sections = _assign_sections(ranked, _NoFloor(), _build_genre_set({}))
+    assert len(sections["top_picks"]) == 1
+
+
+def test_section_floor_mix_prep_skips_below_threshold():
+    ranked = [_scored_candidate(0.5)]
+    sections = _assign_sections_mix_prep(ranked, _MockSettings())
+    assert sections["top_picks"] == []
+    assert sections["deep_cuts"] == []
+
+
 # --- Commit 3: fresh_release threshold 7 days ---
 
 def test_fresh_release_10_days_no_signal():

@@ -98,6 +98,10 @@ class Settings:
         return self._data.get("pipeline", {}).get("release_date_window_days")
 
     @property
+    def pipeline_section_min_score(self) -> float:
+        return float(self._data.get("pipeline", {}).get("section_min_score", 0.0))
+
+    @property
     def pipeline_genre_exclusions(self) -> dict[str, list[str]]:
         return self._data.get("pipeline", {}).get("genre_exclusions", {})
 

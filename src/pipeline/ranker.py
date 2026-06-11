@@ -240,6 +240,7 @@ def _assign_sections(
     label_n = settings.pipeline_label_watch_count
     artist_n = settings.pipeline_artist_watch_count
     wildcard_n = settings.pipeline_wildcard_count
+    min_score = settings.pipeline_section_min_score
 
     used: set[int] = set()
     MAX_PER_ARTIST = 2
@@ -259,6 +260,8 @@ def _assign_sections(
         result = []
         for c in ranked:
             if id(c) in used:
+                continue
+            if c.score < min_score:
                 continue
             if require_signal and not any(s.code == require_signal for s in c.signals):
                 continue
@@ -295,7 +298,7 @@ def _assign_sections(
     logger.info(
         f"[ranker] Sections — top_picks: {len(top_picks)}, "
         f"label_watch: {len(label_watch)}, artist_watch: {len(artist_watch)}, "
-        f"wildcards: {len(wildcards)} | genres: {genre_summary or 'none tagged'}"
+        f"wildcards: {len(wildcards)} (floor={min_score}) | genres: {genre_summary or 'none tagged'}"
     )
     return {
         "top_picks": top_picks,
@@ -346,6 +349,7 @@ def _assign_sections_mix_prep(
 ) -> dict[str, list[Candidate]]:
     top_n = settings.pipeline_mix_prep_top_picks_count
     deep_n = settings.pipeline_mix_prep_deep_cuts_count
+    min_score = settings.pipeline_section_min_score
 
     used: set[int] = set()
     MAX_PER_ARTIST = 2
@@ -357,6 +361,8 @@ def _assign_sections_mix_prep(
         result = []
         for c in ranked:
             if id(c) in used:
+                continue
+            if c.score < min_score:
                 continue
             artist_key = normalise_artist(c.artist)
             release_key = (c.release_name or "").strip().lower()
@@ -375,7 +381,7 @@ def _assign_sections_mix_prep(
 
     top_picks = pick(top_n)
     deep_cuts = pick(deep_n)
-    logger.info(f"[ranker] Mix-prep sections — top_picks: {len(top_picks)}, deep_cuts: {len(deep_cuts)}")
+    logger.info(f"[ranker] Mix-prep sections — top_picks: {len(top_picks)}, deep_cuts: {len(deep_cuts)} (floor={min_score})")
     return {"top_picks": top_picks, "deep_cuts": deep_cuts}
 
 
