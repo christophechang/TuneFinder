@@ -26,7 +26,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 | Source | Method | Status |
 |---|---|---|
-| Juno Download | Genre top-100 track chart | disabled (site shut down June 2026) |
 | Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | ✅ |
 | Bandcamp | `discover_web` JSON API | ✅ |
 | Volumo | REST API (`/api/v1/albums`) | ✅ |
@@ -223,7 +222,6 @@ src/
   logger.py          # Structured logging setup
   fetchers/
     catalog.py       # SoundCloud AI Mix Recommender API (mix history + known tracks)
-    juno.py          # Juno Download genre top-100 chart (disabled — site shut down June 2026)
     beatport.py      # Beatport genre top-100 chart (__NEXT_DATA__)
     bandcamp.py      # Bandcamp discover_web API
     volumo.py        # Volumo REST API (/api/v1/albums)

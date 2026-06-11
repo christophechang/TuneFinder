@@ -113,8 +113,8 @@ def filter_known(candidates: list[Candidate], known_keys: set[str]) -> list[Cand
     """Remove candidates that match a track in the known-track exclusion set.
 
     Checks both the release-level title and any individual tracks nested in
-    raw_metadata["tracks"] (populated by the Juno scraper), so that an EP
-    whose tracks are already owned is correctly excluded.
+    raw_metadata["tracks"], so a release whose tracks are already owned is
+    correctly excluded.
     """
     result = []
     removed = 0
@@ -122,7 +122,7 @@ def filter_known(candidates: list[Candidate], known_keys: set[str]) -> list[Cand
         if c.key in known_keys or make_dedup_key(c.artist, c.title) in known_keys:
             removed += 1
             continue
-        # Also check individual tracks embedded in the release (Juno EP tracks)
+        # Also check individual tracks embedded in the release
         tracks = c.raw_metadata.get("tracks", [])
         if any(
             make_dedup_key(t.get("artist", c.artist), t["title"]) in known_keys

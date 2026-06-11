@@ -181,7 +181,7 @@ def _score(
         except ValueError:
             pass
 
-    # --- Chart position (Juno and any other source that sets chart_position) ---
+    # --- Chart position (any source that sets chart_position, e.g. Beatport) ---
     chart_pos = c.raw_metadata.get("chart_position")
     if chart_pos and isinstance(chart_pos, int) and 1 <= chart_pos <= _CHART_SCALE:
         chart_bonus = _W_CHART_TOP * (1 - (chart_pos - 1) / _CHART_SCALE)

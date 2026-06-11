@@ -8,7 +8,7 @@ by the pipeline on the same run.
 import json
 import os
 
-from src.fetchers import bandcamp, beatport, bleep, boomkat, juno, mixupload, ra, traxsource, volumo
+from src.fetchers import bandcamp, beatport, bleep, boomkat, mixupload, ra, traxsource, volumo
 from src.logger import get_logger
 from src.models import SourceItem
 
@@ -17,7 +17,6 @@ logger = get_logger(__name__)
 _SOURCE_ITEMS_FILE = "source_items.json"
 
 _FETCHERS = [
-    ("juno", juno.fetch),
     ("beatport", beatport.fetch),
     ("bandcamp", bandcamp.fetch),
     ("traxsource", traxsource.fetch),

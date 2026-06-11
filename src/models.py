@@ -62,7 +62,7 @@ class RecommendationSignal:
 @dataclass
 class SourceItem:
     """Raw item as ingested from any external source, before normalisation."""
-    source: str        # e.g. "beatport", "juno", "bandcamp"
+    source: str        # e.g. "beatport", "volumo", "bandcamp"
     artist: str
     title: str
     link: str

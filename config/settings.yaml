@@ -39,22 +39,6 @@ llm:
 
 sources:
 
-  juno:
-    enabled: false   # Site shut down June 2026
-    # Maps internal genre names to Juno URL slugs
-    # Note: dnb feed includes both D&B and jungle tracks
-    # Note: funk-soul-jazz feed includes funk, soul, and jazz tracks
-    genre_map:
-      breaks: breakbeat
-      uk-bass: bass
-      downtempo: downtempo
-      dnb: drumandbass
-      funk-soul-jazz: funk-soul-jazz
-      hip-hop: hip-hop
-      house: house
-      ukg: 4x4-garage
-      electronica: leftfield
-
   beatport:
     enabled: true
     chart_pattern: "https://www.beatport.com/genre/{slug}/{id}/top-100"
