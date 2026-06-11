@@ -8,35 +8,6 @@ discord:
   alert_channel: alerts
   mix_prep_channel: mix-prep
 
-llm:
-  stage1:
-    provider: "mistral"
-    model: "mistral-small-latest"
-    max_tokens: 4096
-    temperature: 0.1
-    timeout_seconds: 120
-
-  stage2:
-    provider: "openrouter"
-    model: "deepseek/deepseek-chat"
-    max_tokens: 4096
-    temperature: 0.3
-    timeout_seconds: 120
-
-  # Fallback chain for Stage 2 — tried in order if primary fails
-  stage2_fallback_chain: []
-
-  # Fallback chain for Stage 1 — tried in order if primary fails
-  fallback_chain:
-    - provider: "groq"
-      model: "llama-3.3-70b-versatile"
-    - provider: "gemini"
-      model: "gemini-2.5-flash"
-    - provider: "openrouter"
-      model: "openrouter/free"
-    - provider: "openrouter"
-      model: "mistralai/mistral-small"
-
 sources:
 
   beatport:

@@ -12,19 +12,9 @@ logger = get_logger(__name__)
 _REQUIRED_ENV_VARS = [
     "DISCORD_BOT_TOKEN",
     "DISCORD_GUILD_ID",
-    "MISTRAL_API_KEY",
-    "OPENROUTER_API_KEY",
 ]
 
 _OPTIONAL_ENV_VARS: list[str] = []
-
-# Maps provider name → environment variable name (for cascade config check)
-PROVIDER_ENV_VAR = {
-    "mistral": "MISTRAL_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-}
 
 _CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -68,40 +58,6 @@ class Settings:
     @property
     def discord_mix_prep_channel(self) -> str:
         return self._data.get("discord", {}).get("mix_prep_channel", "mix-prep")
-
-    # --- LLM ---
-
-    @property
-    def mistral_api_key(self) -> str:
-        return os.getenv("MISTRAL_API_KEY", "")
-
-    @property
-    def groq_api_key(self) -> str:
-        return os.getenv("GROQ_API_KEY", "")
-
-    @property
-    def gemini_api_key(self) -> str:
-        return os.getenv("GEMINI_API_KEY", "")
-
-    @property
-    def openrouter_api_key(self) -> str:
-        return os.getenv("OPENROUTER_API_KEY", "")
-
-    @property
-    def llm_stage1(self) -> dict:
-        return self._data.get("llm", {}).get("stage1", {})
-
-    @property
-    def llm_stage2(self) -> dict:
-        return self._data.get("llm", {}).get("stage2", {})
-
-    @property
-    def llm_stage2_fallback_chain(self) -> list[dict]:
-        return self._data.get("llm", {}).get("stage2_fallback_chain", [])
-
-    @property
-    def llm_fallback_chain(self) -> list[dict]:
-        return self._data.get("llm", {}).get("fallback_chain", [])
 
     # --- Sources ---
 

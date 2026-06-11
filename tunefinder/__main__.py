@@ -10,52 +10,15 @@ from src.config import load_settings
 
 
 def cmd_check_config(args):
-    from src.config import PROVIDER_ENV_VAR
-
     settings = load_settings()
     settings.validate()
 
-    stage1_cfg = settings.llm_stage1
-    fallback_chain = settings.llm_fallback_chain
-
-    cascade = [
-        {"provider": stage1_cfg.get("provider", "mistral"), "model": stage1_cfg.get("model", ""), "position": "primary"}
-    ] + [
-        {"provider": e.get("provider", ""), "model": e.get("model", ""), "position": f"fallback {i + 1}"}
-        for i, e in enumerate(fallback_chain)
-    ]
-
-    def _print_cascade(label, chain):
-        print(f"\n{label}:")
-        print(f"  {'Position':<12}  {'Provider':<12}  {'Model':<30}  {'Env Var':<22}  Status")
-        print(f"  {'-'*12}  {'-'*12}  {'-'*30}  {'-'*22}  ------")
-        for entry in chain:
-            provider = entry["provider"]
-            model = entry["model"]
-            position = entry["position"]
-            env_var = PROVIDER_ENV_VAR.get(provider)
-            if env_var is None:
-                status = "no key needed"
-                env_var_display = "(none)"
-            elif os.getenv(env_var):
-                status = "SET"
-                env_var_display = env_var
-            else:
-                status = "MISSING"
-                env_var_display = env_var
-            print(f"  {position:<12}  {provider:<12}  {model:<30}  {env_var_display:<22}  {status}")
-
-    stage2_cfg = settings.llm_stage2
-    stage2_fallback_chain = settings.llm_stage2_fallback_chain
-    stage2_chain = [
-        {"provider": stage2_cfg.get("provider", "openrouter"), "model": stage2_cfg.get("model", ""), "position": "primary"}
-    ] + [
-        {"provider": e.get("provider", ""), "model": e.get("model", ""), "position": f"fallback {i + 1}"}
-        for i, e in enumerate(stage2_fallback_chain)
-    ]
-
-    _print_cascade("Stage 1 LLM cascade (reason enrichment)", cascade)
-    _print_cascade("Stage 2 LLM cascade (report generation)", stage2_chain)
+    from src.config import _REQUIRED_ENV_VARS
+    print("\nEnvironment variables:")
+    for key in _REQUIRED_ENV_VARS:
+        status = "SET" if os.getenv(key) else "MISSING"
+        print(f"  {key:<30}  {status}")
+    print("\nReport generation: deterministic (no LLM)")
     print("")
 
 
@@ -192,10 +155,10 @@ def cmd_run(args):
         return
 
     # 5. Rank and split into sections
-    sections, _label_artists = rank_candidates(candidates, profiles, settings, label_seed=label_seed)
+    sections, label_artists = rank_candidates(candidates, profiles, settings, label_seed=label_seed)
 
     # 6. Generate report
-    report_text = generate_report(sections, report_id, stats, settings, profiles=profiles)
+    report_text = generate_report(sections, report_id, stats, settings, profiles=profiles, label_artists=label_artists)
 
     # 7. Post to Discord (skipped in dry-run)
     if dry_run:
@@ -363,10 +326,10 @@ def cmd_mix_prep(args):
         return
 
     # 5. Rank and section
-    sections, _label_artists = rank_candidates_mix_prep(candidates, profiles, settings, label_seed=label_seed)
+    sections, label_artists = rank_candidates_mix_prep(candidates, profiles, settings, label_seed=label_seed)
 
     # 6. Generate report
-    report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles)
+    report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles, label_artists=label_artists)
 
     # 7. Post to mix-prep Discord channel (skipped in dry-run)
     if dry_run:

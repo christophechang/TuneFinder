@@ -1,39 +1,18 @@
 """
-Report generator — two-stage LLM pipeline.
+Deterministic report renderer.
 
-Stage 1 (cheap, fast):
-  Enriches the reason field for each shortlisted candidate using the Stage 1
-  cascade chain. One batch call covering all sections.
-  Falls back to signal-derived reasons if Stage 1 fails.
-
-Stage 2:
-  Writes the full Discord-formatted weekly report from the enriched candidates.
-  One call per run.
+No LLM — reasons from src.pipeline.reasons, layout from this module.
+_sanitize_report and Discord-safe link formatting are preserved verbatim.
 """
-import json
 import re
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import Optional
 
-from src.llm import call_stage1, call_stage2
 from src.logger import get_logger
 from src.models import ArtistProfile, Candidate
-from src.pipeline.label_cache import load_label_profiles, save_label_profiles
 from src.pipeline.profile import _split_artists
-
-
-def _clean_llm_json(raw: str) -> str:
-    """Strip markdown code fences and replace control characters that break json.loads."""
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    # Replace all control characters with a space.
-    # LLMs occasionally embed raw newlines/tabs inside string values, which is invalid JSON.
-    # Replacing with spaces is safe — JSON parsers treat spaces as whitespace between tokens.
-    raw = re.sub(r"[\x00-\x1f\x7f]", " ", raw)
-    return raw
+from src.pipeline.reasons import compose_reason
 
 logger = get_logger(__name__)
 
@@ -49,11 +28,8 @@ def _sanitize_report(text: str) -> str:
     """Post-process report: suppress Discord embeds and remove duplicate URLs per line."""
     lines = []
     for line in text.split("\n"):
-        # Convert [text](url) → [text](<url>) to suppress Discord embed previews
         line = _LINK_RE.sub(lambda m: f'[{m.group(1)}](<{m.group(2)}>)', line)
-        # Remove any remaining bare URLs (not inside <> or markdown links) — these trigger embeds
         line = _BARE_URL_RE.sub('', line).strip()
-        # Deduplicate: if the same URL appears twice in masked links on one line, keep first only
         seen: set[str] = set()
 
         def _dedup(m: re.Match) -> str:
@@ -68,222 +44,15 @@ def _sanitize_report(text: str) -> str:
     return "\n".join(lines)
 
 
-_DJ_CONTEXT = (
-    "The DJ plays D&B, Breakbeat, UK Bass, UK Garage, House, Techno, and Electronica. "
-    "Mix genre is a soft signal — tracks appear across scene boundaries. "
-    "The audience is the DJ themselves reviewing their own weekly discovery feed."
-)
-
-
 # ---------------------------------------------------------------------------
-# Stage 1 — reason enrichment
-# ---------------------------------------------------------------------------
-
-def _signal_summary(c: Candidate) -> list[str]:
-    return [s.explanation for s in c.signals]
-
-
-def _enrich_reasons(
-    candidates: list[Candidate],
-    settings,
-    profiles: dict[str, ArtistProfile] | None = None,
-) -> dict[str, str]:
-    """
-    Call Stage 1 LLM to generate a punchy one-sentence reason per candidate.
-    Returns dict of {artist||title: reason}. Falls back to signal text on failure.
-
-    Profiles surface concrete catalog facts (prior titles, play count) so the LLM
-    has real anchors to quote rather than paraphrasing the signal text.
-    """
-    profiles_lower = {k.lower(): v for k, v in (profiles or {}).items()}
-
-    def _payload_for(c: Candidate) -> dict:
-        signal_codes = [s.code for s in c.signals]
-        best_play_count = None
-        prior_titles: list[str] = []
-        if "known_artist" in signal_codes:
-            for part in _split_artists(c.artist):
-                profile = profiles_lower.get(part.lower().strip())
-                if profile:
-                    if best_play_count is None or profile.play_count > best_play_count:
-                        best_play_count = profile.play_count
-                    for t in profile.track_titles:
-                        if t and t not in prior_titles and t.lower() != c.title.lower():
-                            prior_titles.append(t)
-                            if len(prior_titles) >= 3:
-                                break
-                    if len(prior_titles) >= 3:
-                        break
-        return {
-            "artist": c.artist,
-            "title": c.title,
-            "label": c.label or "",
-            "source": c.source,
-            "genre_tags": c.genre_tags[:5],
-            "release_date": c.release_date or "",
-            "chart_position": c.raw_metadata.get("chart_position"),
-            "cross_source_count": len(c.raw_metadata.get("seen_on_sources", [c.source])),
-            "signal_codes": signal_codes,
-            "known_artist_play_count": best_play_count,
-            "prior_titles_sample": prior_titles,
-        }
-
-    payload = [_payload_for(c) for c in candidates]
-
-    system = (
-        "You write concise music discovery reasons for a DJ. "
-        f"{_DJ_CONTEXT} "
-        "For each track, write one sentence (max 15 words) explaining why it fits this DJ's taste. "
-        "Anchor on one concrete fact from the payload: a prior track by the artist, a genre tag, "
-        "the chart position, or the cross-source count. Use only facts present in the payload. "
-        "Avoid marketing words: sonic, undeniable, journey, vibes, must-hear, perfect for, your next favorite. "
-        "Return a valid JSON array only, no preamble."
-    )
-
-    examples = [
-        {
-            "input": {
-                "artist": "Sully", "title": "Cherry", "label": "Astrophonica", "source": "beatport",
-                "genre_tags": ["breaks", "uk-bass"], "chart_position": 3, "cross_source_count": 1,
-                "signal_codes": ["known_artist", "chart_position"],
-                "known_artist_play_count": 4, "prior_titles_sample": ["Swandive", "Glasshouse"],
-            },
-            "output": {
-                "artist": "Sully", "title": "Cherry",
-                "reason": "Sully follow-up to Swandive, currently #3 on the Beatport breaks chart.",
-            },
-        },
-        {
-            "input": {
-                "artist": "Skee Mask", "title": "Pop", "label": "Ilian Tape", "source": "juno",
-                "genre_tags": ["electronica", "breaks"], "chart_position": None, "cross_source_count": 2,
-                "signal_codes": ["label_match", "genre_match"],
-                "known_artist_play_count": None, "prior_titles_sample": [],
-            },
-            "output": {
-                "artist": "Skee Mask", "title": "Pop",
-                "reason": "Ilian Tape release tagged electronica/breaks — picked up across two sources.",
-            },
-        },
-    ]
-
-    prompt = (
-        "Examples:\n"
-        f"{json.dumps(examples, ensure_ascii=False)}\n\n"
-        f"Generate reasons for these tracks:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
-        'Return format: [{"artist": "...", "title": "...", "reason": "..."}]'
-    )
-
-    try:
-        raw = _clean_llm_json(call_stage1(prompt, system, settings, temperature=0.3))
-        enriched = json.loads(raw)
-        return {
-            f"{e['artist'].lower().strip()}||{e['title'].lower().strip()}": e.get("reason", "")
-            for e in enriched
-            if "artist" in e and "title" in e
-        }
-    except Exception as e:
-        logger.warning(f"[report] Stage 1 reason enrichment failed: {e} — using signal fallback")
-        return {}
-
-
-# ---------------------------------------------------------------------------
-# Label synopsis enrichment
-# ---------------------------------------------------------------------------
-
-def _enrich_label_synopses(labels: list[str], settings, data_dir: str) -> dict[str, str]:
-    """
-    Return a synopsis string for each label name.
-    Hits the cache first; only calls Stage 1 LLM for labels not yet cached.
-    Saves new entries back to cache.
-    Returns dict keyed by original label name (preserves case for display).
-    """
-    cache = load_label_profiles(data_dir)
-    result: dict[str, str] = {}
-    missing: list[str] = []
-
-    for label in labels:
-        cached = cache.get(label.lower().strip())
-        if cached:
-            result[label] = cached
-        else:
-            missing.append(label)
-
-    if missing:
-        system = (
-            "You write concise record label descriptions for a DJ's music discovery report. "
-            "For each label write one sentence (max 20 words) covering: founding city/country, "
-            "approximate founding year if known, and 2-3 key artists. Be factual and specific. "
-            "Return a valid JSON array only, no preamble."
-        )
-        prompt = (
-            f"Generate synopses for these labels:\n{json.dumps(missing, ensure_ascii=False)}\n\n"
-            'Return format: [{"label": "...", "synopsis": "..."}]'
-        )
-        try:
-            raw = _clean_llm_json(call_stage1(prompt, system, settings))
-            enriched = json.loads(raw)
-            for e in enriched:
-                if "label" in e and "synopsis" in e:
-                    result[e["label"]] = e["synopsis"]
-                    cache[e["label"].lower().strip()] = e["synopsis"]
-            save_label_profiles(cache, data_dir)
-        except Exception as e:
-            logger.warning(f"[report] Label synopsis enrichment failed: {e}")
-
-    return result
-
-
-def _format_label_watch_for_prompt(
-    candidates: list[Candidate],
-    reasons: dict[str, str],
-    synopses: dict[str, str],
-) -> str:
-    """Format LABEL WATCH section grouped by label, with synopsis per label group."""
-    if not candidates:
-        return ""
-
-    by_label: dict[str, list[Candidate]] = defaultdict(list)
-    no_label: list[Candidate] = []
-    for c in candidates:
-        if c.label:
-            by_label[c.label].append(c)
-        else:
-            no_label.append(c)
-
-    lines = ["LABEL WATCH (active labels in your scene):"]
-    for label_name, label_candidates in by_label.items():
-        synopsis = synopses.get(label_name, "")
-        lines.append(f"  [LABEL: {label_name}]")
-        if synopsis:
-            lines.append(f"  [SYNOPSIS: {synopsis}]")
-        for c in label_candidates:
-            key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
-            reason = reasons.get(key) or c.primary_reason or "Interesting new release."
-            source_tag = f" [SOURCE:{c.source.title()}]" if c.source else ""
-            link_str = f" {c.link}" if c.link else ""
-            lines.append(f"    - {c.artist} — {c.title} [{label_name}]{source_tag} | {reason}{link_str}")
-
-    # Tracks with no label fall through without a sub-header
-    for c in no_label:
-        key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
-        reason = reasons.get(key) or c.primary_reason or "Interesting new release."
-        source_tag = f" [SOURCE:{c.source.title()}]" if c.source else ""
-        link_str = f" {c.link}" if c.link else ""
-        lines.append(f"  - {c.artist} — {c.title}{source_tag} | {reason}{link_str}")
-
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Stage 2 — full report
+# Stats helpers (kept verbatim from original)
 # ---------------------------------------------------------------------------
 
 def _format_weekly_stats(
     sections: dict[str, list[Candidate]],
     profiles: dict[str, ArtistProfile] | None,
 ) -> str:
-    """Compact stats line injected into the Stage 2 prompt as soft context."""
+    """Compact stats line rendered in the report header."""
     all_c = [c for sec in sections.values() for c in sec]
     if not all_c:
         return ""
@@ -308,10 +77,7 @@ def _format_weekly_stats(
 
 
 def _format_mix_prep_stats(sections: dict[str, list[Candidate]]) -> str:
-    """Compact stats line for mix-prep — totals and top genres only.
-    Labels and known-artist counts are intentionally omitted (per spec): in a
-    mix-prep run the genre is fixed and the focus is the track list itself.
-    """
+    """Compact stats line for mix-prep — totals and top genres only."""
     all_c = [c for sec in sections.values() for c in sec]
     if not all_c:
         return ""
@@ -342,7 +108,7 @@ def _format_fetcher_health(health: dict) -> str:
 
 
 def _build_footer(report_id: str, stats: dict, recommended_count: int | None = None) -> str:
-    """Build the Processing Summary and Fetcher Health footer in plain Discord-friendly text."""
+    """Build the Processing Summary and Fetcher Health footer."""
     lines = ["## ⚙️ Processing Summary"]
     lines.append(f"📥 Sources fetched: **{stats.get('sources_fetched', '?')}**")
     lines.append(f"🔀 After dedup: **{stats.get('after_dedup', stats.get('sources_fetched', '?'))}**")
@@ -367,167 +133,6 @@ def _build_footer(report_id: str, stats: dict, recommended_count: int | None = N
     return "\n".join(lines)
 
 
-def _format_section_for_prompt(label: str, candidates: list[Candidate], reasons: dict[str, str]) -> str:
-    if not candidates:
-        return ""
-    lines = [f"{label}:"]
-    for c in candidates:
-        key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
-        reason = reasons.get(key) or c.primary_reason or "Interesting new release."
-        label_str = f" [{c.label}]" if c.label else ""
-        source_tag = f" [SOURCE:{c.source.title()}]" if c.source else ""
-        link_str = f" {c.link}" if c.link else ""
-        lines.append(f"  - {c.artist} — {c.title}{label_str}{source_tag} | {reason}{link_str}")
-    return "\n".join(lines)
-
-
-def generate_report(
-    sections: dict[str, list[Candidate]],
-    report_id: str,
-    stats: dict,
-    settings,
-    profiles: dict[str, ArtistProfile] | None = None,
-) -> str:
-    """
-    Generate the full Discord-formatted weekly report.
-    Calls Stage 1 to enrich reasons and label synopses, then Stage 2 to write the report.
-    Returns the final report string ready to post.
-    """
-    all_candidates = []
-    for candidates in sections.values():
-        all_candidates.extend(candidates)
-
-    # Stage 1 — enrich reasons
-    reasons = _enrich_reasons(all_candidates, settings, profiles=profiles) if all_candidates else {}
-
-    # Stage 1 — enrich label synopses (cached; only calls LLM for new labels)
-    label_watch_candidates = sections.get("label_watch", [])
-    active_labels = list({c.label for c in label_watch_candidates if c.label})
-    synopses = _enrich_label_synopses(active_labels, settings, settings.data_dir) if active_labels else {}
-
-    # Build structured prompt for Stage 2
-    today = datetime.now(timezone.utc).strftime("%-d %B %Y")
-    sections_text = "\n\n".join(filter(None, [
-        _format_section_for_prompt("TOP PICKS (strongest taste matches)", sections.get("top_picks", []), reasons),
-        _format_label_watch_for_prompt(label_watch_candidates, reasons, synopses),
-        _format_section_for_prompt("ARTIST WATCH (new material from artists you play)", sections.get("artist_watch", []), reasons),
-        _format_section_for_prompt("WILDCARDS (interesting outliers worth a listen)", sections.get("wildcards", []), reasons),
-    ]))
-
-    system = (
-        "You write a weekly music discovery report for a DJ's Discord channel #music-research. "
-        f"{_DJ_CONTEXT} "
-        "Write in a concise, knowledgeable tone — like a respected record shop selector. "
-        "Format for Discord markdown. Use ** for bold, ## for section headers with emojis. "
-        "Exact track format (two lines per track, no blank line between them):\n"
-        "**Artist — Title** [Label] [Source] → [Listen](<url>)\n"
-        "> {reason}\n"
-        "The reason comes after the `|` in each input line. Render it verbatim on the blockquote line — do not rewrite, do not omit. "
-        "Each track in the input has a [SOURCE:name] tag — render it as [name] in the track line, "
-        "immediately after the label bracket and before the →. "
-        "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
-        "Never output bare URLs. Never repeat the same URL twice for one track. "
-        "Section headers: ## 🔺 Top Picks, ## 🏷️ Label Watch, ## 👁️ Artist Watch, ## 🃏 Wildcards. "
-        "Omit a section header entirely if that section has no tracks. "
-        "In the Label Watch section, the input groups tracks by label using [LABEL: name] and [SYNOPSIS: text] tags. "
-        "For each label group: render the label name as a bold sub-header (e.g. **Ilian Tape**), "
-        "then the synopsis as an italicised line underneath, then the tracks for that label (each with its blockquote reason). "
-        "Quality over quantity. Do not add tracks that aren't in the input. "
-        "End after the last track section — do not add a summary or stats section. "
-        "Avoid marketing words: sonic, undeniable, journey, vibes, must-hear, perfect for, your next favorite. "
-        "No filler intro before sections. No closing summary."
-    )
-
-    stats_line = _format_weekly_stats(sections, profiles)
-    prompt = (
-        f"Write the weekly music discovery report for {today} (Report ID: {report_id}).\n\n"
-        + (f"{stats_line}\n\n" if stats_line else "")
-        + f"{sections_text}\n\n"
-        "Format the full Discord report with ## section headers (with emojis), bold artist names, "
-        "and track links as [Listen](<url>)."
-    )
-
-    recommended_count = sum(len(v) for v in sections.values())
-    footer = _build_footer(report_id, stats, recommended_count)
-
-    logger.info("[report] Calling Stage 2 for report generation")
-    try:
-        report = call_stage2(prompt, system, settings)
-        report = _sanitize_report(report)
-        report = report.rstrip() + "\n\n" + footer
-        logger.info(f"[report] Report generated — {len(report)} chars")
-        return report
-    except Exception as e:
-        logger.error(f"[report] Stage 2 failed: {e}")
-        return _fallback_report(sections, reasons, report_id, today, stats, synopses)
-
-
-def generate_mix_prep_report(
-    sections: dict[str, list[Candidate]],
-    report_id: str,
-    stats: dict,
-    genre: str,
-    settings,
-    profiles: dict[str, ArtistProfile] | None = None,
-) -> str:
-    """
-    Generate a Discord-formatted mix-prep report focused on a single genre.
-    Uses the same two-stage LLM pipeline as generate_report but with genre-aware prompts.
-    """
-    all_candidates = []
-    for candidates in sections.values():
-        all_candidates.extend(candidates)
-
-    reasons = _enrich_reasons(all_candidates, settings, profiles=profiles) if all_candidates else {}
-
-    today = datetime.now(timezone.utc).strftime("%-d %B %Y")
-    sections_text = "\n\n".join(filter(None, [
-        _format_section_for_prompt(f"TOP PICKS (best {genre} tracks for the mix)", sections.get("top_picks", []), reasons),
-        _format_section_for_prompt("DEEP CUTS (deeper selections worth exploring)", sections.get("deep_cuts", []), reasons),
-    ]))
-
-    system = (
-        f"You write a mix preparation report for a DJ building a {genre} mix. "
-        f"{_DJ_CONTEXT} "
-        "Write in a concise, knowledgeable tone — like a respected record shop selector. "
-        "Format for Discord markdown. Use ** for bold, ## for section headers with emojis. "
-        "Exact track format (two lines per track, no blank line between them):\n"
-        "**Artist — Title** [Label] → [Listen](<url>)\n"
-        "> {reason}\n"
-        "The reason comes after the `|` in each input line. Render it verbatim on the blockquote line — do not rewrite, do not omit. "
-        "Rules: wrap every URL in angle brackets inside the link ([text](<url>)) to suppress Discord embeds. "
-        "Never output bare URLs. Never repeat the same URL twice for one track. "
-        f"Section headers: ## 🔺 Top Picks ({genre}), ## 🎧 Deep Cuts. "
-        "Quality over quantity. Do not add tracks that aren't in the input. "
-        "End after the last track section — do not add a summary or stats section. "
-        "Avoid marketing words: sonic, undeniable, journey, vibes, must-hear, perfect for, your next favorite. "
-        "No filler intro before sections. No closing summary."
-    )
-
-    stats_line = _format_mix_prep_stats(sections)
-    prompt = (
-        f"Write the {genre} mix preparation report for {today} (Report ID: {report_id}).\n\n"
-        + (f"{stats_line}\n\n" if stats_line else "")
-        + f"{sections_text}\n\n"
-        "Format the full Discord report with ## section headers (with emojis), bold artist names, "
-        "and track links as [Listen](<url>)."
-    )
-
-    header = _build_mix_prep_header(report_id, today, genre)
-    footer = _build_footer(report_id, stats)
-
-    logger.info(f"[report] Calling Stage 2 for mix-prep report — genre: {genre}")
-    try:
-        report = call_stage2(prompt, system, settings)
-        report = _sanitize_report(report)
-        report = header + "\n\n" + report.rstrip() + "\n\n" + footer
-        logger.info(f"[report] Mix-prep report generated — {len(report)} chars")
-        return report
-    except Exception as e:
-        logger.error(f"[report] Stage 2 failed: {e}")
-        return _fallback_mix_prep_report(sections, reasons, report_id, today, genre, stats)
-
-
 def _build_mix_prep_header(report_id: str, today: str, genre: str) -> str:
     display_genre = genre.upper() if genre == "ukg" else genre.replace("-", " ").title()
     return "\n".join([
@@ -537,91 +142,165 @@ def _build_mix_prep_header(report_id: str, today: str, genre: str) -> str:
     ])
 
 
-def _fallback_mix_prep_report(
+# ---------------------------------------------------------------------------
+# Track line formatter
+# ---------------------------------------------------------------------------
+
+def _track_line(n: int, c: Candidate) -> str:
+    label_str = f" [{c.label}]" if c.label else ""
+    source_str = f" [{c.source.title()}]"
+    link_str = f" → [Listen](<{c.link}>)" if c.link else ""
+    return f"{n}. **{c.artist} — {c.title}**{label_str}{source_str}{link_str}"
+
+
+# ---------------------------------------------------------------------------
+# Label Watch artist-fact line
+# ---------------------------------------------------------------------------
+
+def _label_artist_line(label_key: str, label_artists: dict[str, list[str]]) -> str:
+    """Return the italic artist-fact line for a label group, or "" if no names."""
+    names = label_artists.get(label_key, [])
+    if not names:
+        return ""
+    n = len(names)
+    first3 = names[:3]
+    names_disp = ", ".join(first3)
+    if n > 3:
+        names_disp += ", …"
+    verb = "releases" if n == 1 else "release"
+    return f"*{n} of your artists {verb} here: {names_disp}*"
+
+
+# ---------------------------------------------------------------------------
+# Main renderers
+# ---------------------------------------------------------------------------
+
+def generate_report(
     sections: dict[str, list[Candidate]],
-    reasons: dict[str, str],
     report_id: str,
-    today: str,
-    genre: str,
     stats: dict,
+    settings,
+    profiles: dict[str, ArtistProfile] | None = None,
+    label_artists: dict[str, list[str]] | None = None,
+    today: Optional[date] = None,
 ) -> str:
-    lines = [_build_mix_prep_header(report_id, today, genre), ""]
-    section_labels = {
-        "top_picks": f"## 🔺 Top Picks ({genre})",
-        "deep_cuts": "## 🎧 Deep Cuts",
-    }
-    for key, header in section_labels.items():
-        candidates = sections.get(key, [])
-        if not candidates:
-            continue
-        lines.append(header)
-        for c in candidates:
-            label_str = f" [{c.label}]" if c.label else ""
-            source_str = f" [{c.source.title()}]" if c.source else ""
-            link_str = f" → [Listen](<{c.link}>)" if c.link else ""
-            lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
-            reason_key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
-            reason = reasons.get(reason_key) or c.primary_reason
-            if reason:
-                lines.append(f"> {reason}")
-        lines.append("")
-    lines.append(_build_footer(report_id, stats))
-    return _sanitize_report("\n".join(lines))
+    """Generate the full Discord-formatted weekly report deterministically."""
+    if today is None:
+        today = datetime.now(timezone.utc).date()
 
+    profiles_lower = {k.lower(): v for k, v in (profiles or {}).items()}
+    today_str = today.strftime("%-d %B %Y")
+    stats_line = _format_weekly_stats(sections, profiles)
 
-def _fallback_report(
-    sections: dict[str, list[Candidate]],
-    reasons: dict[str, str],
-    report_id: str,
-    today: str,
-    stats: dict,
-    synopses: dict[str, str] | None = None,
-) -> str:
-    """Plain-text fallback report if Stage 2 fails."""
-    lines = [f"**TuneFinder — {today} ({report_id})**\n"]
-    section_labels = {
-        "top_picks": "## 🔺 Top Picks",
-        "artist_watch": "## 👁️ Artist Watch",
-        "wildcards": "## 🃏 Wildcards",
-    }
-    for key, header in section_labels.items():
-        candidates = sections.get(key, [])
-        if not candidates:
-            continue
-        lines.append(header)
-        for c in candidates:
-            label_str = f" [{c.label}]" if c.label else ""
-            source_str = f" [{c.source.title()}]" if c.source else ""
-            link_str = f" → [Listen](<{c.link}>)" if c.link else ""
-            lines.append(f"**{c.artist} — {c.title}**{label_str}{source_str}{link_str}")
-            reason_key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
-            reason = reasons.get(reason_key) or c.primary_reason
-            if reason:
-                lines.append(f"> {reason}")
+    lines = [f"**TuneFinder — {today_str} ({report_id})**"]
+    if stats_line:
+        lines.append(f"*{stats_line}*")
+    lines.append("")
+
+    track_counter = [0]
+
+    def _render_track(c: Candidate) -> list[str]:
+        track_counter[0] += 1
+        reason = compose_reason(c, profiles_lower, label_artists=label_artists, today=today)
+        return [_track_line(track_counter[0], c), f"> {reason}"]
+
+    # Top Picks
+    top_picks = sections.get("top_picks", [])
+    if top_picks:
+        lines.append("## 🔺 Top Picks")
+        for c in top_picks:
+            lines.extend(_render_track(c))
         lines.append("")
 
+    # Label Watch — grouped by label
     label_watch = sections.get("label_watch", [])
     if label_watch:
         lines.append("## 🏷️ Label Watch")
         by_label: dict[str, list[Candidate]] = defaultdict(list)
+        no_label: list[Candidate] = []
         for c in label_watch:
-            by_label[c.label or ""].append(c)
+            if c.label:
+                by_label[c.label].append(c)
+            else:
+                no_label.append(c)
         for label_name, label_candidates in by_label.items():
-            if label_name:
-                lines.append(f"**{label_name}**")
-                synopsis = (synopses or {}).get(label_name, "")
-                if synopsis:
-                    lines.append(f"*{synopsis}*")
+            lines.append(f"**{label_name}**")
+            artist_line = _label_artist_line(label_name.lower().strip(), label_artists or {})
+            if artist_line:
+                lines.append(artist_line)
             for c in label_candidates:
-                source_str = f" [{c.source.title()}]" if c.source else ""
-                link_str = f" → [Listen](<{c.link}>)" if c.link else ""
-                lines.append(f"**{c.artist} — {c.title}**{source_str}{link_str}")
-                reason_key = f"{c.artist.lower().strip()}||{c.title.lower().strip()}"
-                reason = reasons.get(reason_key) or c.primary_reason
-                if reason:
-                    lines.append(f"> {reason}")
+                lines.extend(_render_track(c))
+        for c in no_label:
+            lines.extend(_render_track(c))
+        lines.append("")
+
+    # Artist Watch
+    artist_watch = sections.get("artist_watch", [])
+    if artist_watch:
+        lines.append("## 👁️ Artist Watch")
+        for c in artist_watch:
+            lines.extend(_render_track(c))
+        lines.append("")
+
+    # Wildcards
+    wildcards = sections.get("wildcards", [])
+    if wildcards:
+        lines.append("## 🃏 Wildcards")
+        for c in wildcards:
+            lines.extend(_render_track(c))
         lines.append("")
 
     recommended_count = sum(len(v) for v in sections.values())
     lines.append(_build_footer(report_id, stats, recommended_count))
+
+    return _sanitize_report("\n".join(lines))
+
+
+def generate_mix_prep_report(
+    sections: dict[str, list[Candidate]],
+    report_id: str,
+    stats: dict,
+    genre: str,
+    settings,
+    profiles: dict[str, ArtistProfile] | None = None,
+    label_artists: dict[str, list[str]] | None = None,
+    today: Optional[date] = None,
+) -> str:
+    """Generate a Discord-formatted mix-prep report focused on a single genre."""
+    if today is None:
+        today = datetime.now(timezone.utc).date()
+
+    profiles_lower = {k.lower(): v for k, v in (profiles or {}).items()}
+    today_str = today.strftime("%-d %B %Y")
+    stats_line = _format_mix_prep_stats(sections)
+    header = _build_mix_prep_header(report_id, today_str, genre)
+
+    lines = [header, ""]
+    if stats_line:
+        lines.append(f"*{stats_line}*")
+        lines.append("")
+
+    track_counter = [0]
+
+    def _render_track(c: Candidate) -> list[str]:
+        track_counter[0] += 1
+        reason = compose_reason(c, profiles_lower, label_artists=label_artists, today=today)
+        return [_track_line(track_counter[0], c), f"> {reason}"]
+
+    top_picks = sections.get("top_picks", [])
+    if top_picks:
+        lines.append(f"## 🔺 Top Picks ({genre})")
+        for c in top_picks:
+            lines.extend(_render_track(c))
+        lines.append("")
+
+    deep_cuts = sections.get("deep_cuts", [])
+    if deep_cuts:
+        lines.append("## 🎧 Deep Cuts")
+        for c in deep_cuts:
+            lines.extend(_render_track(c))
+        lines.append("")
+
+    lines.append(_build_footer(report_id, stats))
+
     return _sanitize_report("\n".join(lines))

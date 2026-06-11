@@ -3,8 +3,8 @@ def test_smoke_imports():
     from src.models import Candidate
     from src.pipeline.ranker import rank_candidates
     from src.pipeline.report import generate_report
-    from src.llm import call_stage1
+    from src.pipeline.reasons import compose_reason
     assert callable(rank_candidates)
     assert callable(generate_report)
-    assert callable(call_stage1)
+    assert callable(compose_reason)
     assert Candidate
