@@ -4,11 +4,14 @@ from datetime import date
 import pytest
 
 from src.models import ArtistProfile, Candidate, RecommendationSignal
+import re
+
 from src.pipeline.report import (
     _format_weekly_stats,
     _format_mix_prep_stats,
     generate_report,
     generate_mix_prep_report,
+    report_order,
 )
 
 TODAY = date(2026, 6, 11)
@@ -314,3 +317,78 @@ def test_mix_prep_snapshot():
         today=TODAY,
     )
     assert result == _MIX_PREP_SNAPSHOT
+
+
+# ---------------------------------------------------------------------------
+# report_order tests
+# ---------------------------------------------------------------------------
+
+def _parse_track_numbers(report_text: str) -> list[tuple[int, str, str]]:
+    """Extract (n, artist, title) from '1. **Artist — Title**...' lines."""
+    found = []
+    for line in report_text.splitlines():
+        m = re.match(r'^(\d+)\. \*\*(.+?) — (.+?)\*\*', line)
+        if m:
+            found.append((int(m.group(1)), m.group(2), m.group(3)))
+    return found
+
+
+def test_report_order_matches_weekly_render():
+    profiles, sections = _make_weekly_fixture()
+    label_artists = {
+        "signature": ["Calibre", "Sully"],
+        "metalheadz": ["Calibre", "Sully"],
+    }
+    rendered = generate_report(
+        sections, "2026-W24",
+        {"sources_fetched": 100, "after_dedup": 80, "after_known": 60,
+         "after_history": 55, "after_release_date": 40, "pool_injected": 5},
+        object(), profiles=profiles, label_artists=label_artists, today=TODAY,
+    )
+    parsed = _parse_track_numbers(rendered)
+    ordered = list(enumerate(report_order(sections), start=1))
+    for (n, artist, title), (i, c) in zip(parsed, ordered):
+        assert n == i
+        assert artist == c.artist
+        assert title == c.title
+
+
+def test_report_order_matches_mix_prep_render():
+    profiles, sections = _make_mix_prep_fixture()
+    rendered = generate_mix_prep_report(
+        sections, "2026-W24-mix-prep-dnb",
+        {"sources_fetched": 50, "after_dedup": 40, "after_genre": 20, "pool_injected": 2},
+        "dnb", object(), profiles=profiles,
+        label_artists={"signature": ["Calibre"]}, today=TODAY,
+    )
+    parsed = _parse_track_numbers(rendered)
+    ordered = list(enumerate(report_order(sections), start=1))
+    for (n, artist, title), (i, c) in zip(parsed, ordered):
+        assert n == i
+        assert artist == c.artist
+        assert title == c.title
+
+
+def test_report_order_interleaved_labels():
+    """label_watch with interleaved labels: rendered groups by label, not raw order."""
+    cA1 = _c("ArtistA", "Track1", label="LabelA")
+    cB1 = _c("ArtistB", "Track2", label="LabelB")
+    cA2 = _c("ArtistA2", "Track3", label="LabelA")
+    sections = {"label_watch": [cA1, cB1, cA2]}
+    ordered = report_order(sections)
+    # LabelA group first (both tracks), then LabelB
+    assert ordered == [cA1, cA2, cB1]
+
+
+def test_report_order_shuffled_key_order_identical():
+    """Dict key order must not affect report_order output."""
+    profiles, sections_natural = _make_weekly_fixture()
+    # Rebuild with reversed key order
+    sections_reversed = {k: sections_natural[k] for k in reversed(list(sections_natural))}
+    assert report_order(sections_natural) == report_order(sections_reversed)
+
+
+def test_report_order_unknown_key_raises():
+    sections = {"top_picks": [], "unknown_section": []}
+    with pytest.raises(ValueError, match="unknown_section"):
+        report_order(sections)

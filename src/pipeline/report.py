@@ -17,6 +17,63 @@ from src.pipeline.reasons import compose_reason
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
+# Canonical ordering
+# ---------------------------------------------------------------------------
+
+_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards", "deep_cuts")
+
+
+def _group_label_watch(label_watch: list[Candidate]) -> tuple[dict[str, list[Candidate]], list[Candidate]]:
+    """(by_label in first-occurrence order, no_label) — the exact render grouping."""
+    by_label: dict[str, list[Candidate]] = {}
+    no_label: list[Candidate] = []
+    for c in label_watch:
+        if c.label:
+            if c.label not in by_label:
+                by_label[c.label] = []
+            by_label[c.label].append(c)
+        else:
+            no_label.append(c)
+    return by_label, no_label
+
+
+def report_order(sections: dict[str, list[Candidate]]) -> list[Candidate]:
+    """Candidates in exact rendered-number order.
+
+    Walks _SECTION_ORDER (absent keys skipped); 'label_watch' is expanded
+    via _group_label_watch (grouped labels first, then no-label tracks).
+    Raises ValueError on a section key not in _SECTION_ORDER. Works for
+    weekly and mix-prep section dicts.
+    """
+    unknown = set(sections) - set(_SECTION_ORDER)
+    if unknown:
+        raise ValueError(f"Unknown section key(s): {', '.join(sorted(unknown))}")
+
+    result: list[Candidate] = []
+    seen: set[int] = set()
+
+    def _add(c: Candidate) -> None:
+        if id(c) not in seen:
+            result.append(c)
+            seen.add(id(c))
+
+    for key in _SECTION_ORDER:
+        if key not in sections:
+            continue
+        if key == "label_watch":
+            by_label, no_label = _group_label_watch(sections[key])
+            for label_candidates in by_label.values():
+                for c in label_candidates:
+                    _add(c)
+            for c in no_label:
+                _add(c)
+        else:
+            for c in sections[key]:
+                _add(c)
+
+    return result
+
+# ---------------------------------------------------------------------------
 # Discord output sanitiser
 # ---------------------------------------------------------------------------
 
@@ -216,13 +273,7 @@ def generate_report(
     label_watch = sections.get("label_watch", [])
     if label_watch:
         lines.append("## 🏷️ Label Watch")
-        by_label: dict[str, list[Candidate]] = defaultdict(list)
-        no_label: list[Candidate] = []
-        for c in label_watch:
-            if c.label:
-                by_label[c.label].append(c)
-            else:
-                no_label.append(c)
+        by_label, no_label = _group_label_watch(label_watch)
         for label_name, label_candidates in by_label.items():
             lines.append(f"**{label_name}**")
             artist_line = _label_artist_line(label_name.lower().strip(), label_artists or {})
