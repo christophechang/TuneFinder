@@ -17,7 +17,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
 2. **Fetch** — scrapes new releases from Beatport, Bandcamp, Volumo, and Mixupload (Traxsource and Resident Advisor are available but disabled by default)
-3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches
+3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches; embed metadata (`beatport_id`, `bandcamp_album_id`, `bpm`, `keysign`, etc.) is backfilled from merged-away duplicates so cross-source tracks retain all embed ids
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
 5. **Report** — deterministic renderer: reasons composed from catalog facts (play count, prior titles, chart position, label/artist data) in `src/pipeline/reasons.py`; Discord-formatted report built in `src/pipeline/report.py`
 6. **Post** — sends the report to your Discord `#music-research` channel via Bot token
@@ -28,7 +28,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 |---|---|---|
 | Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | ✅ |
 | Bandcamp | `discover_web` JSON API | ✅ |
-| Volumo | REST API (`/api/v1/albums`) | ✅ (audio previews work) |
+| Volumo | REST API (`/api/v1/albums`) | ✅ (no preview URLs in API — rows are link-only in audition page) |
 | Mixupload | HTML scrape (chart + genre pages) | ✅ |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | disabled by default |
@@ -58,6 +58,74 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 - **Wildcards** — interesting outliers from the remaining pool
 
 Each track line includes a source tag (`[Beatport]`, `[Bandcamp]`, etc.) so you can see at a glance where each recommendation came from.
+
+## Audition pages
+
+Every live run (weekly and mix-prep) writes a self-contained HTML audition page to `data/reports/audition_{report_id}.html`. The page contains inline players where available, store links, and copy-buttons for the `mark` command.
+
+**Player availability per source (Step 0 probed 2026-06-12):**
+
+| Source | Player |
+|---|---|
+| Bandcamp | `EmbeddedPlayer` iframe — works (`item_id` field confirmed) |
+| Beatport | embed iframe (`embed.beatport.com/?id={id}&type=track`) — works |
+| Volumo | link-only — no preview URL field in the API response |
+| Others | link-only |
+
+- Pages are retained for the most recent 26 runs (same policy as source item archives).
+- Dry-runs do not write pages — the run logs "DRY RUN — audition page not written".
+- The page has no CDN dependencies. The only remote content is the store player iframes themselves, all `loading="lazy"`.
+- Weekly pages copy `tunefinder mark {n} {outcome}` (number form resolves against the latest weekly report). Mix-prep pages copy the string form (`tunefinder mark "Artist - Title" {outcome}`).
+
+## Explain
+
+Trace any track through the weekly pipeline offline:
+
+```bash
+./venv/bin/python -m tunefinder explain "Calibre - New Dawn"
+```
+
+Output (example):
+
+```
+Reconstruction from current data/ state (source_items.json of the last fetch) — not a replay of the posted report.
+Selector: 'Calibre - New Dawn'
+
+Dedup key: 'calibre||new dawn'
+
+=== FETCHED ===
+  source='beatport' label='Signature' release_date='2026-06-10' genre_tags=[dnb] link='https://...'
+
+=== DEDUP ===
+  Merged item: seen_on_sources=['beatport', 'volumo'] genre_tags=[dnb]
+
+=== KNOWN-TRACK FILTER ===
+  PASS — not in known-track exclusion set.
+
+=== HISTORY FILTER ===
+  PASS — not in recommendation history.
+
+=== RELEASE WINDOW ===
+  PASS — release_date='2026-06-10' within 28-day window.
+
+=== SCORING + SECTION RECONSTRUCTION ===
+  Rank: #2 of 143 scored candidates (score=7.5)
+  Signals:
+    [known_artist] You play Calibre — this is new material from them.
+    [recurring_artist] Calibre appears in 6 of your mixes.
+    [cross_source] Flagged by 2 sources: Beatport, Volumo.
+
+=== SECTION ===
+  Landed in: top_picks (position #2)
+
+=== POOL ===
+  Not in pool.
+
+=== FEEDBACK ===
+  No feedback recorded.
+```
+
+`explain` works without Discord env vars (no `settings.validate()`). Output is labelled as a reconstruction — it can differ from the posted report if sources or the profile changed since the run.
 
 ## Mix prep
 
@@ -163,6 +231,9 @@ VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without th
 
 # Show feedback statistics
 ./venv/bin/python -m tunefinder stats
+
+# Trace a track through the weekly pipeline offline (no Discord env vars needed)
+./venv/bin/python -m tunefinder explain "Calibre - New Dawn"
 ```
 
 ### mark / stats notes

@@ -2,6 +2,18 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.9.0 — 2026-06-12
+
+### Audition queue & explain (Phase 2b)
+
+Minor bump: audition HTML pages and the `explain` command. Full context: `docs/improvement-plan.md` §5 Phase 2.
+
+- **Dedup metadata backfill across cross-source merges.** `_merge_group` in `src/pipeline/dedup.py` now backfills allowlisted embed/display keys (`beatport_id`, `volumo_track_id`, `volumo_album_id`, `bandcamp_album_id`, `bpm`, `key`, `keysign`) from merged-away duplicates. The winning item's values are never overwritten. Cross-source tracks — which score highest — now reliably carry ids from all constituent sources.
+- **Embed metadata capture in fetchers.** `src/fetchers/bandcamp.py` now captures `bandcamp_album_id` from the `item_id` field of the `discover_web` response (confirmed numeric id, embed URL verified).
+- **Audition page renderer.** `src/pipeline/audition.py` produces a fully self-contained HTML page (inline CSS + JS, no CDN). Player precedence per track: Bandcamp `EmbeddedPlayer` iframe (via `bandcamp_album_id`) → Beatport embed iframe (via `beatport_id`) → link-only row. Volumo has no preview URL in its API response — Volumo rows are link-only. The page header shows report_id and track count; each track shows number, artist/title, label, sources, BPM/key when present, the reason line (identical to Discord), a store link, and four copy-buttons for the `mark` command. Weekly pages copy `tunefinder mark {n} {outcome}`; mix-prep pages copy the shlex-quoted string form. The `data-cmd` attribute pattern keeps JS/HTML/shell quoting layers separate.
+- **Audition pages written from runs.** `cmd_run` and `cmd_mix_prep` now call `write_audition_page` after each live run, writing to `data/reports/audition_{report_id}.html`. Dry-runs log "DRY RUN — audition page not written" and write nothing. The most recent 26 pages are retained (same policy as snapshot archives).
+- **`tunefinder explain` command.** Traces any track through the weekly pipeline offline from current `data/` state. Prints fetched copies, dedup outcome, known-track/history/release-window verdict, scoring signals and total (with a single pass — `_score` is never called twice on the same object), section placement or skip reason, pool status, and feedback history. Works without Discord env vars. Output is labelled as a reconstruction — it can differ from the posted report if sources or the profile changed.
+
 ## v0.8.0 — 2026-06-12
 
 ### Feedback capture & ops hardening (Phase 2a)
