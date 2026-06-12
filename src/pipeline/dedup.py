@@ -56,6 +56,14 @@ def _richness(item: SourceItem) -> int:
     return sum([bool(item.label), bool(item.release_date), bool(item.release_name), len(item.genre_tags)])
 
 
+# Embed/display metadata worth preserving from merged-away duplicates.
+# Backfill only — the winning item's values are never overwritten.
+_MERGE_BACKFILL_KEYS = (
+    "beatport_id", "volumo_track_id", "volumo_album_id",
+    "bandcamp_album_id", "bpm", "key", "keysign",
+)
+
+
 def _merge_group(items: list[SourceItem]) -> SourceItem:
     """Merge a group of duplicate SourceItems — keep richest metadata."""
     best = max(items, key=_richness)
@@ -67,6 +75,17 @@ def _merge_group(items: list[SourceItem]) -> SourceItem:
                 all_genres.append(g)
     best.genre_tags = all_genres
     best.raw_metadata["seen_on_sources"] = sorted({i.source for i in items})
+
+    # Backfill embed metadata from losing items without overwriting winner's values.
+    losers = [i for i in items if i is not best]
+    for key in _MERGE_BACKFILL_KEYS:
+        if best.raw_metadata.get(key) is None:
+            for loser in losers:
+                val = loser.raw_metadata.get(key)
+                if val is not None:
+                    best.raw_metadata[key] = val
+                    break
+
     return best
 
 
