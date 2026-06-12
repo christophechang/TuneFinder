@@ -107,7 +107,11 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
                 release_date=item.get("release_date"),
                 release_name=title,
                 genre_tags=[genre],
-                raw_metadata={"bandcamp_tag": tag, "item_type": item.get("item_type")},
+                raw_metadata={
+                    "bandcamp_tag": tag,
+                    "item_type": item.get("item_type"),
+                    "bandcamp_album_id": item.get("item_id"),  # numeric id from discover_web `item_id` field
+                },
             ))
 
         logger.info(f"[bandcamp] {tag}: {len(tag_items)} items")
