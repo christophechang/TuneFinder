@@ -235,6 +235,7 @@ def _assign_sections(
     ranked: list[Candidate],
     settings,
     genres_set: set[str],
+    trace: dict | None = None,
 ) -> dict[str, list[Candidate]]:
     top_n = settings.pipeline_top_picks_count
     label_n = settings.pipeline_label_watch_count
@@ -252,7 +253,7 @@ def _assign_sections(
     # Genre cap is global across all sections so one genre can't flood the full report
     genre_counts: dict[str, int] = {}
 
-    def pick(n: int, require_signal: str = None) -> list[Candidate]:
+    def pick(n: int, require_signal: str = None, section_name: str = "") -> list[Candidate]:
         # Artist/release caps reset per section so an artist can appear in different
         # sections (e.g. top_picks and label_watch serve distinct curatorial purposes)
         artist_counts: dict[str, int] = {}
@@ -262,14 +263,22 @@ def _assign_sections(
             if id(c) in used:
                 continue
             if c.score < min_score:
+                if trace is not None and section_name:
+                    trace.setdefault(id(c), []).append((section_name, f"below floor {min_score}"))
                 continue
             if require_signal and not any(s.code == require_signal for s in c.signals):
+                if trace is not None and section_name:
+                    trace.setdefault(id(c), []).append((section_name, f"lacks {require_signal} signal"))
                 continue
             artist_key = normalise_artist(c.artist)
             release_key = (c.release_name or "").strip().lower()
             if artist_counts.get(artist_key, 0) >= MAX_PER_ARTIST:
+                if trace is not None and section_name:
+                    trace.setdefault(id(c), []).append((section_name, "artist cap"))
                 continue
             if release_key and release_counts.get(release_key, 0) >= MAX_PER_RELEASE:
+                if trace is not None and section_name:
+                    trace.setdefault(id(c), []).append((section_name, "release cap"))
                 continue
             # Genre cap: use first specific (non-broad) genre tag; exempt if none found
             cap_genre = next(
@@ -277,6 +286,8 @@ def _assign_sections(
                 None,
             )
             if cap_genre and genre_counts.get(cap_genre, 0) >= MAX_PER_GENRE:
+                if trace is not None and section_name:
+                    trace.setdefault(id(c), []).append((section_name, f"genre cap ({cap_genre})"))
                 continue
             artist_counts[artist_key] = artist_counts.get(artist_key, 0) + 1
             if release_key:
@@ -289,10 +300,10 @@ def _assign_sections(
                 break
         return result
 
-    top_picks = pick(top_n)
-    label_watch = pick(label_n, require_signal="label_match")
-    artist_watch = pick(artist_n, require_signal="known_artist")
-    wildcards = pick(wildcard_n)
+    top_picks = pick(top_n, section_name="top_picks")
+    label_watch = pick(label_n, require_signal="label_match", section_name="label_watch")
+    artist_watch = pick(artist_n, require_signal="known_artist", section_name="artist_watch")
+    wildcards = pick(wildcard_n, section_name="wildcards")
 
     genre_summary = ", ".join(f"{g}: {n}" for g, n in sorted(genre_counts.items()))
     logger.info(

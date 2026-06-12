@@ -278,3 +278,86 @@ def test_electronic_with_house_scores_house_only():
     assert "house" in genre_sigs[0].explanation
     assert "electronic" not in genre_sigs[0].explanation
     assert c.score == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Commit 5: _assign_sections trace hook
+# ---------------------------------------------------------------------------
+
+def test_trace_none_sections_identical_to_no_trace():
+    ranked = [_scored_candidate(2.0, artist="A", title=f"T{i}") for i in range(10)]
+    settings = _MockSettings()
+    genres = _build_genre_set({})
+
+    without_trace = _assign_sections(ranked, settings, genres, trace=None)
+    with_trace = _assign_sections(ranked, settings, genres, trace={})
+
+    for key in without_trace:
+        assert [c.artist for c in without_trace[key]] == [c.artist for c in with_trace[key]]
+
+
+def test_trace_records_below_floor():
+    low = _scored_candidate(0.1, artist="Low", title="Floor")
+    ranked = [low]
+    trace: dict = {}
+    _assign_sections(ranked, _MockSettings(), _build_genre_set({}), trace=trace)
+    reasons = [r for _, r in trace.get(id(low), [])]
+    assert any("below floor" in r for r in reasons)
+
+
+def test_trace_records_lacks_signal():
+    # Fill top_picks (cap=5) with distinct-artist candidates so the target is
+    # not selected there, then it will be examined (and skipped) in label_watch.
+    fillers = [_scored_candidate(10.0 - i, artist=f"F{i}", title=f"Filler{i}") for i in range(5)]
+    c = _scored_candidate(3.0, artist="NoLabel", title="T")
+    # No label_match signal → skipped from label_watch
+    c.signals = []
+    ranked = fillers + [c]
+    trace: dict = {}
+    _assign_sections(ranked, _MockSettings(), _build_genre_set({}), trace=trace)
+    reasons_by_section = trace.get(id(c), [])
+    label_reasons = [r for sname, r in reasons_by_section if sname == "label_watch"]
+    assert any("lacks label_match signal" in r for r in label_reasons)
+
+
+def test_trace_records_artist_cap():
+    settings = _MockSettings()
+    # 3 tracks by same artist — artist cap is 2 per section
+    ranked = [_scored_candidate(5.0 - i, artist="Sully", title=f"T{i}") for i in range(3)]
+    trace: dict = {}
+    _assign_sections(ranked, settings, _build_genre_set({}), trace=trace)
+    third = ranked[2]
+    reasons = [r for sname, r in trace.get(id(third), []) if sname == "top_picks"]
+    assert any("artist cap" in r for r in reasons)
+
+
+def test_trace_records_genre_cap():
+    class _SmallCap(_MockSettings):
+        pipeline_top_picks_count = 10
+        pipeline_label_watch_count = 10
+        pipeline_artist_watch_count = 10
+        pipeline_wildcard_count = 10
+
+    # 4 tracks tagged 'house' — genre cap is 3 globally
+    ranked = [_scored_candidate(5.0 - i, artist=f"A{i}", title=f"T{i}", genre_tags=["house"]) for i in range(4)]
+    trace: dict = {}
+    _assign_sections(ranked, _SmallCap(), _build_genre_set({}), trace=trace)
+    fourth = ranked[3]
+    reasons = [r for _, r in trace.get(id(fourth), [])]
+    assert any("genre cap" in r for r in reasons)
+
+
+def test_trace_same_candidate_skipped_in_two_sections_for_different_reasons():
+    # Fill top_picks so the target is not consumed there, then it's examined
+    # in label_watch (lacks label_match) and artist_watch (lacks known_artist).
+    fillers = [_scored_candidate(10.0 - i, artist=f"F{i}", title=f"Filler{i}") for i in range(5)]
+    c = _scored_candidate(3.0, artist="Solo", title="T")
+    c.signals = []  # no label_match, no known_artist
+    ranked = fillers + [c]
+    trace: dict = {}
+    _assign_sections(ranked, _MockSettings(), _build_genre_set({}), trace=trace)
+    entries = trace.get(id(c), [])
+    sections_seen = {sname for sname, _ in entries}
+    # Should appear in label_watch and artist_watch (lacks signal)
+    assert "label_watch" in sections_seen
+    assert "artist_watch" in sections_seen

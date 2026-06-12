@@ -469,6 +469,15 @@ def cmd_mark(args):
     logger.info(f"[mark] {history_name}/{entry_key} → {args.outcome}")
 
 
+def cmd_explain(args):
+    from src.pipeline.explain import explain_track
+
+    settings = load_settings()
+    # No settings.validate() — works without Discord env vars
+    output = explain_track(args.selector, settings)
+    print(output)
+
+
 def cmd_stats(args):
     from src.pipeline.feedback import load_feedback, summarise_feedback
     from src.pipeline.history import load_history, load_mix_prep_history
@@ -552,6 +561,14 @@ def main():
         help="Outcome to record",
     )
     subparsers.add_parser("stats", help="Show feedback statistics")
+    explain_parser = subparsers.add_parser(
+        "explain",
+        help="Trace a track through the weekly pipeline offline",
+    )
+    explain_parser.add_argument(
+        "selector",
+        help="\"Artist - Title\" of the track to trace",
+    )
 
     args = parser.parse_args()
 
@@ -575,6 +592,8 @@ def main():
         cmd_mark(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "explain":
+        cmd_explain(args)
 
 
 if __name__ == "__main__":
