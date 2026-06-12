@@ -181,6 +181,15 @@ def cmd_run(args):
     # 6. Generate report
     report_text = generate_report(sections, report_id, stats, settings, profiles=profiles, label_artists=label_artists)
 
+    # 6b. Write audition page (live runs only)
+    if not dry_run:
+        from src.pipeline.audition import generate_audition_page, write_audition_page
+        audition_html = generate_audition_page(sections, report_id, settings, profiles=profiles, label_artists=label_artists)
+        audition_path = write_audition_page(audition_html, settings.data_dir, report_id)
+        logger.info(f"[run] Audition page written: {audition_path}")
+    else:
+        logger.info("[run] DRY RUN — audition page not written")
+
     # 7. Post to Discord (skipped in dry-run)
     if dry_run:
         report_text = "🧪 **[DRY RUN — history not updated]**\n\n" + report_text
@@ -358,6 +367,16 @@ def cmd_mix_prep(args):
 
     # 6. Generate report
     report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles, label_artists=label_artists)
+
+    # 6b. Write audition page (live runs only)
+    if not dry_run:
+        from src.pipeline.audition import generate_audition_page, write_audition_page
+        audition_html = generate_audition_page(sections, report_id, settings, profiles=profiles,
+                                               label_artists=label_artists, mark_by_number=False)
+        audition_path = write_audition_page(audition_html, settings.data_dir, report_id)
+        logger.info(f"[mix-prep] Audition page written: {audition_path}")
+    else:
+        logger.info("[mix-prep] DRY RUN — audition page not written")
 
     # 7. Post to mix-prep Discord channel (skipped in dry-run)
     if dry_run:
