@@ -2,7 +2,7 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
-## v0.8.0 — 2026-06-11
+## v0.8.0 — 2026-06-12
 
 ### Feedback capture & ops hardening (Phase 2a)
 
