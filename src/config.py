@@ -121,6 +121,12 @@ class Settings:
     def data_dir(self) -> str:
         return self._data.get("data_dir", "data")
 
+    # --- Audition server ---
+
+    @property
+    def audition_base_url(self) -> str:
+        return os.getenv("TUNEFINDER_AUDITION_BASE_URL", "").rstrip("/")
+
     # --- Testing ---
 
     @property

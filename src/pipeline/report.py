@@ -164,7 +164,7 @@ def _format_fetcher_health(health: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_footer(report_id: str, stats: dict, recommended_count: int | None = None) -> str:
+def _build_footer(report_id: str, stats: dict, recommended_count: int | None = None, audition_url: str | None = None) -> str:
     """Build the Processing Summary and Fetcher Health footer."""
     lines = ["## ⚙️ Processing Summary"]
     lines.append(f"📥 Sources fetched: **{stats.get('sources_fetched', '?')}**")
@@ -180,6 +180,8 @@ def _build_footer(report_id: str, stats: dict, recommended_count: int | None = N
     if recommended_count is not None:
         lines.append(f"🎯 Tracks in report: **{recommended_count}**")
     lines.append(f"`Report ID: {report_id}`")
+    if audition_url:
+        lines.append(f"[🎧 Audition Page](<{audition_url}>)")
 
     health = stats.get("fetcher_health", {})
     if health:
@@ -302,7 +304,9 @@ def generate_report(
         lines.append("")
 
     recommended_count = sum(len(v) for v in sections.values())
-    lines.append(_build_footer(report_id, stats, recommended_count))
+    base_url = getattr(settings, "audition_base_url", "") or ""
+    audition_url = f"{base_url}/audition_{report_id}.html" if base_url else None
+    lines.append(_build_footer(report_id, stats, recommended_count, audition_url=audition_url))
 
     return _sanitize_report("\n".join(lines))
 
@@ -352,6 +356,8 @@ def generate_mix_prep_report(
             lines.extend(_render_track(c))
         lines.append("")
 
-    lines.append(_build_footer(report_id, stats))
+    base_url = getattr(settings, "audition_base_url", "") or ""
+    audition_url = f"{base_url}/audition_{report_id}.html" if base_url else None
+    lines.append(_build_footer(report_id, stats, audition_url=audition_url))
 
     return _sanitize_report("\n".join(lines))
