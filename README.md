@@ -56,6 +56,12 @@ Every candidate also gets two sub-totals alongside the combined score: **familia
 
 `known_artist` matching resolves through `config/aliases.yaml` (release aliases → canonical mix-catalogue name — see Configuration below) before falling back to a direct name match. A matched artist-name part shorter than `scoring.min_artist_match_len` (default `4`) only counts toward `known_artist`/`recurring_artist` if the candidate also carries independent corroboration — a `label_match` or a `genre_match` on the same track. Uncorroborated short matches are dropped silently from scoring (logged at info level) rather than risk a false "You play X" claim from a short-name string collision.
 
+### Label affinity memory
+
+`label_match` used to be re-derived from scratch every run — a label only "existed" if one of your known artists released there *that week*. `data/label_affinity.json` (`src/pipeline/labels.py`) now persists artist↔label associations across runs, so a label you've connected to your taste in the past keeps informing Label Watch and `label_match` scoring even on a quiet week with no known-artist release on that label. Associations older than `scoring.label_memory_max_age_weeks` (default `26` weeks) are treated as stale and excluded. Every `run` and `mix-prep` reads the fresh memory before scoring and writes newly observed associations back after scoring (live runs only — `--dry-run` never touches the store). `tunefinder explain` reads the same memory for consistency but never writes it.
+
+Use `tunefinder backfill-labels` to seed the store from your archived weekly fetches (`data/archive/source_items_*.json.gz`) — handy the first time you enable this, or after a gap in runs. It's read-only against your live state (no Discord, no history/pool writes) and idempotent — re-running it converges to the same store.
+
 ## Report sections
 
 - **Top Picks** — highest overall score, any signal type
@@ -240,6 +246,9 @@ VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without th
 
 # Trace a track through the weekly pipeline offline (no Discord env vars needed)
 ./venv/bin/python -m tunefinder explain "Calibre - New Dawn"
+
+# Replay archived source_items snapshots into the label affinity store (see Label affinity memory)
+./venv/bin/python -m tunefinder backfill-labels
 ```
 
 ### mark / stats notes
@@ -264,6 +273,7 @@ Edit `config/settings.yaml` to:
 - **Genre affinity** — `scoring.genre_affinity_min` / `scoring.genre_affinity_max` (default `0.5`/`2.0`) set the multiplier range `genre_match` is scaled by, derived from `data/genre_affinity.json` (rebuilt on every `build-profile`, `run`, and `mix-prep`). Delete the file to fall back to a flat ×1.0 multiplier.
 - **Artist aliases** — `config/aliases.yaml` maps canonical mix-catalogue artist names to a list of release aliases they should also match: `canonical_name: [alias1, alias2]`. Matching is case-insensitive; a missing or empty file (the shipped default) simply disables alias resolution — no warning. A malformed file logs a warning and is treated as empty rather than crashing a run.
 - **Short-name match guard** — `scoring.min_artist_match_len` (default `4`) prevents short artist-name parts (e.g. a 2–3 character alias or handle) from string-colliding with an unrelated release and producing a false "You play X" claim. A match shorter than this only counts if the candidate has independent corroboration (a label or genre match); otherwise it's dropped from scoring and logged.
+- **Label affinity memory** — `scoring.label_memory_max_age_weeks` (default `26`) controls how long a persisted artist↔label association in `data/label_affinity.json` stays "fresh" enough to count toward Label Watch relevance and `label_match` scoring. See Label affinity memory above.
 
 Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
 
@@ -310,6 +320,7 @@ src/
     ranker.py          # Scoring and section assignment
     history.py         # Recommendation history store (weekly + mix-prep)
     pool.py            # Persistent candidate pool across runs
+    labels.py          # Persistent artist<->label affinity memory (data/label_affinity.json)
     reasons.py         # Deterministic reason composer
     report.py          # Deterministic report renderer (weekly + mix-prep)
     feedback.py        # Outcome marking and stats aggregation
@@ -325,4 +336,5 @@ data/
   mix_prep_history.json         # Mix-prep recommendation records (gitignored)
   feedback.json                 # Outcome marks (append-only, gitignored)
   source_health.json            # Per-source run health for anomaly detection (gitignored)
+  label_affinity.json           # Persisted artist<->label associations (gitignored)
 ```

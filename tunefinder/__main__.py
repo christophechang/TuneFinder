@@ -87,6 +87,9 @@ def cmd_run(args):
         filter_known, filter_history, filter_release_date,
     )
     from src.pipeline.ranker import rank_candidates
+    from src.pipeline.labels import (
+        load_label_affinity, update_label_affinity, save_label_affinity, fresh_label_artist_data,
+    )
     from src.pipeline.pool import load_pool, pool_to_candidates, save_pool, POOL_CAP
     from src.pipeline.report import generate_report, report_order
     from src.pipeline.source_health import append_run_health, load_run_health, detect_anomalies
@@ -110,6 +113,9 @@ def cmd_run(args):
     save_artist_profiles(profiles, settings.data_dir)
     save_genre_affinity(genre_affinity, settings.data_dir)
     known_keys = build_known_track_keys(tracks)
+
+    # 1b. Load label affinity store (issue #5) — persisted artist<->label memory
+    label_store = load_label_affinity(settings.data_dir)
 
     # 2. Load recommendation history and candidate pool
     history = load_history(settings.data_dir)
@@ -183,10 +189,23 @@ def cmd_run(args):
         return
 
     # 5. Rank and split into sections
+    weights = settings.scoring_weights()
+    label_memory = fresh_label_artist_data(label_store, weights.label_memory_max_age_weeks)
     sections, label_artists = rank_candidates(
         candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
+        label_memory=label_memory,
     )
     aliases = settings.artist_aliases()
+
+    # 5b. Update label affinity store from this run's label_seed (live runs only —
+    # a dry-run must not persist state it didn't actually recommend from).
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not dry_run:
+        profiles_lower = {k.lower(): v for k, v in profiles.items()}
+        label_store = update_label_affinity(label_store, label_seed, profiles_lower, aliases, now_iso)
+        save_label_affinity(label_store, settings.data_dir)
+    else:
+        logger.info("[run] DRY RUN — label affinity store not updated")
 
     # 6. Generate report
     report_text = generate_report(sections, report_id, stats, settings, profiles=profiles, label_artists=label_artists, aliases=aliases)
@@ -210,7 +229,6 @@ def cmd_run(args):
         discord.post_report(report_text)
 
     # 8. Update recommendation history and rebuild candidate pool (skipped in dry-run)
-    now_iso = datetime.now(timezone.utc).isoformat()
     recommended = report_order(sections)
     new_records = [
         RecommendationRecord(
@@ -296,6 +314,9 @@ def cmd_mix_prep(args):
         filter_known, filter_genre, filter_genre_exclusions, filter_release_date,
     )
     from src.pipeline.ranker import rank_candidates_mix_prep
+    from src.pipeline.labels import (
+        load_label_affinity, update_label_affinity, save_label_affinity, fresh_label_artist_data,
+    )
     from src.pipeline.pool import load_pool, pool_to_candidates
     from src.pipeline.report import generate_mix_prep_report, report_order
     from src.output.discord import make_discord_client
@@ -319,6 +340,9 @@ def cmd_mix_prep(args):
     save_artist_profiles(profiles, settings.data_dir)
     save_genre_affinity(genre_affinity, settings.data_dir)
     known_keys = build_known_track_keys(tracks)
+
+    # 1b. Load label affinity store (issue #5) — persisted artist<->label memory
+    label_store = load_label_affinity(settings.data_dir)
 
     # 2. Load mix-prep history (separate from weekly history)
     mix_prep_history = load_mix_prep_history(settings.data_dir)
@@ -375,10 +399,22 @@ def cmd_mix_prep(args):
         return
 
     # 5. Rank and section
+    weights = settings.scoring_weights()
+    label_memory = fresh_label_artist_data(label_store, weights.label_memory_max_age_weeks)
     sections, label_artists = rank_candidates_mix_prep(
         candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
+        label_memory=label_memory,
     )
     aliases = settings.artist_aliases()
+
+    # 5b. Update label affinity store from this run's label_seed (live runs only).
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not dry_run:
+        profiles_lower = {k.lower(): v for k, v in profiles.items()}
+        label_store = update_label_affinity(label_store, label_seed, profiles_lower, aliases, now_iso)
+        save_label_affinity(label_store, settings.data_dir)
+    else:
+        logger.info("[mix-prep] DRY RUN — label affinity store not updated")
 
     # 6. Generate report
     report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles, label_artists=label_artists, aliases=aliases)
@@ -403,7 +439,6 @@ def cmd_mix_prep(args):
         discord.post(settings.discord_mix_prep_channel, report_text)
 
     # 8. Save to mix-prep history (skipped in dry-run)
-    now_iso = datetime.now(timezone.utc).isoformat()
     recommended = report_order(sections)
     new_records = [
         RecommendationRecord(
@@ -491,6 +526,55 @@ def cmd_explain(args):
     # No settings.validate() — works without Discord env vars
     output = explain_track(args.selector, settings)
     print(output)
+
+
+def cmd_backfill_labels(args):
+    """Replay archived source_items_*.json.gz snapshots into the label affinity
+    store (issue #5) so historical weeks seed Label Watch memory instead of
+    starting empty. No Discord, no settings.validate() — offline and idempotent
+    (re-running converges to the same store since each archive's associations
+    are keyed by label+artist and simply overwritten with the same values).
+
+    Each archive predates report_id-level timestamps in the store format, so
+    the archive file's own mtime (set at write time by archive_source_items)
+    is used as a stable pseudo-timestamp for that week's associations — an
+    honest approximation, documented here rather than invented precision.
+    """
+    from src.fetchers import list_archive_files, load_archived_source_items
+    from src.pipeline.dedup import items_to_candidates
+    from src.pipeline.profile import load_artist_profiles
+    from src.pipeline.labels import load_label_affinity, update_label_affinity, save_label_affinity
+    from datetime import datetime, timezone
+
+    settings = load_settings()
+    # No settings.validate() — offline, no Discord/env needed.
+    logger = get_logger(__name__)
+
+    profiles = load_artist_profiles(settings.data_dir)
+    profiles_lower = {k.lower(): v for k, v in profiles.items()}
+    aliases = settings.artist_aliases()
+
+    archive_files = list_archive_files(settings.data_dir)
+    if not archive_files:
+        print(f"No archived source_items found under {settings.data_dir}/archive/ — nothing to backfill.")
+        return
+
+    store = load_label_affinity(settings.data_dir)
+    for path in archive_files:
+        mtime_iso = datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc).isoformat()
+        items = load_archived_source_items(path)
+        candidates = items_to_candidates(items)
+        store = update_label_affinity(store, candidates, profiles_lower, aliases, mtime_iso)
+        logger.info(f"[backfill-labels] Replayed {path} ({len(items)} items, as-of {mtime_iso})")
+
+    save_label_affinity(store, settings.data_dir)
+
+    label_count = len(store)
+    association_count = sum(len(entry.get("artists", {})) for entry in store.values())
+    print(
+        f"Backfilled {len(archive_files)} archives → {label_count} labels, "
+        f"{association_count} artist associations → {settings.data_dir}/label_affinity.json"
+    )
 
 
 def cmd_stats(args):
@@ -584,6 +668,10 @@ def main():
         "selector",
         help="\"Artist - Title\" of the track to trace",
     )
+    subparsers.add_parser(
+        "backfill-labels",
+        help="Replay archived source_items snapshots into the label affinity store",
+    )
 
     args = parser.parse_args()
 
@@ -609,6 +697,8 @@ def main():
         cmd_stats(args)
     elif args.command == "explain":
         cmd_explain(args)
+    elif args.command == "backfill-labels":
+        cmd_backfill_labels(args)
 
 
 if __name__ == "__main__":

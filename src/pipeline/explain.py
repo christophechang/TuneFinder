@@ -20,12 +20,14 @@ from src.pipeline.dedup import (
 )
 from src.pipeline.feedback import load_feedback
 from src.pipeline.history import build_history_keys, load_history
+from src.pipeline.labels import fresh_label_artist_data, load_label_affinity
 from src.pipeline.pool import load_pool, pool_to_candidates
 from src.pipeline.profile import load_artist_profiles, load_genre_affinity, load_known_tracks
 from src.pipeline.ranker import (
     _assign_sections,
     _build_genre_set,
     _build_relevant_labels,
+    _merge_label_knowledge,
     _score,
 )
 
@@ -186,10 +188,19 @@ def explain_track(selector: str, settings) -> str:
     all_scored = scored_candidates + pool_injected
 
     aliases = settings.artist_aliases()
-    relevant_labels, label_artist_counts, _ = _build_relevant_labels(
+    relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
         label_seed if label_seed else all_scored, profiles_lower, aliases
     )
     weights = settings.scoring_weights()
+
+    # Label affinity memory (issue #5) — mirror cmd_run so explain matches run
+    # behaviour. Read-only reconstruction: explain never writes the store.
+    label_store = load_label_affinity(settings.data_dir)
+    label_memory = fresh_label_artist_data(label_store, weights.label_memory_max_age_weeks)
+    relevant_labels, label_artist_counts, label_artist_names = _merge_label_knowledge(
+        relevant_labels, label_artist_counts, label_artist_names, label_memory
+    )
+
     from src.pipeline.history import recent_recommended_artists
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 

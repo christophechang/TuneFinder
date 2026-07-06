@@ -30,6 +30,7 @@ class ScoringWeights:
     w_label_base: float = 1.5        # base bonus for any label match
     w_label_per_artist: float = 0.5  # per additional known artist on the label, up to cap
     label_artist_cap: int = 3        # max known artists on a label that contribute to the bonus
+    label_memory_max_age_weeks: int = 26  # persisted artist<->label associations (data/label_affinity.json) older than this don't count toward Label Watch relevance — see src/pipeline/labels.py
     w_cross_source_per: float = 0.5  # per source seen on, up to cap (only credited when len >= 2)
     cross_source_cap: int = 4        # max source count that contributes to the bonus
     w_recency_penalty: float = 0.75  # subtract once if any matched artist was recommended in window
@@ -111,6 +112,43 @@ def _build_relevant_labels(
     label_artist_names = {k: sorted(v) for k, v in names.items()}
     logger.info(f"[ranker] {len(relevant)} relevant labels derived from candidate set")
     return relevant, counts_int, label_artist_names
+
+
+def _merge_label_knowledge(
+    relevant_labels: set[str],
+    label_artist_counts: dict[str, int],
+    label_artist_names: dict[str, list[str]],
+    label_memory: tuple[dict[str, int], dict[str, list[str]]] | None,
+) -> tuple[set[str], dict[str, int], dict[str, list[str]]]:
+    """Union this run's label relevance (from `_build_relevant_labels`, derived
+    purely from the current candidate set) with persisted label affinity
+    memory (issue #5, src/pipeline/labels.py) so `label_match` can fire for a
+    label even when no known artist appears in this week's corpus.
+
+    label_memory is (counts, names) from `labels.fresh_label_artist_data` —
+    None/empty reproduces today's per-run-only behaviour exactly.
+
+    relevant_labels: union of per-run labels and memory label keys.
+    label_artist_counts: per label, max(per-run count, memory count) — not
+    summed, since the same known artist shouldn't double-count just because
+    it exists both in memory and this week's data.
+    label_artist_names: union of display names per label, sorted + deduped.
+    """
+    if not label_memory:
+        return relevant_labels, label_artist_counts, label_artist_names
+
+    memory_counts, memory_names = label_memory
+    merged_relevant = relevant_labels | set(memory_counts) | set(memory_names)
+
+    merged_counts = dict(label_artist_counts)
+    for label_key, count in memory_counts.items():
+        merged_counts[label_key] = max(merged_counts.get(label_key, 0), count)
+
+    merged_names = {k: list(v) for k, v in label_artist_names.items()}
+    for label_key, mem_names in memory_names.items():
+        merged_names[label_key] = sorted(set(merged_names.get(label_key, [])) | set(mem_names))
+
+    return merged_relevant, merged_counts, merged_names
 
 
 def _genre_affinity_multiplier(
@@ -466,6 +504,7 @@ def rank_candidates(
     settings,
     label_seed: list[Candidate] | None = None,
     genre_affinity: dict[str, float] | None = None,
+    label_memory: tuple[dict[str, int], dict[str, list[str]]] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score all candidates, assign signals, sort, and split into report sections.
@@ -480,6 +519,11 @@ def rank_candidates(
 
     genre_affinity: corpus-level genre share map (src/pipeline/profile.py
     build_genre_affinity). None/empty → flat 1.0 multiplier, today's behaviour.
+
+    label_memory: (counts, names) from src/pipeline/labels.fresh_label_artist_data
+    — persisted artist<->label associations from past runs (issue #5), unioned
+    with this run's per-run label derivation via _merge_label_knowledge. None
+    reproduces today's amnesiac (per-run-only) behaviour.
     """
     from src.pipeline.history import recent_recommended_artists
 
@@ -488,6 +532,9 @@ def rank_candidates(
     aliases = settings.artist_aliases()
     relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
         label_seed if label_seed is not None else candidates, profiles_lower, aliases
+    )
+    relevant_labels, label_artist_counts, label_artist_names = _merge_label_knowledge(
+        relevant_labels, label_artist_counts, label_artist_names, label_memory
     )
     weights = settings.scoring_weights()
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
@@ -549,6 +596,7 @@ def rank_candidates_mix_prep(
     settings,
     label_seed: list[Candidate] | None = None,
     genre_affinity: dict[str, float] | None = None,
+    label_memory: tuple[dict[str, int], dict[str, list[str]]] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score and section candidates for a mix-prep run.
@@ -557,6 +605,7 @@ def rank_candidates_mix_prep(
     with no per-genre cap — the genre has already been filtered upstream.
 
     genre_affinity: see rank_candidates. None/empty → flat 1.0 multiplier.
+    label_memory: see rank_candidates. None reproduces per-run-only behaviour.
     """
     from src.pipeline.history import recent_recommended_artists
 
@@ -565,6 +614,9 @@ def rank_candidates_mix_prep(
     aliases = settings.artist_aliases()
     relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
         label_seed if label_seed is not None else candidates, profiles_lower, aliases
+    )
+    relevant_labels, label_artist_counts, label_artist_names = _merge_label_knowledge(
+        relevant_labels, label_artist_counts, label_artist_names, label_memory
     )
     weights = settings.scoring_weights()
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)

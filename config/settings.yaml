@@ -256,6 +256,9 @@ scoring:
   w_label_base: 1.5                    # Base score for any label match
   w_label_per_artist: 0.5              # Additional score per known artist on label
   label_artist_cap: 3                  # Max known artists on label that contribute to score
+  # label_memory_max_age_weeks: 26      # Weeks a persisted artist<->label association (data/label_affinity.json,
+                                        # see src/pipeline/labels.py) stays "fresh" enough to count toward Label
+                                        # Watch relevance and label_match scoring, even with no known artist this week.
 
   # Cross-source credibility
   w_cross_source_per: 0.5              # Score per source (only when len(sources) >= 2)

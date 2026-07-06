@@ -137,3 +137,25 @@ def load_source_items(data_dir: str) -> list[SourceItem]:
     items = [_dict_to_item(d) for d in data]
     logger.info(f"[sources] Loaded {len(items)} source items from {path}")
     return items
+
+
+def list_archive_files(data_dir: str) -> list[str]:
+    """Return sorted paths to all archived source_items_*.json.gz snapshots
+    (see archive_source_items). Used by `tunefinder backfill-labels` to replay
+    historical fetches. Empty list if the archive directory doesn't exist yet.
+    """
+    archive_dir = os.path.join(data_dir, "archive")
+    if not os.path.exists(archive_dir):
+        return []
+    return sorted(
+        os.path.join(archive_dir, fn)
+        for fn in os.listdir(archive_dir)
+        if fn.startswith("source_items_") and fn.endswith(".json.gz")
+    )
+
+
+def load_archived_source_items(path: str) -> list[SourceItem]:
+    """Load a single archived gzip snapshot (written by archive_source_items) back into SourceItems."""
+    with gzip.open(path, "rb") as f:
+        data = json.loads(f.read().decode("utf-8"))
+    return [_dict_to_item(d) for d in data]
