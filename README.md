@@ -144,6 +144,40 @@ Dedup key: 'calibre||new dawn'
 
 `explain` works without Discord env vars (no `settings.validate()`). Output is labelled as a reconstruction — it can differ from the posted report if sources or the profile changed since the run.
 
+## Replay & tuning
+
+Two offline commands for evaluating scoring changes against real data — both work without Discord env vars (no `settings.validate()`), never post, and never write to live state.
+
+### `replay` — re-run an archived week
+
+```bash
+# Replay week 2026-W23 under the current config
+./venv/bin/python -m tunefinder replay --week 2026-W23
+
+# Replay the same week with tweaked weights (config diff, not a code edit)
+./venv/bin/python -m tunefinder replay --week 2026-W23 --set scoring.w_known_artist=2.0 --set pipeline.section_min_score=1.5
+```
+
+`replay` loads `data/archive/source_items_{week}.json.gz` (written by every live `run`; if the week is absent it lists the weeks you do have), runs the weekly pipeline over that frozen corpus, and prints the rendered report followed by a diff against what `recommendation_history.json` recorded for that week:
+
+- `=` **would still recommend** — surfaced then and still surfaces now
+- `+` **newly surfaced** — surfaces now but wasn't recommended that week (e.g. under an override)
+- `−` **no longer surfaced** — was recommended that week but no longer surfaces
+
+`--set path=value` applies a dotted-path override into a deep copy of the config for that replay only (values are parsed as YAML scalars, so `2.0` is a float and `true` a bool). It never mutates `config/settings.yaml`.
+
+**What is as-of-week vs as-of-now.** The fetched corpus (the archive) and the release-date window's reference date are as-of-week: the reference date is the archived ISO week's Sunday (the live run's 09:00 slot), so a week replayed months later still evaluates its date window against that week rather than against today. Everything else — known-tracks, recommendation history, artist profiles, genre affinity, aliases, and label-affinity memory — is read from the current `data/` state (as-of-now, same caveat as `explain`); `fresh_release`/recency also use the current clock. The replayed week's own history records are excluded from the history filter (that week hadn't been recorded when it ran) so re-recommendation is possible and the diff is meaningful. The candidate **pool is not injected** — pool state is today's, not that week's — so replay covers the fresh corpus only. A banner at the top of the output restates these caveats.
+
+### `tune-report` — feedback-driven signal precision
+
+```bash
+./venv/bin/python -m tunefinder tune-report
+```
+
+Joins `feedback.json` (your `mark` outcomes) against both recommendation histories and reports, per signal code / source / genre: recommended count, marked, positive (`bought`/`liked`), positive rate, and **lift** vs. the overall baseline positive rate (`rate / baseline`). `own` marks are excluded from every positive-rate denominator (an identity-gap miss, not a taste signal). Lift and rate show `—` when there's nothing to divide.
+
+Because feedback density is low at n=1, when fewer than 20 non-`own` marks exist the report prints the full table but prefixes it with a prominent "treat everything below as anecdote, not evidence" caveat. There is **no auto-tuning** — `tune-report` is a measurement instrument for deciding weight changes by hand (which you can then trial with `replay --set`), not a fitter.
+
 ## Mix prep
 
 When preparing a mix in a specific style, run `mix-prep <genre>` to get a focused report of the best available tracks for that genre:
@@ -280,6 +314,13 @@ VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without th
 
 # Replay archived source_items snapshots into the label affinity store (see Label affinity memory)
 ./venv/bin/python -m tunefinder backfill-labels
+
+# Replay an archived week offline under current or overridden config (no Discord env vars needed)
+./venv/bin/python -m tunefinder replay --week 2026-W23
+./venv/bin/python -m tunefinder replay --week 2026-W23 --set scoring.w_known_artist=2.0 --set pipeline.section_min_score=1.5
+
+# Feedback-driven per-signal/source/genre positive-rate and lift report (no Discord env vars needed)
+./venv/bin/python -m tunefinder tune-report
 ```
 
 ### mark / stats notes

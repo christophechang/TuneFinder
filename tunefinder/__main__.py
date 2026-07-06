@@ -603,6 +603,31 @@ def cmd_explain(args):
     print(output)
 
 
+def cmd_replay(args):
+    from src.pipeline.replay import replay_week
+
+    settings = load_settings()
+    # No settings.validate() — offline reconstruction, no Discord/env needed.
+    output = replay_week(args.week, getattr(args, "overrides", []) or [], settings)
+    print(output)
+
+
+def cmd_tune_report(args):
+    from src.pipeline.feedback import load_feedback, tune_report
+    from src.pipeline.history import load_history, load_mix_prep_history
+
+    settings = load_settings()
+    # No settings.validate() — offline, works without Discord env vars.
+    entries = load_feedback(settings.data_dir)
+    if not entries:
+        print("No feedback recorded yet — mark tracks with `tunefinder mark`")
+        return
+
+    weekly = load_history(settings.data_dir)
+    mix_prep = load_mix_prep_history(settings.data_dir)
+    print(tune_report(weekly, mix_prep, entries))
+
+
 def cmd_backfill_labels(args):
     """Replay archived source_items_*.json.gz snapshots into the label affinity
     store (issue #5) so historical weeks seed Label Watch memory instead of
@@ -764,6 +789,23 @@ def main():
         "backfill-labels",
         help="Replay archived source_items snapshots into the label affinity store",
     )
+    replay_parser = subparsers.add_parser(
+        "replay",
+        help="Replay an archived week's fetch offline under current or overridden config",
+    )
+    replay_parser.add_argument(
+        "--week", required=True, metavar="YYYY-Www",
+        help="Archived ISO week to replay, e.g. 2026-W23",
+    )
+    replay_parser.add_argument(
+        "--set", action="append", default=[], dest="overrides", metavar="path=value",
+        help="Override a config value for this replay only, e.g. "
+             "--set scoring.w_known_artist=2.0 (repeatable; never writes settings.yaml)",
+    )
+    subparsers.add_parser(
+        "tune-report",
+        help="Feedback-driven per-signal/source/genre positive-rate and lift report",
+    )
 
     args = parser.parse_args()
 
@@ -791,6 +833,10 @@ def main():
         cmd_explain(args)
     elif args.command == "backfill-labels":
         cmd_backfill_labels(args)
+    elif args.command == "replay":
+        cmd_replay(args)
+    elif args.command == "tune-report":
+        cmd_tune_report(args)
 
 
 if __name__ == "__main__":

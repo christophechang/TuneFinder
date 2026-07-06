@@ -167,6 +167,23 @@ def _resolve_by_string(
 # Stats aggregation (Commit 4)
 # ---------------------------------------------------------------------------
 
+def latest_marks(entries: list[FeedbackEntry]) -> list[FeedbackEntry]:
+    """Return one FeedbackEntry per (history, key) — the latest by marked_at.
+
+    Marks are append-only (see append_feedback / cmd_mark), so a re-mark adds a
+    new entry rather than overwriting. Every consumer that wants "the current
+    outcome" collapses to the newest per (history, key); this is the single
+    shared implementation of that rule (used by summarise_feedback and
+    tune_report).
+    """
+    latest: dict[tuple[str, str], FeedbackEntry] = {}
+    for e in entries:
+        k = (e.history, e.key)
+        if k not in latest or e.marked_at > latest[k].marked_at:
+            latest[k] = e
+    return list(latest.values())
+
+
 def summarise_feedback(
     weekly: list[RecommendationRecord],
     mix_prep: list[RecommendationRecord],
@@ -176,14 +193,7 @@ def summarise_feedback(
     if not entries:
         return {}
 
-    # Latest entry per (history, key)
-    latest: dict[tuple[str, str], FeedbackEntry] = {}
-    for e in entries:
-        k = (e.history, e.key)
-        if k not in latest or e.marked_at > latest[k].marked_at:
-            latest[k] = e
-
-    effective = list(latest.values())
+    effective = latest_marks(entries)
 
     def _records_by_key(records: list[RecommendationRecord]) -> dict[str, RecommendationRecord]:
         # Newest per key
@@ -267,3 +277,143 @@ def summarise_feedback(
         "weekly": _bucket("weekly", weekly_by_key),
         "mix_prep": _bucket("mix-prep", mix_prep_by_key),
     }
+
+
+# ---------------------------------------------------------------------------
+# Feedback-driven tuning report (issue #7)
+# ---------------------------------------------------------------------------
+
+# Below this many marks (excluding `own`) the per-dimension rates are too noisy
+# to draw conclusions from — the report still prints the table, but with a
+# prominent "anecdote, not evidence" caveat. Not a scoring weight (it never
+# feeds ranking), so it lives here as a module constant rather than in
+# ScoringWeights / settings.yaml.
+_MIN_MARKS_FOR_CONCLUSIONS = 20
+
+_POSITIVE_OUTCOMES = ("bought", "liked")
+
+
+def _fmt_rate(positive: int, non_own: int) -> str:
+    """Positive rate as a percentage string, or '—' when there's no non-own denominator."""
+    if non_own <= 0:
+        return "—"
+    return f"{round(positive / non_own * 100, 1)}%"
+
+
+def _fmt_lift(positive: int, non_own: int, baseline: float, marked: int) -> str:
+    """Lift = this dimension's positive rate / overall baseline positive rate.
+
+    '—' when there's nothing to compare (no marks, no non-own denominator, or a
+    zero baseline) rather than inventing a ratio.
+    """
+    if marked == 0 or non_own <= 0 or baseline <= 0:
+        return "—"
+    rate = positive / non_own
+    return f"{round(rate / baseline, 2):.2f}"
+
+
+def tune_report(
+    weekly: list[RecommendationRecord],
+    mix_prep: list[RecommendationRecord],
+    entries: list[FeedbackEntry],
+) -> str:
+    """Join feedback marks against recommendation history and report, per signal
+    code / source / genre: recommended count, marked, positive, positive rate,
+    and lift vs. the overall baseline positive rate. Pure — returns plain text,
+    no printing, no IO. `own` is excluded from every positive-rate denominator
+    (an identity-gap miss, not a taste signal — same convention as `stats`).
+    """
+    # Newest recommendation record per (history, dedup-key). A track can be
+    # recommended in both weekly and mix-prep — those are distinct records and
+    # each is joined to feedback marked against that history.
+    records_by_hk: dict[tuple[str, str], RecommendationRecord] = {}
+    for history_name, records in (("weekly", weekly), ("mix-prep", mix_prep)):
+        for r in records:
+            hk = (history_name, make_dedup_key(r.artist, r.title))
+            if hk not in records_by_hk or r.recommended_at > records_by_hk[hk].recommended_at:
+                records_by_hk[hk] = r
+
+    marks_by_hk = {(e.history, e.key): e for e in latest_marks(entries)}
+
+    def _signal_values(rec: RecommendationRecord) -> list[str]:
+        return list(rec.signal_codes) if rec.signal_codes else ["(pre-v0.8.0)"]
+
+    def _genre_values(rec: RecommendationRecord) -> list[str]:
+        return list(rec.genre_tags) if rec.genre_tags else ["(pre-v0.8.0)"]
+
+    def _source_values(rec: RecommendationRecord) -> list[str]:
+        return [rec.source or "(unknown)"]
+
+    dims = {
+        "By signal": _signal_values,
+        "By source": _source_values,
+        "By genre": _genre_values,
+    }
+    # dim_title -> value -> counters
+    agg: dict[str, dict[str, dict[str, int]]] = {name: {} for name in dims}
+
+    def _slot(dim: str, value: str) -> dict[str, int]:
+        return agg[dim].setdefault(
+            value, {"recommended": 0, "marked": 0, "positive": 0, "non_own": 0}
+        )
+
+    # Pass A — recommended counts over the full recommendation corpus.
+    for rec in records_by_hk.values():
+        for dim, extractor in dims.items():
+            for value in extractor(rec):
+                _slot(dim, value)["recommended"] += 1
+
+    # Pass B — marked / positive over joined marks; also the overall baseline.
+    overall_marked = 0
+    overall_non_own = 0
+    overall_positive = 0
+    for hk, entry in marks_by_hk.items():
+        rec = records_by_hk.get(hk)
+        if rec is None:
+            continue
+        is_own = entry.outcome == "own"
+        is_positive = entry.outcome in _POSITIVE_OUTCOMES
+        overall_marked += 1
+        if not is_own:
+            overall_non_own += 1
+        if is_positive:
+            overall_positive += 1
+        for dim, extractor in dims.items():
+            for value in extractor(rec):
+                slot = _slot(dim, value)
+                slot["marked"] += 1
+                if not is_own:
+                    slot["non_own"] += 1
+                if is_positive:
+                    slot["positive"] += 1
+
+    recommended_total = len(records_by_hk)
+    coverage = round(overall_marked / recommended_total * 100, 1) if recommended_total else 0.0
+    baseline = overall_positive / overall_non_own if overall_non_own else 0.0
+
+    lines = ["=== Feedback-Driven Tuning Report ==="]
+    lines.append(
+        f"Recommended: {recommended_total}  |  Marked: {overall_marked}  |  "
+        f"Coverage: {coverage}%  |  Baseline positive rate: {_fmt_rate(overall_positive, overall_non_own)}"
+    )
+    if overall_non_own < _MIN_MARKS_FOR_CONCLUSIONS:
+        lines.append("")
+        lines.append(
+            f"⚠️  Only {overall_non_own} marks — treat everything below as anecdote, not evidence."
+        )
+
+    for dim in dims:
+        rows = agg[dim]
+        if not rows:
+            continue
+        lines.append("")
+        lines.append(f"{dim}:")
+        for value, c in sorted(rows.items(), key=lambda kv: (-kv[1]["marked"], kv[0])):
+            rate = _fmt_rate(c["positive"], c["non_own"])
+            lift = _fmt_lift(c["positive"], c["non_own"], baseline, c["marked"])
+            lines.append(
+                f"  {value}: recommended={c['recommended']} marked={c['marked']} "
+                f"positive={c['positive']} rate={rate} lift={lift}"
+            )
+
+    return "\n".join(lines)

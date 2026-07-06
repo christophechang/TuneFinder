@@ -183,14 +183,25 @@ def filter_genre_exclusions(
     return result
 
 
-def filter_release_date(candidates: list[Candidate], window_days: int) -> list[Candidate]:
+def filter_release_date(
+    candidates: list[Candidate],
+    window_days: int,
+    today: "date | None" = None,
+) -> list[Candidate]:
     """Drop candidates whose release_date is older than window_days ago.
 
     Items with no release_date (e.g. Bandcamp) are always kept — we can't
     confirm they're stale, so we give them the benefit of the doubt.
+
+    `today` sets the reference date the cutoff is measured back from. Default
+    (None) uses today's UTC date — the live-run behaviour. Offline replay
+    (src/pipeline/replay.py) passes the archived week's own reference date so a
+    week replayed months later still evaluates its window against that week,
+    not against now (otherwise every candidate ages out).
     """
-    from datetime import datetime, timedelta, timezone
-    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=window_days)).isoformat()
+    from datetime import datetime, timedelta, timezone, date
+    ref = today if today is not None else datetime.now(timezone.utc).date()
+    cutoff = (ref - timedelta(days=window_days)).isoformat()
     result = []
     removed = 0
     for c in candidates:
