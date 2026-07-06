@@ -18,7 +18,7 @@ from src.pipeline.dedup import (
     items_to_candidates,
     make_dedup_key,
 )
-from src.pipeline.feedback import load_feedback
+from src.pipeline.feedback import load_feedback, skipped_artists
 from src.pipeline.history import build_history_keys, load_history
 from src.pipeline.labels import fresh_label_artist_data, load_label_affinity
 from src.pipeline.pool import load_pool, pool_to_candidates
@@ -213,9 +213,13 @@ def explain_track(selector: str, settings) -> str:
     from src.pipeline.history import recent_recommended_artists
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
+    # Skip-derived negative signal (issue #11) — mirror cmd_run/cmd_mix_prep so
+    # explain's reconstruction matches an actual run.
+    skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
+
     # Single scoring pass
     for c in all_scored:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_set)
 
     ranked = sorted(all_scored, key=lambda c: c.score, reverse=True)
 
@@ -229,7 +233,7 @@ def explain_track(selector: str, settings) -> str:
             hyp = copy.copy(target_candidate)
             hyp.signals = []
             hyp.score = 0.0
-            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data)
+            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_set)
             target_scored = hyp
             hypothetical = True
         else:

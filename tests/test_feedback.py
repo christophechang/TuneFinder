@@ -13,6 +13,7 @@ from src.pipeline.feedback import (
     resolve_selector,
     summarise_feedback,
     latest_marks,
+    skipped_artists,
     tune_report,
     _MIN_MARKS_FOR_CONCLUSIONS,
 )
@@ -272,6 +273,105 @@ def test_latest_marks_keeps_distinct_histories():
     result = latest_marks([w, mp])
     assert len(result) == 2
     assert {e.history for e in result} == {"weekly", "mix-prep"}
+
+
+# ---------------------------------------------------------------------------
+# skipped_artists — skip-derived negative signal (issue #11)
+# ---------------------------------------------------------------------------
+
+def test_skipped_artists_below_threshold_not_included():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=2),
+    ]
+    assert "sully" not in skipped_artists(entries, min_skips=2)
+
+
+def test_skipped_artists_meets_threshold_included():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == {"sully"}
+
+
+def test_skipped_artists_positive_mark_disqualifies_even_with_enough_skips():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T3", outcome="liked", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == set()
+
+
+def test_skipped_artists_bought_also_disqualifies():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T3", outcome="bought", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == set()
+
+
+def test_skipped_artists_latest_mark_semantics_skip_then_liked_supersedes():
+    """A track re-marked 'liked' after an earlier 'skip' on the SAME track means
+    only the latest mark (liked) counts for that (history, key) — the earlier
+    skip is superseded, not counted at all."""
+    from src.pipeline.dedup import make_dedup_key
+    entries = [
+        FeedbackEntry(
+            key=make_dedup_key("Sully", "Same Track"), artist="Sully", title="Same Track",
+            outcome="skip", marked_at=_iso(5), report_id="2026-W20", track_no=1, history="weekly",
+        ),
+        FeedbackEntry(
+            key=make_dedup_key("Sully", "Same Track"), artist="Sully", title="Same Track",
+            outcome="liked", marked_at=_iso(1), report_id="2026-W20", track_no=1, history="weekly",
+        ),
+        # A second, distinct track still skipped and un-superseded.
+        _entry(artist="Sully", title="Other Track", outcome="skip", days_ago=2),
+    ]
+    # Only 1 surviving 'skip' (the second track) — below threshold of 2, and
+    # the surviving 'liked' mark disqualifies the artist regardless.
+    assert skipped_artists(entries, min_skips=2) == set()
+
+
+def test_skipped_artists_own_outcome_is_neutral():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T3", outcome="own", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == {"sully"}
+
+
+def test_skipped_artists_combines_both_histories():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", history="weekly", days_ago=2),
+        _entry(artist="Sully", title="T2", outcome="skip", history="mix-prep", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == {"sully"}
+
+
+def test_skipped_artists_splits_collaborative_artist_string():
+    entries = [
+        _entry(artist="Bakey, Kasia", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Bakey, Kasia", title="T2", outcome="skip", days_ago=2),
+    ]
+    result = skipped_artists(entries, min_skips=2)
+    assert result == {"bakey", "kasia"}
+
+
+def test_skipped_artists_split_collaborator_positive_only_disqualifies_that_artist():
+    entries = [
+        _entry(artist="Bakey, Kasia", title="T1", outcome="skip", days_ago=4),
+        _entry(artist="Bakey, Kasia", title="T2", outcome="skip", days_ago=3),
+        _entry(artist="Bakey", title="Solo Track", outcome="liked", days_ago=1),
+    ]
+    result = skipped_artists(entries, min_skips=2)
+    assert result == {"kasia"}
+
+
+def test_skipped_artists_empty_entries_returns_empty_set():
+    assert skipped_artists([], min_skips=2) == set()
 
 
 # ---------------------------------------------------------------------------

@@ -108,12 +108,15 @@ def _parse_track(raw: dict) -> tuple[Track, int]:
 # Public API
 # ---------------------------------------------------------------------------
 
-# Currently uncalled — retained deliberately for Phase 3 (BPM/energy-aware mix-prep). See docs/improvement-plan.md §5.
+# Caller: src/pipeline/profile.apply_recency_weights (issue #11), via
+# tunefinder.__main__._load_profile_state / cmd_build_profile — timestamps each
+# artist's plays to compute a recency-weighted play count. Also retained for
+# future BPM/energy-aware mix-prep taste modelling. See docs/improvement-plan.md §5.
 def fetch_all_mixes(settings) -> list[Mix]:
     """
     Fetch all published mixes with full tracklists.
-    Used for taste modelling (genre, BPM, energy, moods) and as a secondary
-    source of known-track data.
+    Used for taste modelling (genre, BPM, energy, moods, recency) and as a
+    secondary source of known-track data.
     Falls back to fixtures when settings.testing_use_fixtures is True.
     """
     if settings.testing_use_fixtures:

@@ -62,6 +62,13 @@ class ScoringWeights:
     # --- Per-source share cap (issue #12, weekly only) ---
     max_share_per_source: float = 0.6  # max fraction of total_configured_slots any single source can claim (1.0 disables)
 
+    # --- Taste recency weighting (issue #11) ---
+    taste_half_life_months: float = 18.0  # half-life for recency_weighted_play_count decay — see src/pipeline/profile.apply_recency_weights
+
+    # --- Skip-derived negative signal (issue #11) ---
+    w_skipped_artist: float = 1.0        # penalty subtracted (once, from the total score only) when a matched artist is in the skip set
+    skipped_artist_min_skips: int = 2    # latest-mark 'skip' outcomes (zero positives) an artist needs before the penalty applies — see src/pipeline/feedback.skipped_artists
+
 
 _GENRE_AUGMENT_MIN_ARTISTS = 3
 
@@ -254,6 +261,7 @@ def _score(
     genre_affinity: dict[str, float] | None = None,
     aliases: dict[str, str] | None = None,
     scene_data: tuple[dict[str, str], dict[str, int]] | None = None,
+    skip_penalty_artists: set[str] | None = None,
 ) -> None:
     """Mutate candidate in place: assign signals and total score.
 
@@ -261,6 +269,10 @@ def _score(
     (issue #6) — None disables the scene_adjacent signal entirely (backwards
     compatible default; every direct `_score` call in the existing test suite
     omits it and must keep scoring exactly as before).
+
+    skip_penalty_artists: normalised artist names (dedup.normalise_artist) from
+    `feedback.skipped_artists` (issue #11) — None/empty disables the
+    `skipped_artist` penalty entirely (backwards-compatible default).
     """
     if weights is None:
         weights = ScoringWeights()
@@ -274,8 +286,15 @@ def _score(
 
     # --- Artist signals (familiarity axis) ---
     artist_score = 0.0
-    best_play_count = 0
+    # Recurring-bonus threshold check uses the effective (recency-weighted when
+    # available) count, per issue #11 — see below. best_raw_play_count tracks
+    # the plain play_count separately so the "recurring_artist" reason text
+    # keeps stating the raw fact ("appears in N of your mixes"), never the
+    # fractional recency-weighted number.
+    best_effective_count = 0.0
+    best_raw_play_count = 0
     matched: list[str] = []
+    artist_parts = _split_artists(c.artist)
 
     # Short-name match guard (issue #4): a matched part shorter than
     # min_artist_match_len can string-collide with an unrelated release, so it
@@ -288,7 +307,7 @@ def _score(
     )
     corroborated = has_label_corrob or has_genre_corrob
 
-    for part in _split_artists(c.artist):
+    for part in artist_parts:
         profile = resolve_profile(part, profiles_lower, aliases)
         if not profile:
             continue
@@ -296,8 +315,19 @@ def _score(
         if len(written_name) < weights.min_artist_match_len and not corroborated:
             logger.info(f"[ranker] short-name match '{written_name}' skipped (uncorroborated)")
             continue
-        artist_score += profile.play_count * weights.w_known_artist
-        best_play_count = max(best_play_count, profile.play_count)
+        # Recency-weighted taste (issue #11): a profile with no dated-mix
+        # occurrence (recency_weighted_play_count == 0.0 — either mixes fetch
+        # was unavailable when the profile was built, or this artist genuinely
+        # never showed up in a dated mix) falls back to the raw play_count
+        # rather than scoring as if the artist were unknown.
+        effective_count = (
+            profile.recency_weighted_play_count
+            if profile.recency_weighted_play_count > 0
+            else profile.play_count
+        )
+        artist_score += effective_count * weights.w_known_artist
+        best_effective_count = max(best_effective_count, effective_count)
+        best_raw_play_count = max(best_raw_play_count, profile.play_count)
         matched.append(profile.name)
 
     if matched:
@@ -310,12 +340,12 @@ def _score(
             explanation=f"You play {names} — this is new material from them.",
         ))
 
-        if best_play_count >= weights.recurring_threshold:
+        if best_effective_count >= weights.recurring_threshold:
             score += weights.w_recurring
             familiarity += weights.w_recurring
             c.signals.append(RecommendationSignal(
                 code="recurring_artist",
-                explanation=f"{matched[0]} appears in {best_play_count} of your mixes.",
+                explanation=f"{matched[0]} appears in {best_raw_play_count} of your mixes.",
             ))
 
         # --- Artist-recency penalty ---
@@ -325,6 +355,31 @@ def _score(
             c.signals.append(RecommendationSignal(
                 code="recent_recommendation",
                 explanation=f"{matched[0]} appeared in a recent report — soft down-weight.",
+            ))
+
+    # --- Skip-derived negative signal (discovery-free correction; issue #11) ---
+    # A soft penalty, not evidence — applied to the TOTAL score only, never to
+    # either axis (an artist you've actively skipped isn't "less discovery
+    # merit", it's a correction on top of whatever merit the track has).
+    # Checks both the resolved `matched` profiles (their canonical display
+    # name) and every raw split part of c.artist (in case the skip set names
+    # an artist string that never resolved to a live profile at all, e.g. an
+    # artist with no mix-history match) — fires once per candidate.
+    if skip_penalty_artists:
+        skip_name = next(
+            (name for name in matched if normalise_artist(name) in skip_penalty_artists),
+            None,
+        )
+        if skip_name is None:
+            skip_name = next(
+                (part.strip() for part in artist_parts if normalise_artist(part) in skip_penalty_artists),
+                None,
+            )
+        if skip_name is not None:
+            score -= weights.w_skipped_artist
+            c.signals.append(RecommendationSignal(
+                code="skipped_artist",
+                explanation=f"You've skipped {skip_name} recently.",
             ))
 
     # --- Label signal (discovery axis) ---
@@ -637,6 +692,7 @@ def rank_candidates(
     label_seed: list[Candidate] | None = None,
     genre_affinity: dict[str, float] | None = None,
     label_memory: tuple[dict[str, int], dict[str, list[str]]] | None = None,
+    skip_penalty_artists: set[str] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score all candidates, assign signals, sort, and split into report sections.
@@ -661,6 +717,10 @@ def rank_candidates(
     signal (issue #6) is built internally from the merged label knowledge and
     roster_source (label_seed, or candidates if not given) — always enabled
     here; pass scene_data=None directly to `_score` to disable it.
+
+    skip_penalty_artists: normalised artist names from
+    src/pipeline/feedback.skipped_artists (issue #11) — None/empty disables
+    the skipped_artist penalty entirely.
     """
     from src.pipeline.history import recent_recommended_artists
 
@@ -679,7 +739,7 @@ def rank_candidates(
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_penalty_artists)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -753,6 +813,7 @@ def rank_candidates_mix_prep(
     genre_affinity: dict[str, float] | None = None,
     label_memory: tuple[dict[str, int], dict[str, list[str]]] | None = None,
     demoted_keys: set[str] | None = None,
+    skip_penalty_artists: set[str] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score and section candidates for a mix-prep run.
@@ -767,6 +828,9 @@ def rank_candidates_mix_prep(
     src/pipeline/harmonic.partition_by_harmonic) to sort below every matching
     candidate in `_assign_sections_mix_prep`, without changing their score.
     None (default) — today's behaviour, unaffected by this feature.
+
+    skip_penalty_artists: see rank_candidates. None/empty disables the
+    skipped_artist penalty entirely.
     """
     from src.pipeline.history import recent_recommended_artists
 
@@ -785,7 +849,7 @@ def rank_candidates_mix_prep(
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_penalty_artists)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")

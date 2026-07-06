@@ -51,6 +51,12 @@ class ArtistProfile:
     play_count: int = 0
     genres_seen: list[str] = field(default_factory=list)
     track_titles: list[str] = field(default_factory=list)
+    # Recency-weighted play count (issue #11) — half-life decayed sum of track
+    # occurrences across dated mixes (see src/pipeline/profile.apply_recency_weights).
+    # 0.0 means "never seen in a dated mix" (either mixes fetch was unavailable, or
+    # this artist genuinely has no dated occurrence) — scoring falls back to the
+    # raw play_count in that case rather than treating 0.0 as "plays never happened".
+    recency_weighted_play_count: float = 0.0
 
 
 @dataclass

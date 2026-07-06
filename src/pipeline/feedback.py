@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from src.models import RecommendationRecord
-from src.pipeline.dedup import make_dedup_key
+from src.pipeline.dedup import make_dedup_key, normalise_artist
+from src.pipeline.profile import _split_artists
 
 OUTCOMES = ("bought", "liked", "skip", "own")
 
@@ -188,6 +189,52 @@ def latest_marks(entries: list[FeedbackEntry]) -> list[FeedbackEntry]:
         if k not in latest or e.marked_at > latest[k].marked_at:
             latest[k] = e
     return list(latest.values())
+
+
+# ---------------------------------------------------------------------------
+# Skip-derived negative signal (issue #11)
+# ---------------------------------------------------------------------------
+
+_POSITIVE_MARK_OUTCOMES = ("bought", "liked")
+
+
+def skipped_artists(entries: list[FeedbackEntry], min_skips: int) -> set[str]:
+    """Return normalised artist names (dedup.normalise_artist) that qualify for
+    the skip-derived negative signal (issue #11 — ranker `skipped_artist`).
+
+    Reuses `latest_marks`' latest-mark-per-(history, key) semantics: a stale
+    mark superseded by a later re-mark on the same track never counts. Each
+    surviving entry's artist string is split via `profile._split_artists`
+    (collaborators get individual credit, same rule as profile building) and
+    each part normalised via `dedup.normalise_artist` so "Sully" and "sully "
+    collapse to one key. Combining across BOTH histories ('weekly' and
+    'mix-prep' — a skip is a skip regardless of which report it came from), an
+    artist qualifies when they have >= min_skips latest-mark 'skip' outcomes
+    AND zero latest-mark positive outcomes ('bought' or 'liked'). A single
+    positive mark disqualifies the artist entirely, even if the skip count
+    would otherwise clear the threshold — one 'liked' means taste changed, not
+    aversion, and the penalty should not keep firing against current evidence.
+    'own' is neutral (an identity-gap mark, not a taste signal) — it counts
+    toward neither skips nor positives.
+    """
+    skip_counts: dict[str, int] = {}
+    has_positive: set[str] = set()
+
+    for entry in latest_marks(entries):
+        for part in _split_artists(entry.artist):
+            name = normalise_artist(part)
+            if not name:
+                continue
+            if entry.outcome == "skip":
+                skip_counts[name] = skip_counts.get(name, 0) + 1
+            elif entry.outcome in _POSITIVE_MARK_OUTCOMES:
+                has_positive.add(name)
+            # "own" — neutral, no-op.
+
+    return {
+        name for name, count in skip_counts.items()
+        if count >= min_skips and name not in has_positive
+    }
 
 
 def summarise_feedback(

@@ -1282,3 +1282,158 @@ def test_source_popularity_configurable_threshold_and_weight():
     _score(c, {}, set(), {}, _build_genre_set({}), weights=weights)
     assert c.score == 0.5
     assert c.discovery_score == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Taste recency weighting (issue #11) — recency_weighted_play_count in known_artist scoring
+# ---------------------------------------------------------------------------
+
+def test_scoring_weights_recency_and_skip_penalty_defaults():
+    w = ScoringWeights()
+    assert w.taste_half_life_months == 18.0
+    assert w.w_skipped_artist == 1.0
+    assert w.skipped_artist_min_skips == 2
+
+
+def test_known_artist_uses_recency_weighted_count_when_positive():
+    """A profile with rwpc > 0 scores off rwpc, not the (larger) raw play_count —
+    the two must differ for this test to prove rwpc is actually used."""
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=10, recency_weighted_play_count=2.5)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}))
+    assert c.score == 2.5 * 3.0  # 7.5 — NOT 10 * 3.0 = 30.0
+
+
+def test_known_artist_falls_back_to_raw_play_count_when_rwpc_zero():
+    """rwpc == 0.0 (never seen in a dated mix, or mixes fetch unavailable) must
+    reproduce the exact pre-issue-#11 score off raw play_count — no artist is
+    silently zeroed out just because recency data doesn't cover them."""
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=4, recency_weighted_play_count=0.0)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}))
+    assert c.score == 4 * 3.0  # unchanged from pre-#11 behaviour
+
+
+def test_recurring_artist_threshold_uses_effective_count():
+    """A profile whose rwpc alone clears recurring_threshold (but whose raw
+    play_count does not) still earns the recurring bonus — the threshold
+    check uses the effective (recency-weighted) count."""
+    profiles_lower = {
+        "sully": ArtistProfile(name="Sully", play_count=1, recency_weighted_play_count=3.0)
+    }
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}))
+    assert any(s.code == "recurring_artist" for s in c.signals)
+    # known_artist: 3.0 * 3.0 = 9.0; recurring bonus: +2.0
+    assert c.score == 9.0 + 2.0
+
+
+def test_recurring_artist_reason_text_states_raw_play_count_not_weighted():
+    """The recurring_artist explanation must keep quoting the RAW play_count
+    fact ("appears in N of your mixes") even though the score math and
+    threshold check both use the fractional recency-weighted count."""
+    profiles_lower = {
+        "sully": ArtistProfile(name="Sully", play_count=6, recency_weighted_play_count=3.25)
+    }
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}))
+    recurring = next(s for s in c.signals if s.code == "recurring_artist")
+    assert "appears in 6 of your mixes" in recurring.explanation
+    assert "3.25" not in recurring.explanation
+
+
+def test_recency_weighting_configurable_half_life_does_not_affect_score_directly():
+    """taste_half_life_months only matters to apply_recency_weights (profile
+    build time) — _score just reads whatever rwpc is already stored, so a
+    weights override here changes nothing about the score."""
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=10, recency_weighted_play_count=2.0)}
+    c = _candidate(artist="Sully")
+    weights = ScoringWeights(taste_half_life_months=6.0)
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}), weights=weights)
+    assert c.score == 2.0 * 3.0
+
+
+# ---------------------------------------------------------------------------
+# Skip-derived negative signal (issue #11)
+# ---------------------------------------------------------------------------
+
+def test_skip_penalty_fires_once_for_matched_artist():
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}), skip_penalty_artists={"sully"})
+    # known_artist: 1 * 3.0 = 3.0; skip penalty: -1.0
+    assert c.score == 2.0
+    sigs = [s for s in c.signals if s.code == "skipped_artist"]
+    assert len(sigs) == 1
+    assert sigs[0].explanation == "You've skipped Sully recently."
+
+
+def test_skip_penalty_fires_for_unresolved_artist_named_in_set():
+    """The skip set can name an artist part that never resolved to a live
+    profile at all (e.g. discovered once, skipped, never played) — the
+    penalty still applies, checking the raw split parts of c.artist."""
+    c = _candidate(artist="Unknown Artist")
+    _score(c, {}, set(), {}, _build_genre_set({}), skip_penalty_artists={"unknown artist"})
+    assert c.score == -1.0
+    sigs = [s for s in c.signals if s.code == "skipped_artist"]
+    assert len(sigs) == 1
+    assert sigs[0].explanation == "You've skipped Unknown Artist recently."
+
+
+def test_skip_penalty_applies_to_total_only_not_axes():
+    """The penalty is a correction, not evidence — familiarity_score and
+    discovery_score stay exactly what they'd be without the penalty; only the
+    combined total absorbs it (same convention as pool_age)."""
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c_no_penalty = _candidate(artist="Sully")
+    _score(c_no_penalty, profiles_lower, set(), {}, _build_genre_set({}))
+
+    c_penalty = _candidate(artist="Sully")
+    _score(c_penalty, profiles_lower, set(), {}, _build_genre_set({}), skip_penalty_artists={"sully"})
+
+    assert c_penalty.familiarity_score == c_no_penalty.familiarity_score
+    assert c_penalty.discovery_score == c_no_penalty.discovery_score
+    assert c_penalty.score == c_no_penalty.score - 1.0
+
+
+def test_skip_penalty_not_fired_when_set_is_none():
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}), skip_penalty_artists=None)
+    assert c.score == 3.0
+    assert not any(s.code == "skipped_artist" for s in c.signals)
+
+
+def test_skip_penalty_not_fired_when_set_is_empty():
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}), skip_penalty_artists=set())
+    assert c.score == 3.0
+    assert not any(s.code == "skipped_artist" for s in c.signals)
+
+
+def test_skip_penalty_not_fired_when_artist_not_in_set():
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}), skip_penalty_artists={"someone else"})
+    assert c.score == 3.0
+    assert not any(s.code == "skipped_artist" for s in c.signals)
+
+
+def test_skip_penalty_uses_configurable_weight():
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c = _candidate(artist="Sully")
+    weights = ScoringWeights(w_skipped_artist=2.5)
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}), weights=weights, skip_penalty_artists={"sully"})
+    assert c.score == 3.0 - 2.5
+
+
+def test_skip_penalty_matches_split_collaborator_part():
+    """A skip set entry naming one half of a collaborative artist string still
+    fires the penalty for that candidate."""
+    c = _candidate(artist="Bakey, Kasia")
+    _score(c, {}, set(), {}, _build_genre_set({}), skip_penalty_artists={"kasia"})
+    assert c.score == -1.0
+    sigs = [s for s in c.signals if s.code == "skipped_artist"]
+    assert len(sigs) == 1
+    assert sigs[0].explanation == "You've skipped Kasia recently."

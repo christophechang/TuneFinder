@@ -260,6 +260,18 @@ scoring:
   # Artist aliases (release name -> canonical mix-catalogue name) live in
   # config/aliases.yaml — see that file for format. Empty by default.
 
+  # Taste recency weighting (issue #11) — known_artist scoring uses a
+  # half-life-decayed play count (data/artist_profiles.json
+  # recency_weighted_play_count, built from dated mixes via `fetch_all_mixes`)
+  # instead of the lifetime play_count, when recency data is available.
+  # taste_half_life_months: 18.0        # Half-life for the recency decay — an artist played 18 months ago counts ~half as much as one played this week
+
+  # Skip-derived negative signal (issue #11) — artists you've repeatedly
+  # skipped (via `tunefinder mark ... skip`) with no offsetting bought/liked
+  # mark get a soft penalty. See src/pipeline/feedback.skipped_artists.
+  # w_skipped_artist: 1.0               # Penalty subtracted once per candidate (total score only) when a matched/named artist is in the skip set
+  # skipped_artist_min_skips: 2         # Latest-mark 'skip' outcomes (zero positives) needed before the penalty applies
+
   # Label affinity
   w_label_base: 1.5                    # Base score for any label match
   w_label_per_artist: 0.5              # Additional score per known artist on label

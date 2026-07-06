@@ -1,11 +1,16 @@
 import json
 import os
 import re
+from datetime import datetime, timezone
 
 from src.logger import get_logger
-from src.models import ArtistProfile, Track
+from src.models import ArtistProfile, Mix, Track
 
 logger = get_logger(__name__)
+
+# Average days per month used to convert a mix's age into months for the
+# recency-weight half-life calculation (issue #11) — 365.25 / 12.
+_DAYS_PER_MONTH = 30.44
 
 _KNOWN_TRACKS_FILE = "known_tracks.json"
 _ARTIST_PROFILES_FILE = "artist_profiles.json"
@@ -75,6 +80,68 @@ def build_artist_profiles(tracks: list[Track]) -> dict[str, ArtistProfile]:
 
     logger.info(f"[profile] Built {len(profiles)} artist profiles")
     return profiles
+
+
+def apply_recency_weights(
+    profiles: dict[str, ArtistProfile],
+    mixes: list[Mix],
+    half_life_months: float,
+    now: datetime | None = None,
+) -> None:
+    """Add recency-weighted play counts to matched profiles, in place (issue #11).
+
+    For each mix with a parseable `published_at` (ISO date/datetime string —
+    missing, blank, or unparseable means the mix is skipped entirely, no
+    partial credit), every tracklist TrackRef's artist string is split
+    (_split_artists, same collaborator-splitting rule as build_artist_profiles)
+    and each part resolved to a profile via a direct lower().strip() lookup —
+    aliases aren't needed here since profiles were built from the same
+    catalogue strings the mixes come from. Each matched profile's
+    `recency_weighted_play_count` gains `0.5 ** (age_months / half_life_months)`
+    per track occurrence (age_months = days_old / 30.44), mirroring how
+    `play_count` counts recurrences — one increment per occurrence, not one
+    per mix.
+
+    A profile never referenced by any dated mix is left untouched (stays at
+    whatever it already was — 0.0 for a freshly built profile). Callers must
+    treat 0.0 as "no recency data available", not "never played" — the ranker
+    falls back to raw play_count in that case (see ranker._score).
+
+    Stored values are rounded to 3 decimal places.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    profiles_lower = {k.lower(): v for k, v in profiles.items()}
+
+    for mix in mixes:
+        published_raw = (mix.published_at or "").strip()
+        if not published_raw:
+            continue
+        try:
+            published = datetime.fromisoformat(published_raw)
+        except ValueError:
+            logger.warning(f"[profile] Mix {mix.id!r} has unparseable published_at {published_raw!r} — skipped")
+            continue
+
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+
+        age_days = (now - published).total_seconds() / 86400
+        age_months = age_days / _DAYS_PER_MONTH
+        weight = 0.5 ** (age_months / half_life_months)
+
+        for track_ref in mix.tracklist:
+            for part in _split_artists(track_ref.artist):
+                profile = profiles_lower.get(part.lower().strip())
+                if profile is None:
+                    continue
+                profile.recency_weighted_play_count += weight
+
+    for profile in profiles_lower.values():
+        profile.recency_weighted_play_count = round(profile.recency_weighted_play_count, 3)
+
+    logger.info(f"[profile] Applied recency weights from {len(mixes)} mixes (half-life={half_life_months}mo)")
 
 
 def build_genre_affinity(tracks: list[Track]) -> dict[str, float]:
@@ -158,6 +225,7 @@ def _profile_to_dict(p: ArtistProfile) -> dict:
         "play_count": p.play_count,
         "genres_seen": p.genres_seen,
         "track_titles": p.track_titles,
+        "recency_weighted_play_count": p.recency_weighted_play_count,
     }
 
 
@@ -167,6 +235,9 @@ def _dict_to_profile(d: dict) -> ArtistProfile:
         play_count=d.get("play_count", 0),
         genres_seen=d.get("genres_seen", []),
         track_titles=d.get("track_titles", []),
+        # Default 0.0 for profile files saved before issue #11 — falls back to
+        # raw play_count in scoring (see ranker._score), never zeroes anything out.
+        recency_weighted_play_count=d.get("recency_weighted_play_count", 0.0),
     )
 
 

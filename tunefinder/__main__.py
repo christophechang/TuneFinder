@@ -46,8 +46,9 @@ def cmd_save_fixtures(args):
 
 
 def cmd_build_profile(args):
-    from src.fetchers.catalog import fetch_all_tracks
+    from src.fetchers.catalog import fetch_all_mixes, fetch_all_tracks
     from src.pipeline.profile import (
+        apply_recency_weights,
         build_artist_profiles,
         build_genre_affinity,
         save_known_tracks,
@@ -63,6 +64,17 @@ def cmd_build_profile(args):
     logger.info("[build-profile] Building artist profiles...")
     profiles = build_artist_profiles(tracks)
     genre_affinity = build_genre_affinity(tracks)
+
+    # Taste recency weighting (issue #11) — best-effort: a mixes-fetch failure
+    # is graceful degradation (profile build itself already succeeded), not an
+    # alert-worthy failure, so profiles simply keep whatever recency weights
+    # were last saved (or 0.0 / raw play_count fallback for a fresh profile).
+    try:
+        weights = settings.scoring_weights()
+        mixes = fetch_all_mixes(settings)
+        apply_recency_weights(profiles, mixes, weights.taste_half_life_months)
+    except Exception as exc:
+        logger.warning(f"[build-profile] mixes fetch failed — recency weights unavailable, using raw play counts ({exc})")
 
     save_known_tracks(tracks, settings.data_dir)
     save_artist_profiles(profiles, settings.data_dir)
@@ -103,9 +115,9 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=Fa
     post_alert_fn: callable(message: str) to post alerts. Called on live runs
     only (mirrors existing anomaly-alert gating); dry-run logs instead.
     """
-    from src.fetchers.catalog import fetch_all_tracks
+    from src.fetchers.catalog import fetch_all_mixes, fetch_all_tracks
     from src.pipeline.profile import (
-        build_artist_profiles, build_genre_affinity, build_known_track_keys,
+        apply_recency_weights, build_artist_profiles, build_genre_affinity, build_known_track_keys,
         save_known_tracks, save_artist_profiles, save_genre_affinity,
         load_artist_profiles, load_genre_affinity, load_known_tracks,
     )
@@ -140,6 +152,19 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=Fa
     profiles = build_artist_profiles(tracks)
     genre_affinity = build_genre_affinity(tracks)
     known_keys = build_known_track_keys(tracks, remix_aware)
+
+    # Taste recency weighting (issue #11) — best-effort: mixes fetch failure is
+    # graceful degradation only (the track/profile fetch above already
+    # succeeded), not the same class of failure as _load_profile_state's own
+    # alerting above — no alert, profiles keep raw play_count scoring for this
+    # run via the ranker's fallback.
+    try:
+        weights = settings.scoring_weights()
+        mixes = fetch_all_mixes(settings)
+        apply_recency_weights(profiles, mixes, weights.taste_half_life_months)
+    except Exception as exc:
+        logger.warning(f"[load_profile_state] mixes fetch failed — recency weights unavailable, using raw play counts ({exc})")
+
     save_known_tracks(tracks, settings.data_dir, remix_aware)
     save_artist_profiles(profiles, settings.data_dir)
     save_genre_affinity(genre_affinity, settings.data_dir)
@@ -161,6 +186,7 @@ def cmd_run(args):
     from src.pipeline.labels import (
         load_label_affinity, update_label_affinity, save_label_affinity, fresh_label_artist_data,
     )
+    from src.pipeline.feedback import load_feedback, skipped_artists
     from src.pipeline.pool import load_pool, pool_to_candidates, save_pool, POOL_CAP
     from src.pipeline.report import generate_report, report_order
     from src.pipeline.source_health import append_run_health, load_run_health, detect_anomalies
@@ -270,9 +296,13 @@ def cmd_run(args):
     # 5. Rank and split into sections
     weights = settings.scoring_weights()
     label_memory = fresh_label_artist_data(label_store, weights.label_memory_max_age_weeks)
+    # Skip-derived negative signal (issue #11) — artists with repeated 'skip'
+    # marks and no positives get a soft penalty. See src/pipeline/feedback.skipped_artists.
+    feedback_entries = load_feedback(settings.data_dir)
+    skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
     sections, label_artists = rank_candidates(
         candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
-        label_memory=label_memory,
+        label_memory=label_memory, skip_penalty_artists=skip_set,
     )
     aliases = settings.artist_aliases()
 
@@ -391,6 +421,7 @@ def cmd_mix_prep(args):
     from src.pipeline.labels import (
         load_label_affinity, update_label_affinity, save_label_affinity, fresh_label_artist_data,
     )
+    from src.pipeline.feedback import load_feedback, skipped_artists
     from src.pipeline.pool import load_pool, pool_to_candidates
     from src.pipeline.report import generate_mix_prep_report, report_order
     from src.pipeline.harmonic import to_camelot, partition_by_harmonic
@@ -527,9 +558,12 @@ def cmd_mix_prep(args):
     # 5. Rank and section
     weights = settings.scoring_weights()
     label_memory = fresh_label_artist_data(label_store, weights.label_memory_max_age_weeks)
+    # Skip-derived negative signal (issue #11) — see cmd_run.
+    feedback_entries = load_feedback(settings.data_dir)
+    skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
     sections, label_artists = rank_candidates_mix_prep(
         candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
-        label_memory=label_memory, demoted_keys=demoted_keys,
+        label_memory=label_memory, demoted_keys=demoted_keys, skip_penalty_artists=skip_set,
     )
     aliases = settings.artist_aliases()
 
