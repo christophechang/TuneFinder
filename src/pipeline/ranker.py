@@ -55,6 +55,13 @@ class ScoringWeights:
     w_scene_adjacent: float = 0.75           # bonus for an unknown artist releasing on a label your known artists are on
     scene_label_roster_cap: int = 30         # labels with more distinct artists than this (in the current week's corpus) don't fire scene_adjacent — a 500-artist label is not a scene
 
+    # --- Mixupload popularity signal (issue #12) ---
+    w_mixupload_popularity: float = 0.25     # bonus for Mixupload tracks with popular download count
+    mixupload_popularity_downloads: int = 100  # minimum download count to fire the signal
+
+    # --- Per-source share cap (issue #12, weekly only) ---
+    max_share_per_source: float = 0.6  # max fraction of total_configured_slots any single source can claim (1.0 disables)
+
 
 _GENRE_AUGMENT_MIN_ARTISTS = 3
 
@@ -433,6 +440,17 @@ def _score(
             explanation="Bandcamp discovery — independent release outside chart sources.",
         ))
 
+    # --- Mixupload popularity signal (discovery axis; issue #12) ---
+    download_count = c.raw_metadata.get("download_count")
+    if (download_count is not None and isinstance(download_count, int) and
+        download_count >= weights.mixupload_popularity_downloads):
+        score += weights.w_mixupload_popularity
+        discovery += weights.w_mixupload_popularity
+        c.signals.append(RecommendationSignal(
+            code="source_popularity",
+            explanation=f"{download_count} downloads on Mixupload.",
+        ))
+
     # --- Pool age penalty ---
     # Applied to the TOTAL score only, not either axis. Decision: pool age is an
     # artefact of the queue (how long a candidate sat unrecommended), not a fact
@@ -468,6 +486,7 @@ def _assign_sections(
     genres_set: set[str],
     trace: dict | None = None,
 ) -> dict[str, list[Candidate]]:
+    import math
     top_n = settings.pipeline_top_picks_count
     label_n = settings.pipeline_label_watch_count
     artist_n = settings.pipeline_artist_watch_count
@@ -484,6 +503,13 @@ def _assign_sections(
 
     # Genre cap is global across all sections so one genre can't flood the full report
     genre_counts: dict[str, int] = {}
+
+    # Per-source share cap (issue #12) — global across all sections
+    total_configured_slots = top_n + label_n + artist_n + wildcard_n
+    source_cap = None
+    if weights.max_share_per_source < 1.0:
+        source_cap = math.ceil(weights.max_share_per_source * total_configured_slots)
+    source_counts: dict[str, int] = {}
 
     def pick(
         n: int,
@@ -536,11 +562,17 @@ def _assign_sections(
                 if trace is not None and section_name:
                     trace.setdefault(id(c), []).append((section_name, f"genre cap ({cap_genre})"))
                 continue
+            # Per-source cap: check if adding this candidate would exceed the global source limit
+            if source_cap is not None and source_counts.get(c.source, 0) >= source_cap:
+                if trace is not None and section_name:
+                    trace.setdefault(id(c), []).append((section_name, f"source cap ({c.source})"))
+                continue
             artist_counts[artist_key] = artist_counts.get(artist_key, 0) + 1
             if release_key:
                 release_counts[release_key] = release_counts.get(release_key, 0) + 1
             if cap_genre:
                 genre_counts[cap_genre] = genre_counts.get(cap_genre, 0) + 1
+            source_counts[c.source] = source_counts.get(c.source, 0) + 1
             result.append(c)
             used.add(id(c))
             if len(result) >= n:

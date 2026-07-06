@@ -179,7 +179,7 @@ def _parse_chart_tracks(html: str, genre_tag: str, period: str | None = None) ->
         if dl is not None:
             raw["download_count"] = dl
         if stream is not None:
-            raw["stream_count"] = stream
+            raw["stream_count"] = stream  # Parsed but unused in scoring — measures free listens, not intent
 
         results.append(SourceItem(
             source=_SOURCE,

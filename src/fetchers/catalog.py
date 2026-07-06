@@ -16,7 +16,6 @@ _NUMBER_PREFIX_RE = re.compile(r"^\s*\d{1,3}[.)]\s+")
 def _clean_artist(name: str) -> str:
     return _NUMBER_PREFIX_RE.sub("", name)
 
-_DEFAULT_BASE_URL = "https://api.changsta.com"
 _MIXES_PAGE_SIZE = 50
 _TRACKS_PAGE_SIZE = 50
 _REQUEST_TIMEOUT = 30
@@ -33,8 +32,10 @@ def _get(url: str, params: dict) -> dict:
     return resp.json()
 
 
-def _paginate(path: str, page_size: int, base_url: str = _DEFAULT_BASE_URL) -> list[dict]:
+def _paginate(path: str, page_size: int, base_url: str) -> list[dict]:
     """Fetch all pages from a paginated endpoint and return a flat item list."""
+    if not base_url:
+        raise ValueError("catalog.user_url not configured")
     url = f"{base_url}{path}"
     page = 1
     all_items: list[dict] = []
@@ -118,7 +119,7 @@ def fetch_all_mixes(settings) -> list[Mix]:
     if settings.testing_use_fixtures:
         return _load_fixture_mixes(settings.testing_fixtures_dir)
 
-    base_url = settings.catalog_user_url or _DEFAULT_BASE_URL
+    base_url = settings.catalog_user_url
     raw_items = _paginate("/api/catalog/mixes", _MIXES_PAGE_SIZE, base_url)
     pairs = [_parse_mix(r) for r in raw_items]
     mixes = [m for m, _ in pairs]
@@ -138,7 +139,7 @@ def fetch_all_tracks(settings) -> list[Track]:
     if settings.testing_use_fixtures:
         return _load_fixture_tracks(settings.testing_fixtures_dir)
 
-    base_url = settings.catalog_user_url or _DEFAULT_BASE_URL
+    base_url = settings.catalog_user_url
     raw_items = _paginate("/api/catalog/tracks", _TRACKS_PAGE_SIZE, base_url)
     pairs = [_parse_track(r) for r in raw_items]
     tracks = [t for t, _ in pairs]
@@ -184,7 +185,7 @@ def save_fixtures(settings) -> None:
     """
     os.makedirs(settings.testing_fixtures_dir, exist_ok=True)
 
-    base_url = settings.catalog_user_url or _DEFAULT_BASE_URL
+    base_url = settings.catalog_user_url
     mixes_raw = _paginate("/api/catalog/mixes", _MIXES_PAGE_SIZE, base_url)
     mixes_path = os.path.join(settings.testing_fixtures_dir, "mixes.json")
     with open(mixes_path, "w", encoding="utf-8") as f:

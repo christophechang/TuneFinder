@@ -190,8 +190,9 @@ def filter_release_date(
 ) -> list[Candidate]:
     """Drop candidates whose release_date is older than window_days ago.
 
-    Items with no release_date (e.g. Bandcamp) are always kept — we can't
-    confirm they're stale, so we give them the benefit of the doubt.
+    Items with no release_date are always kept — we can't confirm they're stale,
+    so we give them the benefit of the doubt. Some Bandcamp items may carry dates
+    now (since the discover_web migration), but many undated items remain.
 
     `today` sets the reference date the cutoff is measured back from. Default
     (None) uses today's UTC date — the live-run behaviour. Offline replay

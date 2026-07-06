@@ -228,7 +228,7 @@ Each internal genre maps to one or more genre feeds on each source. Sources not 
 | `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house | style/house · style-part/deep-house · style-part/tech-house · style-part/progressive-house | house · deep-house · tech-house · soulful-house · funky-house · melodic-house-techno · progressive-house · afro-house |
 | `dnb` | drum-bass | drum-and-bass | drum-and-bass | style/dnb | drum-and-bass |
 | `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat | style/breaks | breaks-breakbeat |
-| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass/tracks | — |
+| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass page | — |
 | `ukg` | uk-garage-bassline | garage | uk-garage | style-part/uk-garage | uk-garage-2-step |
 | `electronica` | electronica | electronica · leftfield | electronic · electronica | style-part/electronica | electronica |
 | `downtempo` | downtempo | lounge-chill-out | downtempo · lounge | style-part/downtempo | organic-house-downtempo |
@@ -355,6 +355,7 @@ Runs every Sunday at 09:00. Logs to `logs/launchd.log`.
 
 ```bash
 # Edit plist to set YOUR_ADMIN_USER and venv path
+# Ensure all paths match your actual checkout location
 nano com.openclaw.tune-finder.plist
 
 # Install

@@ -87,14 +87,69 @@ def cmd_fetch_sources(args):
         print(f"  {source}: {status}")
 
 
-def cmd_run(args):
-    import time
+def _load_profile_state(settings, logger, dry_run, post_alert_fn):
+    """Refresh profile, genre affinity, and known-track state, with graceful fallback.
+
+    Attempts to fetch fresh tracks from the catalog API. On success, builds and
+    SAVES the fresh state (same behaviour as before issue #12). If the fetch
+    fails, loads the last-saved state from data_dir instead and skips all
+    save_* calls (nothing new to persist). Returns (profiles, genre_affinity,
+    known_keys, used_fallback).
+
+    Known-key equivalence: build_known_track_keys(tracks) produces normalised
+    dedup keys, and data/known_tracks.json (written by save_known_tracks) stores
+    exactly those keys — load_known_tracks returns the same set.
+
+    post_alert_fn: callable(message: str) to post alerts. Called on live runs
+    only (mirrors existing anomaly-alert gating); dry-run logs instead.
+    """
     from src.fetchers.catalog import fetch_all_tracks
-    from src.fetchers import fetch_all_sources, save_source_items, archive_source_items
     from src.pipeline.profile import (
         build_artist_profiles, build_genre_affinity, build_known_track_keys,
         save_known_tracks, save_artist_profiles, save_genre_affinity,
+        load_artist_profiles, load_genre_affinity, load_known_tracks,
     )
+
+    try:
+        logger.info("[load_profile_state] Fetching tracks from catalog API...")
+        tracks = fetch_all_tracks(settings)
+    except Exception as exc:
+        logger.error(f"[load_profile_state] fetch_all_tracks failed: {exc}")
+        profiles = load_artist_profiles(settings.data_dir)
+        genre_affinity = load_genre_affinity(settings.data_dir)
+        known_keys = load_known_tracks(settings.data_dir)
+
+        if profiles:
+            alert_msg = (
+                f"Profile fetch failed ({exc}) — proceeding with {len(profiles)} cached "
+                f"artist profiles from last saved state. Check catalog API connectivity."
+            )
+        else:
+            alert_msg = (
+                f"Profile fetch failed ({exc}) — no cached profiles available either. "
+                "Proceeding in discovery-only mode (no artist/label signals)."
+            )
+
+        if not dry_run:
+            post_alert_fn(alert_msg)
+        else:
+            logger.warning(f"[load_profile_state] ALERT (dry-run, not posted): {alert_msg}")
+
+        return profiles, genre_affinity, known_keys, True
+
+    profiles = build_artist_profiles(tracks)
+    genre_affinity = build_genre_affinity(tracks)
+    known_keys = build_known_track_keys(tracks)
+    save_known_tracks(tracks, settings.data_dir)
+    save_artist_profiles(profiles, settings.data_dir)
+    save_genre_affinity(genre_affinity, settings.data_dir)
+    logger.info(f"[load_profile_state] Refreshed profile state from {len(tracks)} known tracks")
+    return profiles, genre_affinity, known_keys, False
+
+
+def cmd_run(args):
+    import time
+    from src.fetchers import fetch_all_sources, save_source_items, archive_source_items
     from src.pipeline.history import (
         load_history, build_history_keys, append_records, make_report_id,
     )
@@ -121,14 +176,19 @@ def cmd_run(args):
     report_id = make_report_id()
     logger.info(f"[run] Starting report run — {report_id}" + (" (DRY RUN)" if dry_run else ""))
 
-    # 1. Refresh profile and known-track set
-    tracks = fetch_all_tracks(settings)
-    profiles = build_artist_profiles(tracks)
-    genre_affinity = build_genre_affinity(tracks)
-    save_known_tracks(tracks, settings.data_dir)
-    save_artist_profiles(profiles, settings.data_dir)
-    save_genre_affinity(genre_affinity, settings.data_dir)
-    known_keys = build_known_track_keys(tracks)
+    # Create discord client early for alerts (same as anomaly-alert gating pattern)
+    discord = make_discord_client(settings)
+
+    # 1. Refresh profile and known-track set (with degraded mode fallback)
+    def _post_profile_alert(msg: str):
+        if not dry_run:
+            discord.post_alert(msg)
+
+    profiles, genre_affinity, known_keys, used_fallback = _load_profile_state(
+        settings, logger, dry_run, _post_profile_alert
+    )
+    if used_fallback:
+        logger.warning("[run] Proceeding with last-saved profile state (degraded mode)")
 
     # 1b. Load label affinity store (issue #5) — persisted artist<->label memory
     label_store = load_label_affinity(settings.data_dir)
@@ -316,12 +376,7 @@ def cmd_run(args):
 
 def cmd_mix_prep(args):
     import time
-    from src.fetchers.catalog import fetch_all_tracks
     from src.fetchers import fetch_all_sources
-    from src.pipeline.profile import (
-        build_artist_profiles, build_genre_affinity, build_known_track_keys,
-        save_known_tracks, save_artist_profiles, save_genre_affinity,
-    )
     from src.pipeline.history import (
         load_mix_prep_history, build_history_keys, append_mix_prep_records, make_report_id,
     )
@@ -374,14 +429,19 @@ def cmd_mix_prep(args):
     report_id = f"{make_report_id()}-mix-prep-{genre}"
     logger.info(f"[mix-prep] Starting mix-prep run — genre: {genre} — {report_id}" + (" (DRY RUN)" if dry_run else ""))
 
-    # 1. Refresh profile and known-track set
-    tracks = fetch_all_tracks(settings)
-    profiles = build_artist_profiles(tracks)
-    genre_affinity = build_genre_affinity(tracks)
-    save_known_tracks(tracks, settings.data_dir)
-    save_artist_profiles(profiles, settings.data_dir)
-    save_genre_affinity(genre_affinity, settings.data_dir)
-    known_keys = build_known_track_keys(tracks)
+    # Create discord client early for alerts (same as anomaly-alert gating pattern)
+    discord = make_discord_client(settings)
+
+    # 1. Refresh profile and known-track set (with degraded mode fallback)
+    def _post_profile_alert(msg: str):
+        if not dry_run:
+            discord.post_alert(msg)
+
+    profiles, genre_affinity, known_keys, used_fallback = _load_profile_state(
+        settings, logger, dry_run, _post_profile_alert
+    )
+    if used_fallback:
+        logger.warning("[mix-prep] Proceeding with last-saved profile state (degraded mode)")
 
     # 1b. Load label affinity store (issue #5) — persisted artist<->label memory
     label_store = load_label_affinity(settings.data_dir)

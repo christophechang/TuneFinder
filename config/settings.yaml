@@ -1,5 +1,5 @@
 catalog:
-  user_url: ""  # e.g. https://api.changsta.com
+  user_url: "https://api.changsta.com"  # Personal catalog API endpoint
 
 discord:
   guild_id: ""  # Override with DISCORD_GUILD_ID env var
@@ -163,7 +163,7 @@ sources:
       - tf_tag: ukg
         chart: style-part/uk-garage
       - tf_tag: uk-bass
-        genre: UKBass     # no chart page — uses /genres/{slug}/tracks
+        genre: UKBass     # no chart page — uses /genres/{slug}/page1
 
   volumo:
     enabled: true
@@ -209,7 +209,7 @@ sources:
       # uk-bass, funk-soul-jazz, hip-hop intentionally not mapped — Volumo has no true-fit genre for them (see docs/improvement-plan.md §3).
 
 pipeline:
-  # Release date window applied to all sources with known dates. Bandcamp items always pass (no date available).
+  # Release date window applied to all sources with known dates. Undated items always pass (e.g. some Bandcamp releases).
   release_date_window_days: 28
   # Minimum score for a track to occupy a report slot — sections may run short.
   # 0 disables the floor (pre-v0.7.1 behaviour).
@@ -281,6 +281,10 @@ scoring:
   # Bandcamp discovery
   w_bandcamp: 1.0                      # Bonus for Bandcamp sources
 
+  # Mixupload popularity
+  w_mixupload_popularity: 0.25         # Bonus for Mixupload tracks with popular download count
+  mixupload_popularity_downloads: 100  # Minimum download count to earn the signal
+
   # Artist score cap and pool age
   max_artist_score: 10.0               # Cap total artist score so one mega-artist doesn't dominate
   w_pool_age_per_week: 0.25            # Penalty per week in candidate pool
@@ -290,6 +294,9 @@ scoring:
   # Top Picks/Label Watch/Artist Watch, which always rank by the combined score above.
   wildcards_axis: discovery             # "discovery" (rank Wildcards by discovery_score only) | "combined" (pre-v0.8 behaviour: rank by total score)
   wildcards_max_familiarity: 0.0        # Wildcards require familiarity_score <= this value when axis is "discovery"
+
+  # Per-source share cap (weekly only) — limits how many tracks from one source can be in the report
+  # max_share_per_source: 0.6           # Max fraction of total_configured_slots (top_picks + label_watch + artist_watch + wildcards) — 1.0 or higher disables
 
   # Scene one-hop signal — label-mates of your known artists (issue #6)
   # w_scene_adjacent: 0.75              # Bonus for an unknown artist releasing on a label your known artists are on (0 disables the signal)

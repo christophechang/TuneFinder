@@ -1140,3 +1140,145 @@ def test_rank_candidates_mix_prep_no_demoted_keys_zero_behaviour_change(tmp_path
 
     # No demoted_keys passed — plain score order, known_artist candidate wins.
     assert sections["top_picks"] == [known, unknown]
+
+
+# ---------------------------------------------------------------------------
+# Issue #12: per-source share cap (weekly _assign_sections only)
+# ---------------------------------------------------------------------------
+
+def test_source_cap_skips_over_share_candidate_with_trace():
+    class _CapSettings(_MockSettings):
+        pipeline_top_picks_count = 3
+        pipeline_label_watch_count = 0
+        pipeline_artist_watch_count = 0
+        pipeline_wildcard_count = 0
+
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights(max_share_per_source=0.5)
+
+    # total_configured_slots = 3, cap = ceil(0.5 * 3) = 2 per source
+    ranked = [
+        _scored_candidate(5.0, artist="A1", title="T1", source="beatport"),
+        _scored_candidate(4.0, artist="A2", title="T2", source="beatport"),
+        _scored_candidate(3.0, artist="A3", title="T3", source="beatport"),
+        _scored_candidate(2.0, artist="A4", title="T4", source="bandcamp"),
+    ]
+    trace: dict = {}
+    sections = _assign_sections(ranked, _CapSettings(), _build_genre_set({}), trace=trace)
+
+    picked = [(c.artist, c.source) for c in sections["top_picks"]]
+    assert picked == [("A1", "beatport"), ("A2", "beatport"), ("A4", "bandcamp")]
+
+    third = ranked[2]
+    reasons = [r for _, r in trace.get(id(third), [])]
+    assert any("source cap (beatport)" in r for r in reasons)
+
+
+def test_source_cap_one_point_zero_disables():
+    class _NoCapSettings(_MockSettings):
+        pipeline_top_picks_count = 3
+        pipeline_label_watch_count = 0
+        pipeline_artist_watch_count = 0
+        pipeline_wildcard_count = 0
+
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights(max_share_per_source=1.0)
+
+    ranked = [
+        _scored_candidate(5.0, artist="A1", title="T1", source="beatport"),
+        _scored_candidate(4.0, artist="A2", title="T2", source="beatport"),
+        _scored_candidate(3.0, artist="A3", title="T3", source="beatport"),
+        _scored_candidate(2.0, artist="A4", title="T4", source="bandcamp"),
+    ]
+    trace: dict = {}
+    sections = _assign_sections(ranked, _NoCapSettings(), _build_genre_set({}), trace=trace)
+
+    # Cap disabled — all three beatport candidates fill top_picks
+    picked = [(c.artist, c.source) for c in sections["top_picks"]]
+    assert picked == [("A1", "beatport"), ("A2", "beatport"), ("A3", "beatport")]
+    assert not any("source cap" in r for reasons in trace.values() for _, r in reasons)
+
+
+def test_source_cap_counts_globally_across_sections():
+    class _CapSettings(_MockSettings):
+        pipeline_top_picks_count = 1
+        pipeline_label_watch_count = 0
+        pipeline_artist_watch_count = 0
+        pipeline_wildcard_count = 1
+
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights(max_share_per_source=0.5, wildcards_axis="combined")
+
+    # total_configured_slots = 2, cap = ceil(1.0) = 1 per source: after
+    # top_picks consumes the one allowed beatport slot, wildcards must skip
+    # the remaining beatport candidate even though its own section is empty.
+    ranked = [
+        _scored_candidate(5.0, artist="A1", title="T1", source="beatport"),
+        _scored_candidate(4.0, artist="A2", title="T2", source="beatport"),
+    ]
+    trace: dict = {}
+    sections = _assign_sections(ranked, _CapSettings(), _build_genre_set({}), trace=trace)
+
+    assert [c.artist for c in sections["top_picks"]] == ["A1"]
+    assert sections["wildcards"] == []
+    reasons = [r for _, r in trace.get(id(ranked[1]), [])]
+    assert any("source cap (beatport)" in r for r in reasons)
+
+
+def test_source_cap_default_does_not_bind_small_input():
+    # Default 0.6 with the default _MockSettings slots (5+5+5+3=18) → cap 11;
+    # a small input must be completely unaffected (snapshot-safety check).
+    ranked = [_scored_candidate(5.0 - i, artist=f"A{i}", title=f"T{i}", source="s") for i in range(5)]
+    trace: dict = {}
+    sections = _assign_sections(ranked, _MockSettings(), _build_genre_set({}), trace=trace)
+    assert len(sections["top_picks"]) == 5
+    assert not any("source cap" in r for reasons in trace.values() for _, r in reasons)
+
+
+# ---------------------------------------------------------------------------
+# Issue #12: Mixupload popularity signal (source_popularity)
+# ---------------------------------------------------------------------------
+
+def test_source_popularity_fires_at_threshold():
+    c = _candidate(source="mixupload", raw_metadata={"download_count": 100})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    sigs = [s for s in c.signals if s.code == "source_popularity"]
+    assert len(sigs) == 1
+    assert sigs[0].explanation == "100 downloads on Mixupload."
+    assert c.score == 0.25
+    assert c.discovery_score == 0.25
+    assert c.familiarity_score == 0.0
+
+
+def test_source_popularity_fires_above_threshold_flat():
+    c = _candidate(source="mixupload", raw_metadata={"download_count": 5000})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    # Flat bonus — fires once regardless of how far above threshold
+    assert c.score == 0.25
+    assert any(s.code == "source_popularity" for s in c.signals)
+
+
+def test_source_popularity_does_not_fire_below_threshold():
+    c = _candidate(source="mixupload", raw_metadata={"download_count": 99})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert not any(s.code == "source_popularity" for s in c.signals)
+    assert c.score == 0.0
+    assert c.discovery_score == 0.0
+
+
+def test_source_popularity_does_not_fire_when_absent():
+    c = _candidate(source="mixupload", raw_metadata={})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert not any(s.code == "source_popularity" for s in c.signals)
+    assert c.score == 0.0
+
+
+def test_source_popularity_configurable_threshold_and_weight():
+    weights = ScoringWeights(w_mixupload_popularity=0.5, mixupload_popularity_downloads=10)
+    c = _candidate(source="mixupload", raw_metadata={"download_count": 10})
+    _score(c, {}, set(), {}, _build_genre_set({}), weights=weights)
+    assert c.score == 0.5
+    assert c.discovery_score == 0.5
