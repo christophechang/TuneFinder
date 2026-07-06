@@ -38,6 +38,8 @@ class ScoringWeights:
     pool_age_penalty_max: float = 1.5  # cap total pool-age penalty
     w_genre: float = 0.5             # per matching genre tag
     genre_match_cap: int = 2         # cross-source dedup unions tags; cap prevents same popularity fact paid twice
+    genre_affinity_min: float = 0.5  # multiplier floor for genres you rarely play (or aren't in the affinity map)
+    genre_affinity_max: float = 2.0  # multiplier ceiling for your most-played genre(s)
     w_fresh: float = 0.5             # released within fresh_days
     fresh_days: int = 7              # genuinely just-out; inside a 28-day-filtered corpus, 30 was a constant
     w_chart_top: float = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
@@ -108,6 +110,29 @@ def _build_relevant_labels(
     return relevant, counts_int, label_artist_names
 
 
+def _genre_affinity_multiplier(
+    tag: str,
+    genre_affinity: dict[str, float] | None,
+    weights: "ScoringWeights",
+) -> float:
+    """Scale genre_match per tag by corpus-level genre affinity (P3).
+
+    None/empty affinity → 1.0 (today's flat behaviour, no data to scale by).
+    Otherwise a tag's share of the affinity map is normalised against the
+    dominant genre's share and mapped into [genre_affinity_min,
+    genre_affinity_max]; a tag absent from the map (a genre you don't play)
+    gets the floor multiplier.
+    """
+    if not genre_affinity:
+        return 1.0
+    share = genre_affinity.get(tag)
+    if share is None:
+        return weights.genre_affinity_min
+    max_share = max(genre_affinity.values())
+    raw = 0.5 + 1.5 * (share / max_share)
+    return min(max(raw, weights.genre_affinity_min), weights.genre_affinity_max)
+
+
 def _score(
     c: Candidate,
     profiles_lower: dict[str, ArtistProfile],
@@ -116,6 +141,7 @@ def _score(
     genres_set: set[str],
     recent_artists: frozenset[str] | set[str] = frozenset(),
     weights: ScoringWeights | None = None,
+    genre_affinity: dict[str, float] | None = None,
 ) -> None:
     """Mutate candidate in place: assign signals and total score."""
     if weights is None:
@@ -191,10 +217,21 @@ def _score(
             explanation=f"Flagged by {len(seen_on)} sources: {', '.join(seen_on)}.",
         ))
 
-    # --- Genre match, soft (discovery axis) ---
+    # --- Genre match, soft, scaled by genre affinity (discovery axis) ---
     matching = [g for g in c.genre_tags if g in genres_set and g not in _SCORING_EXEMPT_GENRES]
     if matching:
-        genre_bonus = weights.w_genre * min(len(matching), weights.genre_match_cap)
+        # When more tags match than genre_match_cap allows, count the
+        # highest-affinity tags first — a dominant-genre tag shouldn't lose
+        # its slot to a fringe one just because of tag order.
+        by_multiplier = sorted(
+            matching,
+            key=lambda g: -_genre_affinity_multiplier(g, genre_affinity, weights),
+        )
+        counted = by_multiplier[:weights.genre_match_cap]
+        genre_bonus = sum(
+            weights.w_genre * _genre_affinity_multiplier(g, genre_affinity, weights)
+            for g in counted
+        )
         score += genre_bonus
         discovery += genre_bonus
         c.signals.append(RecommendationSignal(
@@ -408,6 +445,7 @@ def rank_candidates(
     profiles: dict[str, ArtistProfile],
     settings,
     label_seed: list[Candidate] | None = None,
+    genre_affinity: dict[str, float] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score all candidates, assign signals, sort, and split into report sections.
@@ -419,6 +457,9 @@ def rank_candidates(
     Pass the full source candidate list before filter_known/filter_history so
     that known artists (who are filtered out of candidates) still contribute
     their labels. Defaults to candidates if not provided.
+
+    genre_affinity: corpus-level genre share map (src/pipeline/profile.py
+    build_genre_affinity). None/empty → flat 1.0 multiplier, today's behaviour.
     """
     from src.pipeline.history import recent_recommended_artists
 
@@ -431,7 +472,7 @@ def rank_candidates(
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -486,12 +527,15 @@ def rank_candidates_mix_prep(
     profiles: dict[str, ArtistProfile],
     settings,
     label_seed: list[Candidate] | None = None,
+    genre_affinity: dict[str, float] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score and section candidates for a mix-prep run.
     Returns (sections, label_artist_names).
     Same scoring as rank_candidates but uses two sections (top_picks, deep_cuts)
     with no per-genre cap — the genre has already been filtered upstream.
+
+    genre_affinity: see rank_candidates. None/empty → flat 1.0 multiplier.
     """
     from src.pipeline.history import recent_recommended_artists
 
@@ -504,7 +548,7 @@ def rank_candidates_mix_prep(
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")

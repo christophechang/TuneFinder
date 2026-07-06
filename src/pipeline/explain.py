@@ -21,7 +21,7 @@ from src.pipeline.dedup import (
 from src.pipeline.feedback import load_feedback
 from src.pipeline.history import build_history_keys, load_history
 from src.pipeline.pool import load_pool, pool_to_candidates
-from src.pipeline.profile import load_artist_profiles, load_known_tracks
+from src.pipeline.profile import load_artist_profiles, load_genre_affinity, load_known_tracks
 from src.pipeline.ranker import (
     _assign_sections,
     _build_genre_set,
@@ -60,6 +60,7 @@ def explain_track(selector: str, settings) -> str:
     source_items = load_source_items(settings.data_dir)
     known_keys = load_known_tracks(settings.data_dir)
     profiles = load_artist_profiles(settings.data_dir)
+    genre_affinity = load_genre_affinity(settings.data_dir)
     history = load_history(settings.data_dir)
     history_keys = build_history_keys(history)
     pool_records = load_pool(settings.data_dir)
@@ -193,7 +194,7 @@ def explain_track(selector: str, settings) -> str:
 
     # Single scoring pass
     for c in all_scored:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity)
 
     ranked = sorted(all_scored, key=lambda c: c.score, reverse=True)
 
@@ -207,7 +208,7 @@ def explain_track(selector: str, settings) -> str:
             hyp = copy.copy(target_candidate)
             hyp.signals = []
             hyp.score = 0.0
-            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights)
+            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity)
             target_scored = hyp
             hypothetical = True
         else:

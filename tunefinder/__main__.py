@@ -33,8 +33,10 @@ def cmd_build_profile(args):
     from src.fetchers.catalog import fetch_all_tracks
     from src.pipeline.profile import (
         build_artist_profiles,
+        build_genre_affinity,
         save_known_tracks,
         save_artist_profiles,
+        save_genre_affinity,
     )
     settings = load_settings()
     logger = get_logger(__name__)
@@ -44,11 +46,14 @@ def cmd_build_profile(args):
 
     logger.info("[build-profile] Building artist profiles...")
     profiles = build_artist_profiles(tracks)
+    genre_affinity = build_genre_affinity(tracks)
 
     save_known_tracks(tracks, settings.data_dir)
     save_artist_profiles(profiles, settings.data_dir)
+    save_genre_affinity(genre_affinity, settings.data_dir)
 
-    print(f"Profile built — {len(tracks)} known tracks, {len(profiles)} artists → {settings.data_dir}/")
+    print(f"Profile built — {len(tracks)} known tracks, {len(profiles)} artists, "
+          f"{len(genre_affinity)} genres → {settings.data_dir}/")
 
 
 def cmd_fetch_sources(args):
@@ -71,8 +76,8 @@ def cmd_run(args):
     from src.fetchers.catalog import fetch_all_tracks
     from src.fetchers import fetch_all_sources, save_source_items, archive_source_items
     from src.pipeline.profile import (
-        build_artist_profiles, build_known_track_keys,
-        save_known_tracks, save_artist_profiles,
+        build_artist_profiles, build_genre_affinity, build_known_track_keys,
+        save_known_tracks, save_artist_profiles, save_genre_affinity,
     )
     from src.pipeline.history import (
         load_history, build_history_keys, append_records, make_report_id,
@@ -100,8 +105,10 @@ def cmd_run(args):
     # 1. Refresh profile and known-track set
     tracks = fetch_all_tracks(settings)
     profiles = build_artist_profiles(tracks)
+    genre_affinity = build_genre_affinity(tracks)
     save_known_tracks(tracks, settings.data_dir)
     save_artist_profiles(profiles, settings.data_dir)
+    save_genre_affinity(genre_affinity, settings.data_dir)
     known_keys = build_known_track_keys(tracks)
 
     # 2. Load recommendation history and candidate pool
@@ -176,7 +183,9 @@ def cmd_run(args):
         return
 
     # 5. Rank and split into sections
-    sections, label_artists = rank_candidates(candidates, profiles, settings, label_seed=label_seed)
+    sections, label_artists = rank_candidates(
+        candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
+    )
 
     # 6. Generate report
     report_text = generate_report(sections, report_id, stats, settings, profiles=profiles, label_artists=label_artists)
@@ -275,8 +284,8 @@ def cmd_mix_prep(args):
     from src.fetchers.catalog import fetch_all_tracks
     from src.fetchers import fetch_all_sources
     from src.pipeline.profile import (
-        build_artist_profiles, build_known_track_keys,
-        save_known_tracks, save_artist_profiles,
+        build_artist_profiles, build_genre_affinity, build_known_track_keys,
+        save_known_tracks, save_artist_profiles, save_genre_affinity,
     )
     from src.pipeline.history import (
         load_mix_prep_history, build_history_keys, append_mix_prep_records, make_report_id,
@@ -304,8 +313,10 @@ def cmd_mix_prep(args):
     # 1. Refresh profile and known-track set
     tracks = fetch_all_tracks(settings)
     profiles = build_artist_profiles(tracks)
+    genre_affinity = build_genre_affinity(tracks)
     save_known_tracks(tracks, settings.data_dir)
     save_artist_profiles(profiles, settings.data_dir)
+    save_genre_affinity(genre_affinity, settings.data_dir)
     known_keys = build_known_track_keys(tracks)
 
     # 2. Load mix-prep history (separate from weekly history)
@@ -363,7 +374,9 @@ def cmd_mix_prep(args):
         return
 
     # 5. Rank and section
-    sections, label_artists = rank_candidates_mix_prep(candidates, profiles, settings, label_seed=label_seed)
+    sections, label_artists = rank_candidates_mix_prep(
+        candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
+    )
 
     # 6. Generate report
     report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles, label_artists=label_artists)

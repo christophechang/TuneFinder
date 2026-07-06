@@ -258,6 +258,8 @@ scoring:
   # Genre matching
   w_genre: 0.5                         # Score per matching genre tag
   genre_match_cap: 2                   # Max genre tags that contribute to score
+  # genre_affinity_min: 0.5            # Multiplier floor — fringe genres (or genres you don't play), from data/genre_affinity.json
+  # genre_affinity_max: 2.0            # Multiplier ceiling — your most-played genre(s)
 
   # Freshness
   w_fresh: 0.5                         # Bonus for recent releases

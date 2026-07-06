@@ -45,12 +45,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | `cross_source` | +1.0 to +2.0 | Scales with source count (cap 4) — only credited when seen on 2+ |
 | `chart_position` | +0–1.5 | Linear decay from #1 (Beatport, Traxsource, Mixupload when enabled) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
-| `genre_match` | +0.5 per tag (cap 2) | Soft match against catalog-augmented genre set; `electronic` excluded (too broad); capped at 2 tags to prevent cross-source tag inflation |
+| `genre_match` | +0.5 per tag (cap 2), scaled ×0.5–×2.0 by genre affinity | Soft match against catalog-augmented genre set; `electronic` excluded (too broad); capped at 2 tags (highest-affinity tags counted first) to prevent cross-source tag inflation |
 | `fresh_release` | +0.5 | Released within 7 days |
 | `recent_recommendation` | −0.75 | Artist appeared in weekly or mix-prep history within last 4 weeks |
 | `pool_age` | −0.25 per week (cap −1.5) | Carried over from the persistent pool — older entries lose ground |
 
 Every candidate also gets two sub-totals alongside the combined score: **familiarity** (`known_artist`, `recurring_artist`, `recent_recommendation`) and **discovery** (`label_match`, `cross_source`, `genre_match`, `chart_position`, `fresh_release`, `bandcamp_discovery`). Top Picks, Label Watch, and Artist Watch still rank by the combined score — only Wildcards selection reads the discovery axis (see below). The `pool_age` penalty is deducted from the combined total only; both axes stay gross.
+
+`genre_match` is scaled by genre affinity: `tunefinder build-profile` computes each genre's share of your mix catalogue (weighted by how often each track recurs) into `data/genre_affinity.json`, and every matching tag's contribution is multiplied by that share relative to your most-played genre, clamped to `scoring.genre_affinity_min`–`scoring.genre_affinity_max` (default 0.5–2.0). So a genre you play constantly scores near the max multiplier per tag, a genre you've barely touched scores near the floor, and a genre with no data at all (missing `genre_affinity.json`) falls back to a flat ×1.0 — today's behaviour.
 
 ## Report sections
 
@@ -257,6 +259,7 @@ Edit `config/settings.yaml` to:
 - `alerts.source_drop_threshold_pct` (default `50`) — alert when a source's count falls below this % of its trailing-4-run average
 - `alerts.min_history_runs` (default `2`) — prior runs required per source before drop detection activates (cold-start guard)
 - **Scoring weights** — the `scoring:` block lets you tune all scoring constants (e.g. `w_known_artist`, `w_recurring`, `w_label_base`) without code changes. Omitted keys use defaults matching the weights listed in "Scoring signals" above.
+- **Genre affinity** — `scoring.genre_affinity_min` / `scoring.genre_affinity_max` (default `0.5`/`2.0`) set the multiplier range `genre_match` is scaled by, derived from `data/genre_affinity.json` (rebuilt on every `build-profile`, `run`, and `mix-prep`). Delete the file to fall back to a flat ×1.0 multiplier.
 
 Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
 

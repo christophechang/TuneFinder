@@ -579,3 +579,123 @@ def test_wildcards_combined_axis_reproduces_pre_p2_behaviour():
     # Combined axis: reproduces old total-score-ordered remainder, including
     # the familiar candidate — proof the two modes genuinely diverge.
     assert [c.artist for c in combined_sections["wildcards"]] == ["KnownExtra", "B", "A"]
+
+
+# ---------------------------------------------------------------------------
+# Genre affinity scaling (P3): genre_match scaled by corpus-level genre share
+# ---------------------------------------------------------------------------
+
+def test_genre_affinity_none_reproduces_old_flat_score():
+    """genre_affinity=None (the default) must reproduce today's behaviour exactly."""
+    c = _candidate(genre_tags=["house", "techno", "dnb"])
+    _score(c, {}, set(), {}, _build_genre_set({}), genre_affinity=None)
+    assert c.score == 1.0  # 2 tags capped * 0.5, multiplier 1.0 — same as pre-P3
+
+
+def test_genre_affinity_empty_dict_reproduces_old_flat_score():
+    """An empty affinity map (e.g. no genre data yet) is treated the same as None."""
+    c = _candidate(genre_tags=["house"])
+    _score(c, {}, set(), {}, _build_genre_set({}), genre_affinity={})
+    assert c.score == 0.5
+
+
+def test_genre_affinity_dominant_genre_scales_to_max():
+    """The single genre in the affinity map is trivially the dominant one —
+    its multiplier hits genre_affinity_max (2.0 by default)."""
+    c = _candidate(genre_tags=["dnb"])
+    _score(c, {}, set(), {}, _build_genre_set({}), genre_affinity={"dnb": 1.0})
+    assert c.score == pytest.approx(0.5 * 2.0)  # w_genre * genre_affinity_max
+
+
+def test_genre_affinity_tag_absent_from_map_gets_floor_multiplier():
+    """A genre you don't play at all (absent from the affinity map, unlike a
+    merely fringe one) scores at genre_affinity_min — the floor."""
+    c = _candidate(genre_tags=["house"])
+    _score(c, {}, set(), {}, _build_genre_set({}), genre_affinity={"dnb": 1.0})
+    assert c.score == pytest.approx(0.5 * 0.5)  # w_genre * genre_affinity_min
+
+
+def test_genre_affinity_custom_min_clamps_low_share_tag():
+    """A present-but-fringe tag whose raw multiplier would fall under a custom
+    (raised) floor gets clamped to genre_affinity_min."""
+    weights = ScoringWeights(genre_affinity_min=0.8, genre_affinity_max=2.0)
+    c = _candidate(genre_tags=["house"])
+    _score(
+        c, {}, set(), {}, _build_genre_set({}),
+        weights=weights, genre_affinity={"dnb": 0.9, "house": 0.1},
+    )
+    # raw = 0.5 + 1.5 * (0.1/0.9) = 0.6667 → clamped up to 0.8
+    assert c.score == pytest.approx(0.5 * 0.8)
+
+
+def test_genre_affinity_custom_max_clamps_dominant_tag():
+    weights = ScoringWeights(genre_affinity_max=1.5)
+    c = _candidate(genre_tags=["dnb"])
+    _score(c, {}, set(), {}, _build_genre_set({}), weights=weights, genre_affinity={"dnb": 1.0})
+    # raw = 2.0 → clamped down to 1.5
+    assert c.score == pytest.approx(0.5 * 1.5)
+
+
+def test_genre_affinity_cap_counts_highest_multiplier_tags_not_first_n():
+    """When more tags match than genre_match_cap, the highest-affinity tags
+    are counted, regardless of their position in genre_tags."""
+    affinity = {"dnb": 0.6, "house": 0.3, "techno": 0.1}
+    # Deliberately ordered worst-affinity-first to prove selection isn't by position.
+    c = _candidate(genre_tags=["techno", "house", "dnb"])
+    _score(c, {}, set(), {}, _build_genre_set({}), genre_affinity=affinity)
+    # dnb: share/max=1.0 → raw=2.0 (clamped at max)
+    # house: share/max=0.5 → raw=1.25
+    # techno: share/max=1/6 → raw=0.75 — excluded by the cap (2 tags)
+    expected = 0.5 * 2.0 + 0.5 * 1.25
+    assert c.score == pytest.approx(expected, abs=0.01)
+    # Reason text still lists all matching tags (display only, unaffected by the cap)
+    genre_sig = next(s for s in c.signals if s.code == "genre_match")
+    assert "techno" in genre_sig.explanation
+    assert "house" in genre_sig.explanation
+    assert "dnb" in genre_sig.explanation
+
+
+# ---------------------------------------------------------------------------
+# rank_candidates / rank_candidates_mix_prep — genre_affinity threading
+# ---------------------------------------------------------------------------
+
+def test_rank_candidates_threads_genre_affinity_through_to_score(tmp_path):
+    from src.pipeline.ranker import rank_candidates
+
+    class _RankSettings(_MockSettings):
+        data_dir = str(tmp_path)
+
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights()
+
+    candidates_with = [_candidate(artist="X", title="T1", genre_tags=["dnb"])]
+    candidates_without = [_candidate(artist="X", title="T1", genre_tags=["dnb"])]
+
+    rank_candidates(candidates_with, {}, _RankSettings(), genre_affinity={"dnb": 1.0})
+    rank_candidates(candidates_without, {}, _RankSettings(), genre_affinity=None)
+
+    # Same candidate, dominant-genre affinity present vs. absent — score must differ,
+    # proving genre_affinity actually reaches _score through the public entry point.
+    assert candidates_with[0].score > candidates_without[0].score
+    assert candidates_with[0].score == pytest.approx(1.0)   # 0.5 * genre_affinity_max
+    assert candidates_without[0].score == pytest.approx(0.5)  # 0.5 * 1.0 (flat)
+
+
+def test_rank_candidates_mix_prep_threads_genre_affinity_through_to_score(tmp_path):
+    from src.pipeline.ranker import rank_candidates_mix_prep
+
+    class _RankSettings(_MockSettings):
+        data_dir = str(tmp_path)
+
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights()
+
+    candidates_with = [_candidate(artist="X", title="T1", genre_tags=["dnb"])]
+    candidates_without = [_candidate(artist="X", title="T1", genre_tags=["dnb"])]
+
+    rank_candidates_mix_prep(candidates_with, {}, _RankSettings(), genre_affinity={"dnb": 1.0})
+    rank_candidates_mix_prep(candidates_without, {}, _RankSettings(), genre_affinity=None)
+
+    assert candidates_with[0].score > candidates_without[0].score
