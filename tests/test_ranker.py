@@ -1044,3 +1044,99 @@ def test_rank_candidates_scene_adjacent_via_current_corpus(tmp_path):
     scene_sig = next(s for s in unknown.signals if s.code == "scene_adjacent")
     assert scene_sig.explanation == "Label-mate of Calibre on Signature."
     assert not any(s.code == "scene_adjacent" for s in known.signals)
+
+
+# ---------------------------------------------------------------------------
+# BPM/key-aware mix-prep demotion mechanics (issue #8)
+# ---------------------------------------------------------------------------
+
+def test_assign_sections_mix_prep_no_demoted_keys_reproduces_old_order():
+    high = _scored_candidate(5.0, artist="High", title="T1")
+    low = _scored_candidate(1.0, artist="Low", title="T2")
+    ranked = [high, low]
+    sections = _assign_sections_mix_prep(ranked, _MockSettings())
+    assert sections["top_picks"] == [high, low]
+
+
+def test_assign_sections_mix_prep_demotes_below_all_matches():
+    """A match with a LOWER score must still outrank a demoted (BPM/key-unknown)
+    candidate with a HIGHER score — demotion overrides score ordering entirely."""
+    demoted_high_score = _scored_candidate(9.0, artist="Unknown BPM", title="T1")
+    match_low_score = _scored_candidate(1.0, artist="Known BPM", title="T2")
+    ranked = sorted([demoted_high_score, match_low_score], key=lambda c: -c.score)
+    demoted_keys = {demoted_high_score.key}
+
+    sections = _assign_sections_mix_prep(ranked, _MockSettings(), demoted_keys=demoted_keys)
+
+    picks = sections["top_picks"]
+    assert picks == [match_low_score, demoted_high_score]
+
+
+def test_assign_sections_mix_prep_demoted_keys_empty_set_no_effect():
+    high = _scored_candidate(5.0, artist="High", title="T1")
+    low = _scored_candidate(1.0, artist="Low", title="T2")
+    ranked = [high, low]
+    sections = _assign_sections_mix_prep(ranked, _MockSettings(), demoted_keys=set())
+    assert sections["top_picks"] == [high, low]
+
+
+def test_assign_sections_mix_prep_preserves_score_order_within_each_group():
+    a = _scored_candidate(5.0, artist="A", title="T1")
+    b = _scored_candidate(4.0, artist="B", title="T2")
+    demoted_a = _scored_candidate(9.0, artist="C", title="T3")
+    demoted_b = _scored_candidate(8.0, artist="D", title="T4")
+    ranked = sorted([a, b, demoted_a, demoted_b], key=lambda c: -c.score)
+    demoted_keys = {demoted_a.key, demoted_b.key}
+
+    sections = _assign_sections_mix_prep(ranked, _MockSettings(), demoted_keys=demoted_keys)
+
+    picks = sections["top_picks"]
+    assert picks == [a, b, demoted_a, demoted_b]
+
+
+def test_rank_candidates_mix_prep_threads_demoted_keys_through_to_sections(tmp_path):
+    from src.pipeline.ranker import rank_candidates_mix_prep
+
+    class _RankSettings(_MockSettings):
+        data_dir = str(tmp_path)
+        pipeline_section_min_score = 0.0
+
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights()
+
+    # known_artist scoring gives "Known" a real score edge; "Unknown" scores 0.
+    # Demoting "Known" (as if its BPM/key were unspecified) must still push
+    # it below "Unknown" in the final section order.
+    profiles = {"Known": ArtistProfile(name="Known", play_count=3)}
+    known = _candidate(artist="Known", title="T1")
+    unknown = _candidate(artist="Unknown", title="T2")
+    candidates = [known, unknown]
+
+    sections, _ = rank_candidates_mix_prep(
+        candidates, profiles, _RankSettings(), demoted_keys={known.key},
+    )
+
+    assert sections["top_picks"] == [unknown, known]
+
+
+def test_rank_candidates_mix_prep_no_demoted_keys_zero_behaviour_change(tmp_path):
+    from src.pipeline.ranker import rank_candidates_mix_prep
+
+    class _RankSettings(_MockSettings):
+        data_dir = str(tmp_path)
+        pipeline_section_min_score = 0.0
+
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights()
+
+    profiles = {"Known": ArtistProfile(name="Known", play_count=3)}
+    known = _candidate(artist="Known", title="T1")
+    unknown = _candidate(artist="Unknown", title="T2")
+    candidates = [known, unknown]
+
+    sections, _ = rank_candidates_mix_prep(candidates, profiles, _RankSettings())
+
+    # No demoted_keys passed — plain score order, known_artist candidate wins.
+    assert sections["top_picks"] == [known, unknown]

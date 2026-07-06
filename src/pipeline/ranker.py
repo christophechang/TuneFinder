@@ -658,7 +658,15 @@ def rank_candidates(
 def _assign_sections_mix_prep(
     ranked: list[Candidate],
     settings,
+    demoted_keys: set[str] | None = None,
 ) -> dict[str, list[Candidate]]:
+    """
+    demoted_keys: candidate `.key` values (issue #8 — BPM/key filters active)
+    that must sort BELOW every non-demoted candidate in both sections,
+    regardless of score. None (the default) reproduces today's plain
+    score-descending order exactly — no behaviour change when mix-prep's new
+    --bpm/--key filters aren't used.
+    """
     top_n = settings.pipeline_mix_prep_top_picks_count
     deep_n = settings.pipeline_mix_prep_deep_cuts_count
     min_score = settings.pipeline_section_min_score
@@ -667,11 +675,19 @@ def _assign_sections_mix_prep(
     MAX_PER_ARTIST = 2
     MAX_PER_RELEASE = 2
 
+    # `ranked` arrives sorted by score descending; a stable sort on
+    # (is_demoted, ) preserves that score order within each group while
+    # pushing demoted (BPM/key-unknown) candidates below every match.
+    order = (
+        sorted(ranked, key=lambda c: c.key in demoted_keys)
+        if demoted_keys else ranked
+    )
+
     def pick(n: int) -> list[Candidate]:
         artist_counts: dict[str, int] = {}
         release_counts: dict[str, int] = {}
         result = []
-        for c in ranked:
+        for c in order:
             if id(c) in used:
                 continue
             if c.score < min_score:
@@ -704,6 +720,7 @@ def rank_candidates_mix_prep(
     label_seed: list[Candidate] | None = None,
     genre_affinity: dict[str, float] | None = None,
     label_memory: tuple[dict[str, int], dict[str, list[str]]] | None = None,
+    demoted_keys: set[str] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score and section candidates for a mix-prep run.
@@ -713,6 +730,11 @@ def rank_candidates_mix_prep(
 
     genre_affinity: see rank_candidates. None/empty → flat 1.0 multiplier.
     label_memory: see rank_candidates. None reproduces per-run-only behaviour.
+
+    demoted_keys: BPM/key-unknown candidate `.key`s (issue #8,
+    src/pipeline/harmonic.partition_by_harmonic) to sort below every matching
+    candidate in `_assign_sections_mix_prep`, without changing their score.
+    None (default) — today's behaviour, unaffected by this feature.
     """
     from src.pipeline.history import recent_recommended_artists
 
@@ -736,6 +758,6 @@ def rank_candidates_mix_prep(
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
 
-    return _assign_sections_mix_prep(ranked, settings), label_artist_names
+    return _assign_sections_mix_prep(ranked, settings, demoted_keys=demoted_keys), label_artist_names
 
 

@@ -162,6 +162,29 @@ Results are posted to the Discord `#mix-prep` channel. Mix-prep uses its own his
 
 Pool candidates injected into mix-prep are exempt from the release-date window (same as the weekly run). The pool-age penalty handles staleness; mix-prep benefits most from older pool gems.
 
+### BPM/key filtering
+
+`mix-prep` can narrow results to a tempo range and/or a harmonically compatible key — the facts a DJ actually filters by when building a set. BPM and key metadata come from `raw_metadata` (Volumo: `bpm` + `keysign`; Beatport: `bpm`; Mixupload: `bpm` + `key`) — coverage is partial across sources, so tracks with unknown BPM/key are **kept but demoted** below matching tracks, never dropped.
+
+```bash
+# Only 170-180 BPM dnb
+./venv/bin/python -m tunefinder mix-prep dnb --bpm 170-180
+
+# 170-180 BPM AND harmonically compatible with 8A (A minor)
+./venv/bin/python -m tunefinder mix-prep dnb --bpm 170-180 --key 8A
+
+# Musical notation also works for --key: Am, C major, F# minor, G#m...
+./venv/bin/python -m tunefinder mix-prep house --key "C major"
+
+# Disable half/double-time BPM matching (on by default — see below)
+./venv/bin/python -m tunefinder mix-prep dnb --bpm 170-180 --no-bpm-flex
+```
+
+- `--bpm MIN-MAX` — numeric range (e.g. `170-180`); a track whose BPM is exactly double or half the range also matches by default (e.g. an 85 BPM track matches `170-180`) — pass `--no-bpm-flex` to require an exact in-range match.
+- `--key CODE` — accepts Camelot notation (`8A`, `12B`) or musical key names (`Am`, `Abm`, `G#m`, `C major`, `F# minor`, unicode ♯/♭ all work); enharmonic equivalents (e.g. `G#m` / `Abm`) resolve to the same code. A track's key is considered compatible if it's an exact match, adjacent on the Camelot wheel (±1, wrapping 12↔1), or the same-numbered relative major/minor.
+- Only tracks with a **known** BPM/key that actually *fails* a specified filter are dropped. Unknown values for an active filter never drop a track — they're kept and sorted below every matching track in both Top Picks and Deep Cuts.
+- The report header shows which filters were active, and matched track lines show their BPM/key inline; with no `--bpm`/`--key`, the report is unchanged from before this feature.
+
 ## Genre coverage
 
 Each internal genre maps to one or more genre feeds on each source. Sources not listed for a genre don't contribute to that genre's results.
@@ -240,6 +263,9 @@ VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without th
 
 # Dry-run mix-prep (full pipeline, no Discord posts or history writes)
 ./venv/bin/python -m tunefinder mix-prep house --dry-run
+
+# Mix-prep narrowed by BPM range and Camelot-compatible key
+./venv/bin/python -m tunefinder mix-prep dnb --bpm 170-180 --key 8A
 
 # Record an outcome for a recommended track (no Discord env vars needed)
 ./venv/bin/python -m tunefinder mark 3 bought          # by track number (latest weekly report)
@@ -326,6 +352,7 @@ src/
     history.py         # Recommendation history store (weekly + mix-prep)
     pool.py            # Persistent candidate pool across runs
     labels.py          # Persistent artist<->label affinity memory (data/label_affinity.json)
+    harmonic.py        # BPM/key normalisation + Camelot compatibility (mix-prep --bpm/--key)
     reasons.py         # Deterministic reason composer
     report.py          # Deterministic report renderer (weekly + mix-prep)
     feedback.py        # Outcome marking and stats aggregation

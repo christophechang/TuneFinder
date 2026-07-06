@@ -11,6 +11,7 @@ from typing import Optional
 
 from src.logger import get_logger
 from src.models import ArtistProfile, Candidate
+from src.pipeline.harmonic import candidate_bpm, candidate_camelot
 from src.pipeline.profile import _split_artists, resolve_profile
 from src.pipeline.reasons import compose_reason
 
@@ -179,6 +180,8 @@ def _build_footer(report_id: str, stats: dict, recommended_count: int | None = N
         lines.append(f"🎚️ After genre filter: **{stats['after_genre']}**")
     if "pool_injected" in stats:
         lines.append(f"♻️ Pool injected: **{stats['pool_injected']}**")
+    if "after_harmonic" in stats:
+        lines.append(f"🎚️ After BPM/key filter: **{stats['after_harmonic']}**")
     if recommended_count is not None:
         lines.append(f"🎯 Tracks in report: **{recommended_count}**")
     lines.append(f"`Report ID: {report_id}`")
@@ -194,24 +197,42 @@ def _build_footer(report_id: str, stats: dict, recommended_count: int | None = N
     return "\n".join(lines)
 
 
-def _build_mix_prep_header(report_id: str, today: str, genre: str) -> str:
+def _build_mix_prep_header(report_id: str, today: str, genre: str, filters_desc: str | None = None) -> str:
     display_genre = genre.upper() if genre == "ukg" else genre.replace("-", " ").title()
-    return "\n".join([
+    lines = [
         f"🎛️ {display_genre} Mix Prep Report",
         f"Report ID: {report_id}",
         f"Date: {today}",
-    ])
+    ]
+    if filters_desc:
+        lines.append(filters_desc)
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
 # Track line formatter
 # ---------------------------------------------------------------------------
 
-def _track_line(n: int, c: Candidate) -> str:
+def _track_line(n: int, c: Candidate, show_harmonic: bool = False) -> str:
     label_str = f" [{c.label}]" if c.label else ""
     source_str = f" [{c.source.title()}]"
     link_str = f" → [Listen](<{c.link}>)" if c.link else ""
-    return f"{n}. **{c.artist} — {c.title}**{label_str}{source_str}{link_str}"
+    harmonic_str = ""
+    if show_harmonic:
+        # Mix-prep only (issue #8), and only when the caller's --bpm/--key
+        # filters are active — the weekly report and filter-less mix-prep
+        # runs never pass show_harmonic=True, so their track lines (and the
+        # existing snapshot) are byte-for-byte unchanged.
+        parts = []
+        bpm = candidate_bpm(c)
+        if bpm is not None:
+            parts.append(f"{bpm:g} BPM")
+        camelot = candidate_camelot(c)
+        if camelot is not None:
+            parts.append(camelot)
+        if parts:
+            harmonic_str = " · " + " · ".join(parts)
+    return f"{n}. **{c.artist} — {c.title}**{label_str}{source_str}{link_str}{harmonic_str}"
 
 
 # ---------------------------------------------------------------------------
@@ -324,15 +345,25 @@ def generate_mix_prep_report(
     label_artists: dict[str, list[str]] | None = None,
     today: Optional[date] = None,
     aliases: dict[str, str] | None = None,
+    filters_desc: str | None = None,
 ) -> str:
-    """Generate a Discord-formatted mix-prep report focused on a single genre."""
+    """Generate a Discord-formatted mix-prep report focused on a single genre.
+
+    filters_desc: human-readable summary of active --bpm/--key filters
+    (issue #8, built by the CLI in tunefinder/__main__.cmd_mix_prep), e.g.
+    "Filters: BPM 170–180 (±half/double) · key 8A±compat". None (default,
+    the case for every existing caller/snapshot) omits the header line
+    entirely and keeps track lines free of BPM/key suffixes — no filters
+    active means byte-for-byte the same report as before this feature.
+    """
     if today is None:
         today = datetime.now(timezone.utc).date()
 
     profiles_lower = {k.lower(): v for k, v in (profiles or {}).items()}
     today_str = today.strftime("%-d %B %Y")
     stats_line = _format_mix_prep_stats(sections)
-    header = _build_mix_prep_header(report_id, today_str, genre)
+    header = _build_mix_prep_header(report_id, today_str, genre, filters_desc=filters_desc)
+    show_harmonic = filters_desc is not None
 
     lines = [header, ""]
     if stats_line:
@@ -344,7 +375,7 @@ def generate_mix_prep_report(
     def _render_track(c: Candidate) -> list[str]:
         track_counter[0] += 1
         reason = compose_reason(c, profiles_lower, label_artists=label_artists, today=today, aliases=aliases)
-        return [_track_line(track_counter[0], c), f"> {reason}"]
+        return [_track_line(track_counter[0], c, show_harmonic=show_harmonic), f"> {reason}"]
 
     top_picks = sections.get("top_picks", [])
     if top_picks:
