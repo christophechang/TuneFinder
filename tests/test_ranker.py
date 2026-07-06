@@ -200,6 +200,10 @@ class _MockSettings:
     pipeline_mix_prep_deep_cuts_count = 5
     pipeline_section_min_score = 1.0
 
+    @staticmethod
+    def scoring_weights():
+        return ScoringWeights()
+
 
 def _scored_candidate(score, artist="X", title="T", source="s", **kw):
     c = _candidate(artist=artist, title=title, source=source, **kw)
@@ -441,3 +445,137 @@ def test_scoring_weights_is_frozen():
     w = ScoringWeights()
     with pytest.raises(Exception):  # dataclass frozen raises
         w.w_known_artist = 5.0
+
+
+def test_scoring_weights_wildcards_defaults():
+    w = ScoringWeights()
+    assert w.wildcards_axis == "discovery"
+    assert w.wildcards_max_familiarity == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Two-axis scoring (P2): familiarity vs discovery
+# ---------------------------------------------------------------------------
+
+def test_axis_accumulation_familiarity_and_discovery_sum_to_total():
+    """Known-artist + label + chart candidate: familiarity carries the artist
+    signals, discovery carries label/chart, and the total is unchanged."""
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=4)}
+    candidates = [_candidate(artist="Sully", label="Astrophonica")]
+    _, counts, _ = _build_relevant_labels(candidates, profiles_lower)
+
+    c = _candidate(artist="Sully", label="Astrophonica", raw_metadata={"chart_position": 10})
+    _score(c, profiles_lower, {"astrophonica"}, counts, _build_genre_set(profiles_lower))
+
+    # familiarity: known_artist (4 * 3.0 = 12.0, capped at 10.0) + recurring (+2.0)
+    assert c.familiarity_score == 12.0
+    # discovery: label_match (1.5 + 0.5*1 = 2.0) + chart_position (1.5 * (1 - 9/100))
+    assert c.discovery_score > 0
+    assert any(s.code == "label_match" for s in c.signals)
+    assert any(s.code == "chart_position" for s in c.signals)
+    # total stays the sum of the two axes (rounding tolerance from independent
+    # per-axis rounding vs. the single unrounded running total)
+    assert c.score == pytest.approx(c.familiarity_score + c.discovery_score, abs=0.01)
+
+
+def test_axis_accumulation_unknown_artist_has_zero_familiarity():
+    c = _candidate(artist="Unknown", genre_tags=["house"], raw_metadata={"chart_position": 1})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert c.familiarity_score == 0.0
+    assert c.discovery_score > 0
+    assert c.score == c.discovery_score
+
+
+def test_axis_accumulation_pool_age_hits_total_only():
+    """pool_age is a queueing artefact, not familiarity or discovery merit —
+    it is subtracted from the combined total only; both axes stay gross."""
+    added = (datetime.now(timezone.utc) - timedelta(weeks=3)).isoformat()
+    c = _candidate(artist="Unknown", genre_tags=["house"], pool_added_at=added)
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert any(s.code == "pool_age" for s in c.signals)
+    assert c.discovery_score == 0.5       # genre_match, ungrossed by pool_age
+    assert c.familiarity_score == 0.0
+    assert c.score == -0.25               # 0.5 (genre) - 0.75 (3 weeks pool age)
+
+
+# --- Wildcards axis selection ---
+
+def _scored_with_axes(score, familiarity, discovery, artist="X", title="T", **kw):
+    c = _scored_candidate(score, artist=artist, title=title, **kw)
+    c.familiarity_score = familiarity
+    c.discovery_score = discovery
+    return c
+
+
+def test_wildcards_discovery_mode_orders_by_discovery_and_excludes_familiar():
+    # Fill top_picks (cap=5) with distinct-artist, pure-familiarity fillers so
+    # the interesting candidates below survive to be examined for wildcards.
+    fillers = [
+        _scored_with_axes(20.0, familiarity=20.0, discovery=0.0, artist=f"F{i}", title=f"Filler{i}")
+        for i in range(5)
+    ]
+    # Known artist track: decent discovery (clears the floor) but familiar —
+    # must NOT land in wildcards under the discovery axis.
+    known_extra = _scored_with_axes(5.0, familiarity=5.0, discovery=1.5, artist="KnownExtra", title="TKE")
+    # Two genuine discovery candidates: unknown artists, no familiarity at all.
+    disco_a = _scored_with_axes(2.0, familiarity=0.0, discovery=2.0, artist="A", title="TA")
+    disco_b = _scored_with_axes(3.0, familiarity=0.0, discovery=3.0, artist="B", title="TB")
+
+    ranked = fillers + [known_extra, disco_b, disco_a]
+    trace: dict = {}
+    sections = _assign_sections(ranked, _MockSettings(), _build_genre_set({}), trace=trace)
+
+    wildcards = sections["wildcards"]
+    assert [c.artist for c in wildcards] == ["B", "A"]
+    assert all(c.familiarity_score <= 0.0 for c in wildcards)
+    assert known_extra not in wildcards
+    reasons = [r for sname, r in trace.get(id(known_extra), []) if sname == "wildcards"]
+    assert any("familiarity too high for wildcards" in r for r in reasons)
+
+
+def test_wildcards_floor_applies_to_discovery_axis_not_total():
+    """A candidate can have a high total score yet a discovery score below the
+    floor — in discovery mode it must be excluded on discovery grounds, not
+    slip in on its (familiarity-heavy) total."""
+    fillers = [
+        _scored_with_axes(20.0 - i, familiarity=20.0, discovery=0.0, artist=f"F{i}", title=f"Filler{i}")
+        for i in range(5)
+    ]
+    target = _scored_with_axes(12.0, familiarity=12.0, discovery=0.5, artist="X", title="T")
+
+    ranked = fillers + [target]
+    trace: dict = {}
+    sections = _assign_sections(ranked, _MockSettings(), _build_genre_set({}), trace=trace)
+
+    assert target not in sections["wildcards"]
+    reasons = [r for sname, r in trace.get(id(target), []) if sname == "wildcards"]
+    assert any("below floor 1.0 (discovery axis)" in r for r in reasons)
+
+
+def test_wildcards_combined_axis_reproduces_pre_p2_behaviour():
+    """wildcards_axis='combined' ranks Wildcards by total score, exactly the
+    pre-two-axis behaviour — the two axes must produce different Wildcards
+    for the same input to prove this isn't a no-op."""
+    class _CombinedSettings(_MockSettings):
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights(wildcards_axis="combined")
+
+    fillers = [
+        _scored_with_axes(20.0, familiarity=20.0, discovery=0.0, artist=f"F{i}", title=f"Filler{i}")
+        for i in range(5)
+    ]
+    known_extra = _scored_with_axes(5.0, familiarity=5.0, discovery=1.5, artist="KnownExtra", title="TKE")
+    disco_a = _scored_with_axes(2.0, familiarity=0.0, discovery=2.0, artist="A", title="TA")
+    disco_b = _scored_with_axes(3.0, familiarity=0.0, discovery=3.0, artist="B", title="TB")
+
+    ranked = fillers + [known_extra, disco_b, disco_a]
+
+    discovery_sections = _assign_sections(ranked, _MockSettings(), _build_genre_set({}))
+    combined_sections = _assign_sections(ranked, _CombinedSettings(), _build_genre_set({}))
+
+    # Discovery axis (default): known_extra excluded, ordered by discovery_score.
+    assert [c.artist for c in discovery_sections["wildcards"]] == ["B", "A"]
+    # Combined axis: reproduces old total-score-ordered remainder, including
+    # the familiar candidate — proof the two modes genuinely diverge.
+    assert [c.artist for c in combined_sections["wildcards"]] == ["KnownExtra", "B", "A"]

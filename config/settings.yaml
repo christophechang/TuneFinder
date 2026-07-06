@@ -275,6 +275,11 @@ scoring:
   w_pool_age_per_week: 0.25            # Penalty per week in candidate pool
   pool_age_penalty_max: 1.5            # Cap total pool-age penalty
 
+  # Wildcards axis (two-axis scoring) — Wildcards is selected separately from
+  # Top Picks/Label Watch/Artist Watch, which always rank by the combined score above.
+  wildcards_axis: discovery             # "discovery" (rank Wildcards by discovery_score only) | "combined" (pre-v0.8 behaviour: rank by total score)
+  wildcards_max_familiarity: 0.0        # Wildcards require familiarity_score <= this value when axis is "discovery"
+
 data_dir: data
 
 testing:

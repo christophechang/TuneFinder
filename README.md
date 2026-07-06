@@ -50,12 +50,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | `recent_recommendation` | −0.75 | Artist appeared in weekly or mix-prep history within last 4 weeks |
 | `pool_age` | −0.25 per week (cap −1.5) | Carried over from the persistent pool — older entries lose ground |
 
+Every candidate also gets two sub-totals alongside the combined score: **familiarity** (`known_artist`, `recurring_artist`, `recent_recommendation`) and **discovery** (`label_match`, `cross_source`, `genre_match`, `chart_position`, `fresh_release`, `bandcamp_discovery`). Top Picks, Label Watch, and Artist Watch still rank by the combined score — only Wildcards selection reads the discovery axis (see below). The `pool_age` penalty is deducted from the combined total only; both axes stay gross.
+
 ## Report sections
 
 - **Top Picks** — highest overall score, any signal type
 - **Label Watch** — releases on labels connected to artists you play
 - **Artist Watch** — new material from artists already in your mixes
-- **Wildcards** — interesting outliers from the remaining pool
+- **Wildcards** — genuine discovery channel: ranked by discovery score alone (not the combined score), and excludes anything with meaningful familiarity (`scoring.wildcards_max_familiarity`, default `0.0`) — no known-artist overflow. Set `scoring.wildcards_axis: combined` to restore the pre-v0.8 behaviour of ranking Wildcards by the combined score like the other sections.
 
 Each track line includes a source tag (`[Beatport]`, `[Bandcamp]`, etc.) so you can see at a glance where each recommendation came from.
 

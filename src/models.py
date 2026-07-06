@@ -89,6 +89,8 @@ class Candidate:
     release_name: Optional[str] = None
     signals: list[RecommendationSignal] = field(default_factory=list)
     score: float = 0.0
+    familiarity_score: float = 0.0  # known_artist / recurring_artist / recent_recommendation axis
+    discovery_score: float = 0.0    # label/cross_source/genre/chart/fresh/bandcamp axis
     genre_tags: list[str] = field(default_factory=list)
     raw_metadata: dict = field(default_factory=dict)
     pool_added_at: Optional[str] = None

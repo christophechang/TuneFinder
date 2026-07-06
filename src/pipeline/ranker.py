@@ -44,6 +44,9 @@ class ScoringWeights:
     w_bandcamp: float = 1.0          # discovery bonus for Bandcamp (no chart data available)
     max_artist_score: float = 10.0   # cap so one mega-artist doesn't dominate
     recurring_threshold: int = 3     # play_count needed to earn the recurring bonus
+    # --- Two-axis scoring (Wildcards selection) ---
+    wildcards_axis: str = "discovery"        # "discovery" (rank by discovery_score only) | "combined" (pre-P2 behaviour: rank by total score)
+    wildcards_max_familiarity: float = 0.0   # in "discovery" mode, wildcards require familiarity_score <= this
 
 
 _GENRE_AUGMENT_MIN_ARTISTS = 3
@@ -119,8 +122,13 @@ def _score(
         weights = ScoringWeights()
 
     score = 0.0
+    # Two-axis scoring (P2): the same signals feed a familiarity sub-total and a
+    # discovery sub-total, in addition to the unchanged combined `score`. Used to
+    # pick Wildcards by discovery merit alone instead of leftover total score.
+    familiarity = 0.0
+    discovery = 0.0
 
-    # --- Artist signals ---
+    # --- Artist signals (familiarity axis) ---
     artist_score = 0.0
     best_play_count = 0
     matched: list[str] = []
@@ -135,6 +143,7 @@ def _score(
     if matched:
         artist_score = min(artist_score, weights.max_artist_score)
         score += artist_score
+        familiarity += artist_score
         names = ", ".join(matched[:2])
         c.signals.append(RecommendationSignal(
             code="known_artist",
@@ -143,6 +152,7 @@ def _score(
 
         if best_play_count >= weights.recurring_threshold:
             score += weights.w_recurring
+            familiarity += weights.w_recurring
             c.signals.append(RecommendationSignal(
                 code="recurring_artist",
                 explanation=f"{matched[0]} appears in {best_play_count} of your mixes.",
@@ -151,48 +161,55 @@ def _score(
         # --- Artist-recency penalty ---
         if any(normalise_artist(name) in recent_artists for name in matched):
             score -= weights.w_recency_penalty
+            familiarity -= weights.w_recency_penalty
             c.signals.append(RecommendationSignal(
                 code="recent_recommendation",
                 explanation=f"{matched[0]} appeared in a recent report — soft down-weight.",
             ))
 
-    # --- Label signal ---
+    # --- Label signal (discovery axis) ---
     if c.label and c.label.lower().strip() in relevant_labels:
         label_key = c.label.lower().strip()
         known_on_label = min(label_artist_counts.get(label_key, 1), weights.label_artist_cap)
         label_bonus = weights.w_label_base + weights.w_label_per_artist * known_on_label
         score += label_bonus
+        discovery += label_bonus
         c.signals.append(RecommendationSignal(
             code="label_match",
             explanation=f"{c.label} — a label you've played artists from.",
         ))
 
-    # --- Cross-source credibility ---
+    # --- Cross-source credibility (discovery axis) ---
     seen_on = c.raw_metadata.get("seen_on_sources", [c.source])
     if len(seen_on) >= 2:
         capped = min(len(seen_on), weights.cross_source_cap)
-        score += weights.w_cross_source_per * capped
+        cross_source_bonus = weights.w_cross_source_per * capped
+        score += cross_source_bonus
+        discovery += cross_source_bonus
         c.signals.append(RecommendationSignal(
             code="cross_source",
             explanation=f"Flagged by {len(seen_on)} sources: {', '.join(seen_on)}.",
         ))
 
-    # --- Genre match (soft) ---
+    # --- Genre match, soft (discovery axis) ---
     matching = [g for g in c.genre_tags if g in genres_set and g not in _SCORING_EXEMPT_GENRES]
     if matching:
-        score += weights.w_genre * min(len(matching), weights.genre_match_cap)
+        genre_bonus = weights.w_genre * min(len(matching), weights.genre_match_cap)
+        score += genre_bonus
+        discovery += genre_bonus
         c.signals.append(RecommendationSignal(
             code="genre_match",
             explanation=f"Tagged: {', '.join(matching[:3])}.",
         ))
 
-    # --- Freshness ---
+    # --- Freshness (discovery axis) ---
     if c.release_date:
         try:
             rel = datetime.strptime(c.release_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
             days_old = (datetime.now(timezone.utc) - rel).days
             if 0 <= days_old <= weights.fresh_days:
                 score += weights.w_fresh
+                discovery += weights.w_fresh
                 c.signals.append(RecommendationSignal(
                     code="fresh_release",
                     explanation=f"Released {days_old} day{'s' if days_old != 1 else ''} ago.",
@@ -200,26 +217,34 @@ def _score(
         except ValueError:
             pass
 
-    # --- Chart position (any source that sets chart_position, e.g. Beatport) ---
+    # --- Chart position, discovery axis (any source that sets chart_position, e.g. Beatport) ---
     chart_pos = c.raw_metadata.get("chart_position")
     if chart_pos and isinstance(chart_pos, int) and 1 <= chart_pos <= _CHART_SCALE:
         chart_bonus = weights.w_chart_top * (1 - (chart_pos - 1) / _CHART_SCALE)
         score += chart_bonus
+        discovery += chart_bonus
         chart_period = c.raw_metadata.get("chart_period", "weekly")
         c.signals.append(RecommendationSignal(
             code="chart_position",
             explanation=f"#{chart_pos} on the {c.source.title()} {chart_period} chart.",
         ))
 
-    # --- Bandcamp discovery bonus (compensates for no chart_position signal) ---
+    # --- Bandcamp discovery bonus (discovery axis; compensates for no chart_position signal) ---
     if c.source == "bandcamp":
         score += weights.w_bandcamp
+        discovery += weights.w_bandcamp
         c.signals.append(RecommendationSignal(
             code="bandcamp_discovery",
             explanation="Bandcamp discovery — independent release outside chart sources.",
         ))
 
     # --- Pool age penalty ---
+    # Applied to the TOTAL score only, not either axis. Decision: pool age is an
+    # artefact of the queue (how long a candidate sat unrecommended), not a fact
+    # about its familiarity or discovery merit — deducting it from an axis would
+    # understate a stale-but-genuinely-discovery-worthy pool candidate exactly
+    # when Wildcards selection (discovery axis) needs to see it clearly. Both
+    # axes therefore stay gross; only the combined ranking absorbs the penalty.
     if c.pool_added_at:
         try:
             added = datetime.fromisoformat(c.pool_added_at)
@@ -238,6 +263,8 @@ def _score(
             pass
 
     c.score = round(score, 2)
+    c.familiarity_score = round(familiarity, 2)
+    c.discovery_score = round(discovery, 2)
 
 
 def _assign_sections(
@@ -251,6 +278,7 @@ def _assign_sections(
     artist_n = settings.pipeline_artist_watch_count
     wildcard_n = settings.pipeline_wildcard_count
     min_score = settings.pipeline_section_min_score
+    weights = settings.scoring_weights()
 
     used: set[int] = set()
     MAX_PER_ARTIST = 2
@@ -262,19 +290,34 @@ def _assign_sections(
     # Genre cap is global across all sections so one genre can't flood the full report
     genre_counts: dict[str, int] = {}
 
-    def pick(n: int, require_signal: str = None, section_name: str = "") -> list[Candidate]:
+    def pick(
+        n: int,
+        require_signal: str = None,
+        section_name: str = "",
+        order: list[Candidate] | None = None,
+        floor_field: str = "score",
+        extra_skip=None,
+    ) -> list[Candidate]:
         # Artist/release caps reset per section so an artist can appear in different
         # sections (e.g. top_picks and label_watch serve distinct curatorial purposes)
         artist_counts: dict[str, int] = {}
         release_counts: dict[str, int] = {}
         result = []
-        for c in ranked:
+        candidates_iter = order if order is not None else ranked
+        floor_suffix = " (discovery axis)" if floor_field == "discovery_score" else ""
+        for c in candidates_iter:
             if id(c) in used:
                 continue
-            if c.score < min_score:
+            if getattr(c, floor_field) < min_score:
                 if trace is not None and section_name:
-                    trace.setdefault(id(c), []).append((section_name, f"below floor {min_score}"))
+                    trace.setdefault(id(c), []).append((section_name, f"below floor {min_score}{floor_suffix}"))
                 continue
+            if extra_skip is not None:
+                skip_reason = extra_skip(c)
+                if skip_reason:
+                    if trace is not None and section_name:
+                        trace.setdefault(id(c), []).append((section_name, skip_reason))
+                    continue
             if require_signal and not any(s.code == require_signal for s in c.signals):
                 if trace is not None and section_name:
                     trace.setdefault(id(c), []).append((section_name, f"lacks {require_signal} signal"))
@@ -312,7 +355,39 @@ def _assign_sections(
     top_picks = pick(top_n, section_name="top_picks")
     label_watch = pick(label_n, require_signal="label_match", section_name="label_watch")
     artist_watch = pick(artist_n, require_signal="known_artist", section_name="artist_watch")
-    wildcards = pick(wildcard_n, section_name="wildcards")
+
+    if weights.wildcards_axis == "discovery":
+        # Rank remaining candidates by discovery_score (stable tie-break: total
+        # score, then original — already score-sorted — order) so Wildcards
+        # becomes a genuine discovery channel instead of known-artist overflow.
+        discovery_order = [
+            c for _, c in sorted(
+                enumerate(ranked),
+                key=lambda ic: (-ic[1].discovery_score, -ic[1].score, ic[0]),
+            )
+        ]
+
+        def _familiarity_skip(c: Candidate):
+            if c.familiarity_score > weights.wildcards_max_familiarity:
+                return (
+                    f"familiarity too high for wildcards "
+                    f"({c.familiarity_score} > {weights.wildcards_max_familiarity})"
+                )
+            return None
+
+        # Floor applies to discovery_score in discovery mode — a track with a
+        # high total score but low discovery merit (e.g. an already-known
+        # artist carried mostly by familiarity) must not slip into Wildcards
+        # on its total; it has to clear the floor on discovery grounds alone.
+        wildcards = pick(
+            wildcard_n,
+            section_name="wildcards",
+            order=discovery_order,
+            floor_field="discovery_score",
+            extra_skip=_familiarity_skip,
+        )
+    else:
+        wildcards = pick(wildcard_n, section_name="wildcards")
 
     genre_summary = ", ".join(f"{g}: {n}" for g, n in sorted(genre_counts.items()))
     logger.info(
