@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from src.logger import get_logger
 from src.models import ArtistProfile, Candidate, RecommendationSignal
 from src.pipeline.dedup import normalise_artist
-from src.pipeline.profile import _split_artists
+from src.pipeline.profile import _split_artists, resolve_profile
 
 logger = get_logger(__name__)
 
@@ -46,6 +46,7 @@ class ScoringWeights:
     w_bandcamp: float = 1.0          # discovery bonus for Bandcamp (no chart data available)
     max_artist_score: float = 10.0   # cap so one mega-artist doesn't dominate
     recurring_threshold: int = 3     # play_count needed to earn the recurring bonus
+    min_artist_match_len: int = 4    # matched artist-name parts shorter than this need independent corroboration (label or genre) to count — guards against short-name string collisions
     # --- Two-axis scoring (Wildcards selection) ---
     wildcards_axis: str = "discovery"        # "discovery" (rank by discovery_score only) | "combined" (pre-P2 behaviour: rank by total score)
     wildcards_max_familiarity: float = 0.0   # in "discovery" mode, wildcards require familiarity_score <= this
@@ -82,14 +83,16 @@ _CHART_SCALE = 100         # chart positions are 1–100
 def _build_relevant_labels(
     candidates: list[Candidate],
     profiles_lower: dict[str, ArtistProfile],
+    aliases: dict[str, str] | None = None,
 ) -> tuple[set[str], dict[str, int], dict[str, list[str]]]:
     """Return (relevant_labels, label_known_artist_counts, label_artist_names).
 
     A label is relevant if any release on it has a known artist (matched in
-    profiles_lower). The counts dict tracks how many DISTINCT known artists in
-    the candidate set are on each label — used by the label scoring formula.
-    label_artist_names holds all display names (sorted) per label key; truncation
-    to 3 happens at render time.
+    profiles_lower, or via aliases — see src/pipeline/profile.resolve_profile).
+    The counts dict tracks how many DISTINCT known artists in the candidate set
+    are on each label — used by the label scoring formula. label_artist_names
+    holds all display names (sorted) per label key; truncation to 3 happens at
+    render time.
     """
     relevant: set[str] = set()
     counts: dict[str, set[str]] = {}
@@ -99,7 +102,7 @@ def _build_relevant_labels(
             continue
         label_key = c.label.lower().strip()
         for part in _split_artists(c.artist):
-            profile = profiles_lower.get(part.lower().strip())
+            profile = resolve_profile(part, profiles_lower, aliases)
             if profile:
                 relevant.add(label_key)
                 counts.setdefault(label_key, set()).add(profile.name.lower())
@@ -142,6 +145,7 @@ def _score(
     recent_artists: frozenset[str] | set[str] = frozenset(),
     weights: ScoringWeights | None = None,
     genre_affinity: dict[str, float] | None = None,
+    aliases: dict[str, str] | None = None,
 ) -> None:
     """Mutate candidate in place: assign signals and total score."""
     if weights is None:
@@ -159,12 +163,28 @@ def _score(
     best_play_count = 0
     matched: list[str] = []
 
+    # Short-name match guard (issue #4): a matched part shorter than
+    # min_artist_match_len can string-collide with an unrelated release, so it
+    # only counts when the candidate carries independent corroboration —
+    # otherwise it's a false "You play X" claim. Computed once per candidate
+    # since it doesn't depend on which part matched.
+    has_label_corrob = bool(c.label) and c.label.lower().strip() in relevant_labels
+    has_genre_corrob = any(
+        g in genres_set and g not in _SCORING_EXEMPT_GENRES for g in c.genre_tags
+    )
+    corroborated = has_label_corrob or has_genre_corrob
+
     for part in _split_artists(c.artist):
-        profile = profiles_lower.get(part.lower().strip())
-        if profile:
-            artist_score += profile.play_count * weights.w_known_artist
-            best_play_count = max(best_play_count, profile.play_count)
-            matched.append(profile.name)
+        profile = resolve_profile(part, profiles_lower, aliases)
+        if not profile:
+            continue
+        written_name = part.strip()
+        if len(written_name) < weights.min_artist_match_len and not corroborated:
+            logger.info(f"[ranker] short-name match '{written_name}' skipped (uncorroborated)")
+            continue
+        artist_score += profile.play_count * weights.w_known_artist
+        best_play_count = max(best_play_count, profile.play_count)
+        matched.append(profile.name)
 
     if matched:
         artist_score = min(artist_score, weights.max_artist_score)
@@ -465,14 +485,15 @@ def rank_candidates(
 
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
+    aliases = settings.artist_aliases()
     relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
-        label_seed if label_seed is not None else candidates, profiles_lower
+        label_seed if label_seed is not None else candidates, profiles_lower, aliases
     )
     weights = settings.scoring_weights()
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -541,14 +562,15 @@ def rank_candidates_mix_prep(
 
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
+    aliases = settings.artist_aliases()
     relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
-        label_seed if label_seed is not None else candidates, profiles_lower
+        label_seed if label_seed is not None else candidates, profiles_lower, aliases
     )
     weights = settings.scoring_weights()
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")

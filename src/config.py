@@ -26,6 +26,7 @@ _CONFIG_PATH = os.path.join(
     "config",
     "settings.yaml",
 )
+_ALIASES_PATH = os.path.join(os.path.dirname(_CONFIG_PATH), "aliases.yaml")
 
 
 class Settings:
@@ -158,6 +159,37 @@ class Settings:
         # Build kwargs, filtering out unknown keys
         kwargs = {k: v for k, v in scoring_config.items() if k in known_fields}
         return ScoringWeights(**kwargs)
+
+    # --- Artist aliases ---
+
+    def artist_aliases(self) -> dict[str, str]:
+        """Load config/aliases.yaml and invert to {alias_lower: canonical_lower}.
+
+        Format: `canonical_name: [alias1, alias2, ...]`. A missing file or
+        empty/commented-only content is the expected default state — returns
+        {} with no warning. A malformed file (not a mapping of str -> list)
+        logs a warning and also returns {} — never raises.
+        """
+        if not os.path.exists(_ALIASES_PATH):
+            return {}
+        try:
+            with open(_ALIASES_PATH, "r") as f:
+                data = yaml.safe_load(f)
+            if not data:
+                return {}
+            if not isinstance(data, dict):
+                raise ValueError(f"expected a mapping at top level, got {type(data).__name__}")
+
+            aliases: dict[str, str] = {}
+            for canonical, alias_list in data.items():
+                if not isinstance(alias_list, list):
+                    raise ValueError(f"aliases for {canonical!r} must be a list")
+                for alias in alias_list:
+                    aliases[str(alias).lower().strip()] = str(canonical).lower().strip()
+            return aliases
+        except Exception as exc:
+            logger.warning(f"[config] Malformed aliases file {_ALIASES_PATH}: {exc}")
+            return {}
 
     # --- Validation ---
 

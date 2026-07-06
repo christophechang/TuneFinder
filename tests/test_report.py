@@ -56,6 +56,29 @@ def test_format_weekly_stats_empty_returns_empty_string():
     assert _format_weekly_stats({"top_picks": []}, None) == ""
 
 
+def test_format_weekly_stats_counts_alias_release_as_known_artist(sample_profiles):
+    """A release credited to an alias resolves to its canonical profile and
+    is counted once as a known artist, same as a direct-name match."""
+    sections = {
+        "top_picks": [
+            Candidate(artist="Dave Skinner", title="T1", link="", source="s", label="L1"),
+        ],
+    }
+    aliases = {"dave skinner": "calibre"}
+    line = _format_weekly_stats(sections, sample_profiles, aliases=aliases)
+    assert "1 known artists" in line
+
+
+def test_format_weekly_stats_without_aliases_alias_release_not_counted(sample_profiles):
+    sections = {
+        "top_picks": [
+            Candidate(artist="Dave Skinner", title="T1", link="", source="s", label="L1"),
+        ],
+    }
+    line = _format_weekly_stats(sections, sample_profiles)
+    assert "0 known artists" in line
+
+
 def test_format_mix_prep_stats_omits_labels_and_known_artists():
     sections = {
         "top_picks": [

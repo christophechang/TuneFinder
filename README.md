@@ -54,6 +54,8 @@ Every candidate also gets two sub-totals alongside the combined score: **familia
 
 `genre_match` is scaled by genre affinity: `tunefinder build-profile` computes each genre's share of your mix catalogue (weighted by how often each track recurs) into `data/genre_affinity.json`, and every matching tag's contribution is multiplied by that share relative to your most-played genre, clamped to `scoring.genre_affinity_min`–`scoring.genre_affinity_max` (default 0.5–2.0). So a genre you play constantly scores near the max multiplier per tag, a genre you've barely touched scores near the floor, and a genre with no data at all (missing `genre_affinity.json`) falls back to a flat ×1.0 — today's behaviour.
 
+`known_artist` matching resolves through `config/aliases.yaml` (release aliases → canonical mix-catalogue name — see Configuration below) before falling back to a direct name match. A matched artist-name part shorter than `scoring.min_artist_match_len` (default `4`) only counts toward `known_artist`/`recurring_artist` if the candidate also carries independent corroboration — a `label_match` or a `genre_match` on the same track. Uncorroborated short matches are dropped silently from scoring (logged at info level) rather than risk a false "You play X" claim from a short-name string collision.
+
 ## Report sections
 
 - **Top Picks** — highest overall score, any signal type
@@ -260,6 +262,8 @@ Edit `config/settings.yaml` to:
 - `alerts.min_history_runs` (default `2`) — prior runs required per source before drop detection activates (cold-start guard)
 - **Scoring weights** — the `scoring:` block lets you tune all scoring constants (e.g. `w_known_artist`, `w_recurring`, `w_label_base`) without code changes. Omitted keys use defaults matching the weights listed in "Scoring signals" above.
 - **Genre affinity** — `scoring.genre_affinity_min` / `scoring.genre_affinity_max` (default `0.5`/`2.0`) set the multiplier range `genre_match` is scaled by, derived from `data/genre_affinity.json` (rebuilt on every `build-profile`, `run`, and `mix-prep`). Delete the file to fall back to a flat ×1.0 multiplier.
+- **Artist aliases** — `config/aliases.yaml` maps canonical mix-catalogue artist names to a list of release aliases they should also match: `canonical_name: [alias1, alias2]`. Matching is case-insensitive; a missing or empty file (the shipped default) simply disables alias resolution — no warning. A malformed file logs a warning and is treated as empty rather than crashing a run.
+- **Short-name match guard** — `scoring.min_artist_match_len` (default `4`) prevents short artist-name parts (e.g. a 2–3 character alias or handle) from string-colliding with an unrelated release and producing a false "You play X" claim. A match shorter than this only counts if the candidate has independent corroboration (a label or genre match); otherwise it's dropped from scoring and logged.
 
 Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
 

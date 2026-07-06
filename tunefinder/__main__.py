@@ -186,14 +186,15 @@ def cmd_run(args):
     sections, label_artists = rank_candidates(
         candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
     )
+    aliases = settings.artist_aliases()
 
     # 6. Generate report
-    report_text = generate_report(sections, report_id, stats, settings, profiles=profiles, label_artists=label_artists)
+    report_text = generate_report(sections, report_id, stats, settings, profiles=profiles, label_artists=label_artists, aliases=aliases)
 
     # 6b. Write audition page (live runs only)
     if not dry_run:
         from src.pipeline.audition import generate_audition_page, write_audition_page
-        audition_html = generate_audition_page(sections, report_id, settings, profiles=profiles, label_artists=label_artists)
+        audition_html = generate_audition_page(sections, report_id, settings, profiles=profiles, label_artists=label_artists, aliases=aliases)
         audition_path = write_audition_page(audition_html, settings.data_dir, report_id)
         logger.info(f"[run] Audition page written: {audition_path}")
     else:
@@ -377,15 +378,16 @@ def cmd_mix_prep(args):
     sections, label_artists = rank_candidates_mix_prep(
         candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
     )
+    aliases = settings.artist_aliases()
 
     # 6. Generate report
-    report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles, label_artists=label_artists)
+    report_text = generate_mix_prep_report(sections, report_id, stats, genre, settings, profiles=profiles, label_artists=label_artists, aliases=aliases)
 
     # 6b. Write audition page (live runs only)
     if not dry_run:
         from src.pipeline.audition import generate_audition_page, write_audition_page
         audition_html = generate_audition_page(sections, report_id, settings, profiles=profiles,
-                                               label_artists=label_artists, mark_by_number=False)
+                                               label_artists=label_artists, mark_by_number=False, aliases=aliases)
         audition_path = write_audition_page(audition_html, settings.data_dir, report_id)
         logger.info(f"[mix-prep] Audition page written: {audition_path}")
     else:

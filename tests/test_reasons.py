@@ -452,3 +452,35 @@ def test_today_injection_controls_freshness():
     assert "dnb" in r_today
     assert "dnb" in r_later
     assert r_today != r_later
+
+
+# --- alias resolution (issue #4) ---
+
+def test_compose_reason_alias_release_shows_canonical_name():
+    """A release credited to an alias resolves through the alias map to the
+    canonical profile — the reason text names the canonical artist, not the
+    alias that appeared on the release."""
+    c = _c(
+        artist="Dave Skinner",
+        title="New One",
+        signals=["known_artist"],
+    )
+    profs = _profiles(("Calibre", 8, ["Swandive"]))
+    aliases = {"dave skinner": "calibre"}
+    reason = compose_reason(c, profs, today=TODAY, aliases=aliases)
+    assert "Calibre" in reason
+    assert "Dave Skinner" not in reason
+
+
+def test_compose_reason_without_aliases_alias_release_is_unknown():
+    """Without the alias map threaded through, the same release has no
+    known-artist fact to draw on — proves the canonical name above came from
+    alias resolution, not some other source."""
+    c = _c(
+        artist="Dave Skinner",
+        title="New One",
+        signals=["known_artist"],
+    )
+    profs = _profiles(("Calibre", 8, ["Swandive"]))
+    reason = compose_reason(c, profs, today=TODAY)
+    assert "Calibre" not in reason

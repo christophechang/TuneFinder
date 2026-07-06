@@ -3,12 +3,61 @@ import json
 import os
 import tempfile
 
-from src.models import Track
+from src.models import ArtistProfile, Track
 from src.pipeline.profile import (
     build_genre_affinity,
     load_genre_affinity,
+    resolve_profile,
     save_genre_affinity,
 )
+
+
+# ---------------------------------------------------------------------------
+# resolve_profile — shared alias/direct resolution helper (issue #4)
+# ---------------------------------------------------------------------------
+
+def test_resolve_profile_direct_match():
+    profiles_lower = {"sully": ArtistProfile(name="Sully")}
+    assert resolve_profile("Sully", profiles_lower) is profiles_lower["sully"]
+
+
+def test_resolve_profile_direct_match_is_case_insensitive_and_trims():
+    profiles_lower = {"sully": ArtistProfile(name="Sully")}
+    assert resolve_profile("  SULLY  ", profiles_lower) is profiles_lower["sully"]
+
+
+def test_resolve_profile_no_match_no_aliases_returns_none():
+    profiles_lower = {"sully": ArtistProfile(name="Sully")}
+    assert resolve_profile("Unknown", profiles_lower) is None
+
+
+def test_resolve_profile_resolves_via_alias():
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre")}
+    aliases = {"dave skinner": "calibre"}
+    assert resolve_profile("Dave Skinner", profiles_lower, aliases) is profiles_lower["calibre"]
+
+
+def test_resolve_profile_direct_match_wins_over_alias():
+    """If the written name is itself a known profile, that beats any alias
+    entry that happens to share the same key (defensive — shouldn't occur in
+    practice, but direct match must always take priority)."""
+    profiles_lower = {
+        "sully": ArtistProfile(name="Sully"),
+        "calibre": ArtistProfile(name="Calibre"),
+    }
+    aliases = {"sully": "calibre"}
+    assert resolve_profile("Sully", profiles_lower, aliases) is profiles_lower["sully"]
+
+
+def test_resolve_profile_alias_pointing_at_unknown_canonical_returns_none():
+    profiles_lower = {"sully": ArtistProfile(name="Sully")}
+    aliases = {"some alias": "nonexistent canonical"}
+    assert resolve_profile("Some Alias", profiles_lower, aliases) is None
+
+
+def test_resolve_profile_none_aliases_behaves_like_no_aliases():
+    profiles_lower = {"sully": ArtistProfile(name="Sully")}
+    assert resolve_profile("Unknown", profiles_lower, None) is None
 
 
 # ---------------------------------------------------------------------------

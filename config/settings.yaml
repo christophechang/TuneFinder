@@ -245,6 +245,12 @@ scoring:
   recurring_threshold: 3               # play_count needed to earn the recurring bonus
   w_recency_penalty: 0.75              # Subtracted if matched artist was recently recommended
   recency_weeks: 4                     # Lookback window for recent recommendations
+  # min_artist_match_len: 4            # Matched artist-name parts shorter than this need independent
+                                        # corroboration (label or genre match on the same candidate) to
+                                        # count toward known_artist/recurring — guards against short-name
+                                        # string collisions producing false "You play X" claims.
+  # Artist aliases (release name -> canonical mix-catalogue name) live in
+  # config/aliases.yaml — see that file for format. Empty by default.
 
   # Label affinity
   w_label_base: 1.5                    # Base score for any label match

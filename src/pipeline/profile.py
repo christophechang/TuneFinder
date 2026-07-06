@@ -21,6 +21,29 @@ def _split_artists(artist_string: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def resolve_profile(
+    name_part: str,
+    profiles_lower: dict[str, ArtistProfile],
+    aliases: dict[str, str] | None = None,
+) -> ArtistProfile | None:
+    """Resolve a written artist-name part to its ArtistProfile, if any.
+
+    Tries a direct lower().strip() lookup first (today's behaviour). If that
+    misses and an alias map is given (alias_lower -> canonical_lower, see
+    Settings.artist_aliases), resolves alias -> canonical -> profile. Tiny and
+    dependency-free — no logging, no IO.
+    """
+    key = name_part.lower().strip()
+    profile = profiles_lower.get(key)
+    if profile is not None:
+        return profile
+    if aliases:
+        canonical = aliases.get(key)
+        if canonical:
+            return profiles_lower.get(canonical)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Profile building
 # ---------------------------------------------------------------------------

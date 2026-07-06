@@ -11,7 +11,7 @@ from typing import Optional
 
 from src.logger import get_logger
 from src.models import ArtistProfile, Candidate
-from src.pipeline.profile import _split_artists
+from src.pipeline.profile import _split_artists, resolve_profile
 from src.pipeline.reasons import compose_reason
 
 logger = get_logger(__name__)
@@ -108,6 +108,7 @@ def _sanitize_report(text: str) -> str:
 def _format_weekly_stats(
     sections: dict[str, list[Candidate]],
     profiles: dict[str, ArtistProfile] | None,
+    aliases: dict[str, str] | None = None,
 ) -> str:
     """Compact stats line rendered in the report header."""
     all_c = [c for sec in sections.values() for c in sec]
@@ -119,8 +120,9 @@ def _format_weekly_stats(
     known_artists = set()
     for c in all_c:
         for part in _split_artists(c.artist):
-            if part.lower().strip() in profiles_lower:
-                known_artists.add(part.lower().strip())
+            profile = resolve_profile(part, profiles_lower, aliases)
+            if profile:
+                known_artists.add(profile.name.lower())
     genre_counts: dict[str, int] = {}
     for c in all_c:
         for g in c.genre_tags:
@@ -242,6 +244,7 @@ def generate_report(
     profiles: dict[str, ArtistProfile] | None = None,
     label_artists: dict[str, list[str]] | None = None,
     today: Optional[date] = None,
+    aliases: dict[str, str] | None = None,
 ) -> str:
     """Generate the full Discord-formatted weekly report deterministically."""
     if today is None:
@@ -249,7 +252,7 @@ def generate_report(
 
     profiles_lower = {k.lower(): v for k, v in (profiles or {}).items()}
     today_str = today.strftime("%-d %B %Y")
-    stats_line = _format_weekly_stats(sections, profiles)
+    stats_line = _format_weekly_stats(sections, profiles, aliases=aliases)
 
     lines = [f"**TuneFinder — {today_str} ({report_id})**"]
     if stats_line:
@@ -260,7 +263,7 @@ def generate_report(
 
     def _render_track(c: Candidate) -> list[str]:
         track_counter[0] += 1
-        reason = compose_reason(c, profiles_lower, label_artists=label_artists, today=today)
+        reason = compose_reason(c, profiles_lower, label_artists=label_artists, today=today, aliases=aliases)
         return [_track_line(track_counter[0], c), f"> {reason}"]
 
     # Top Picks
@@ -320,6 +323,7 @@ def generate_mix_prep_report(
     profiles: dict[str, ArtistProfile] | None = None,
     label_artists: dict[str, list[str]] | None = None,
     today: Optional[date] = None,
+    aliases: dict[str, str] | None = None,
 ) -> str:
     """Generate a Discord-formatted mix-prep report focused on a single genre."""
     if today is None:
@@ -339,7 +343,7 @@ def generate_mix_prep_report(
 
     def _render_track(c: Candidate) -> list[str]:
         track_counter[0] += 1
-        reason = compose_reason(c, profiles_lower, label_artists=label_artists, today=today)
+        reason = compose_reason(c, profiles_lower, label_artists=label_artists, today=today, aliases=aliases)
         return [_track_line(track_counter[0], c), f"> {reason}"]
 
     top_picks = sections.get("top_picks", [])

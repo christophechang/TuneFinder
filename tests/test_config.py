@@ -119,3 +119,59 @@ def test_settings_scoring_weights_all_fields_configurable():
     assert weights.w_bandcamp == 0.8
     assert weights.max_artist_score == 8.0
     assert weights.recurring_threshold == 2
+
+
+# ---------------------------------------------------------------------------
+# artist_aliases() — issue #4
+# ---------------------------------------------------------------------------
+
+def test_artist_aliases_missing_file_returns_empty_dict_no_warning(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr("src.config._ALIASES_PATH", str(tmp_path / "aliases.yaml"))
+    settings = Settings({})
+    assert settings.artist_aliases() == {}
+    assert "aliases" not in caplog.text.lower()
+
+
+def test_artist_aliases_empty_file_returns_empty_dict(tmp_path, monkeypatch):
+    path = tmp_path / "aliases.yaml"
+    path.write_text("# no aliases configured yet\n")
+    monkeypatch.setattr("src.config._ALIASES_PATH", str(path))
+    settings = Settings({})
+    assert settings.artist_aliases() == {}
+
+
+def test_artist_aliases_inverts_canonical_to_alias_map(tmp_path, monkeypatch):
+    path = tmp_path / "aliases.yaml"
+    path.write_text("Calibre: [Dave Skinner, DRS & Calibre]\n")
+    monkeypatch.setattr("src.config._ALIASES_PATH", str(path))
+    settings = Settings({})
+    assert settings.artist_aliases() == {
+        "dave skinner": "calibre",
+        "drs & calibre": "calibre",
+    }
+
+
+def test_artist_aliases_lowercases_and_strips(tmp_path, monkeypatch):
+    path = tmp_path / "aliases.yaml"
+    path.write_text("Calibre: [' Dave Skinner ']\n")
+    monkeypatch.setattr("src.config._ALIASES_PATH", str(path))
+    settings = Settings({})
+    assert settings.artist_aliases() == {"dave skinner": "calibre"}
+
+
+def test_artist_aliases_malformed_not_a_mapping_logs_warning_returns_empty(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "aliases.yaml"
+    path.write_text("- just\n- a\n- list\n")
+    monkeypatch.setattr("src.config._ALIASES_PATH", str(path))
+    settings = Settings({})
+    assert settings.artist_aliases() == {}
+    assert "Malformed aliases file" in caplog.text
+
+
+def test_artist_aliases_malformed_alias_value_not_a_list_logs_warning_returns_empty(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "aliases.yaml"
+    path.write_text("Calibre: Dave Skinner\n")  # should be a list, not a bare string
+    monkeypatch.setattr("src.config._ALIASES_PATH", str(path))
+    settings = Settings({})
+    assert settings.artist_aliases() == {}
+    assert "Malformed aliases file" in caplog.text

@@ -185,8 +185,9 @@ def explain_track(selector: str, settings) -> str:
     ]
     all_scored = scored_candidates + pool_injected
 
+    aliases = settings.artist_aliases()
     relevant_labels, label_artist_counts, _ = _build_relevant_labels(
-        label_seed if label_seed else all_scored, profiles_lower
+        label_seed if label_seed else all_scored, profiles_lower, aliases
     )
     weights = settings.scoring_weights()
     from src.pipeline.history import recent_recommended_artists
@@ -194,7 +195,7 @@ def explain_track(selector: str, settings) -> str:
 
     # Single scoring pass
     for c in all_scored:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases)
 
     ranked = sorted(all_scored, key=lambda c: c.score, reverse=True)
 
@@ -208,7 +209,7 @@ def explain_track(selector: str, settings) -> str:
             hyp = copy.copy(target_candidate)
             hyp.signals = []
             hyp.score = 0.0
-            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity)
+            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases)
             target_scored = hyp
             hypothetical = True
         else:

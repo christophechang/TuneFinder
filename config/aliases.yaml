@@ -1,0 +1,24 @@
+# Artist alias map (issue #4).
+#
+# Aliases are endemic in electronic music: an artist can release under a
+# different spelling, a shortened handle, or an entirely separate alias on a
+# given label/store. Without this map, an alias release scores as a totally
+# unknown artist even though it's someone you already play.
+#
+# Format: canonical name (as it appears in your mix catalogue / profiles)
+# maps to a list of release aliases it should resolve to.
+#
+#   canonical_name: [alias1, alias2]
+#
+# Matching is case-insensitive and whitespace-trimmed on both sides. Loaded
+# via Settings.artist_aliases() (src/config.py), which inverts this file to
+# {alias_lower: canonical_lower} for lookup.
+#
+# This file intentionally ships empty (comments only) — add entries as you
+# discover real aliases in your own catalogue. A missing or empty file is
+# the expected default: no warning, matching just falls back to direct
+# name lookup.
+#
+# Example (commented out):
+#
+# Calibre: [Dave Skinner, DRS & Calibre]

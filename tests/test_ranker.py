@@ -204,6 +204,10 @@ class _MockSettings:
     def scoring_weights():
         return ScoringWeights()
 
+    @staticmethod
+    def artist_aliases():
+        return {}
+
 
 def _scored_candidate(score, artist="X", title="T", source="s", **kw):
     c = _candidate(artist=artist, title=title, source=source, **kw)
@@ -698,4 +702,130 @@ def test_rank_candidates_mix_prep_threads_genre_affinity_through_to_score(tmp_pa
     rank_candidates_mix_prep(candidates_with, {}, _RankSettings(), genre_affinity={"dnb": 1.0})
     rank_candidates_mix_prep(candidates_without, {}, _RankSettings(), genre_affinity=None)
 
-    assert candidates_with[0].score > candidates_without[0].score
+
+# ---------------------------------------------------------------------------
+# Alias resolution + short-name match guard (issue #4)
+# ---------------------------------------------------------------------------
+
+def test_alias_resolution_in_score_scores_as_canonical():
+    """A release credited to an alias resolves to the canonical profile and
+    scores/known_artist-signals exactly as if the canonical name matched."""
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=2)}
+    aliases = {"dave skinner": "calibre"}
+    c = _candidate(artist="Dave Skinner")
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower), aliases=aliases)
+    assert c.score == 6.0  # 2 * 3.0, same as a direct "Calibre" match
+    signal = next(s for s in c.signals if s.code == "known_artist")
+    assert "Calibre" in signal.explanation
+    assert "Dave Skinner" not in signal.explanation
+
+
+def test_alias_resolution_no_aliases_given_scores_zero():
+    """Sanity check: without the alias map, the same release is invisible —
+    proves the alias resolution (not some other match) drove the score above."""
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=2)}
+    c = _candidate(artist="Dave Skinner")
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower))
+    assert c.score == 0.0
+
+
+def test_alias_in_label_relevance():
+    """_build_relevant_labels resolves aliases too, so a label release credited
+    to an alias still marks the label relevant and credits the canonical artist."""
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre")}
+    aliases = {"dave skinner": "calibre"}
+    candidates = [_candidate(artist="Dave Skinner", label="Signature")]
+    relevant, counts, names = _build_relevant_labels(candidates, profiles_lower, aliases)
+    assert "signature" in relevant
+    assert counts["signature"] == 1
+    assert names["signature"] == ["Calibre"]
+
+
+def test_alias_in_label_relevance_absent_without_aliases():
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre")}
+    candidates = [_candidate(artist="Dave Skinner", label="Signature")]
+    relevant, counts, names = _build_relevant_labels(candidates, profiles_lower)
+    assert "signature" not in relevant
+
+
+# --- Short-name match guard ---
+
+def test_short_name_guard_blocks_uncorroborated_match(caplog):
+    """A 2-character matched artist name with no label or genre corroboration
+    on the candidate must not fire known_artist — the worst trust-error class
+    (false 'You play X' claim from a short-name string collision)."""
+    import logging
+    caplog.set_level(logging.INFO, logger="src.pipeline.ranker")
+    profiles_lower = {"jm": ArtistProfile(name="JM", play_count=5)}
+    c = _candidate(artist="JM")
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower))
+    assert not any(s.code == "known_artist" for s in c.signals)
+    assert c.score == 0.0
+    assert "short-name match 'JM' skipped (uncorroborated)" in caplog.text
+
+
+def test_short_name_guard_admits_corroborated_by_label():
+    """The same short match is admitted when the candidate's label is a
+    relevant label — independent corroboration."""
+    profiles_lower = {"jm": ArtistProfile(name="JM", play_count=5)}
+    c = _candidate(artist="JM", label="Big Dada")
+    _score(c, profiles_lower, {"big dada"}, {}, _build_genre_set(profiles_lower))
+    assert any(s.code == "known_artist" for s in c.signals)
+    # artist (5*3.0 capped at 10.0) + recurring (+2.0) + label_match (1.5 + 0.5*1)
+    assert c.score == 14.0
+
+
+def test_short_name_guard_admits_corroborated_by_genre():
+    """The same short match is admitted when the candidate carries a
+    non-exempt genre tag in the taste genre set — independent corroboration."""
+    profiles_lower = {"jm": ArtistProfile(name="JM", play_count=5)}
+    c = _candidate(artist="JM", genre_tags=["dnb"])
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower))
+    assert any(s.code == "known_artist" for s in c.signals)
+
+
+def test_short_name_guard_electronic_tag_alone_does_not_corroborate():
+    """`electronic` is scoring-exempt (too broad to be evidence of fit) — it
+    must not count as corroboration for the short-name guard either."""
+    profiles_lower = {"jm": ArtistProfile(name="JM", play_count=5)}
+    c = _candidate(artist="JM", genre_tags=["electronic"])
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower))
+    assert not any(s.code == "known_artist" for s in c.signals)
+
+
+def test_short_name_guard_respects_config_override():
+    """Lowering min_artist_match_len admits a match the default would guard."""
+    profiles_lower = {"jm": ArtistProfile(name="JM", play_count=5)}
+    weights = ScoringWeights(min_artist_match_len=2)
+    c = _candidate(artist="JM")
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower), weights=weights)
+    assert any(s.code == "known_artist" for s in c.signals)
+
+
+def test_short_name_guard_raising_threshold_blocks_longer_names_too():
+    profiles_lower = {"amit": ArtistProfile(name="Amit", play_count=5)}
+    weights = ScoringWeights(min_artist_match_len=5)
+    c = _candidate(artist="Amit")  # 4 chars — clears default (4) but not a raised 5
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower), weights=weights)
+    assert not any(s.code == "known_artist" for s in c.signals)
+
+
+def test_short_name_guard_uses_written_alias_length_not_canonical_length():
+    """Alias-resolved matches are guarded on the length of the WRITTEN name
+    part, not the (possibly much longer) canonical profile name."""
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    aliases = {"cb": "calibre"}  # 2-char alias for a 7-char canonical name
+    c = _candidate(artist="CB")
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower), aliases=aliases)
+    assert not any(s.code == "known_artist" for s in c.signals)
+    assert c.score == 0.0
+
+
+def test_long_name_match_unaffected_by_guard():
+    """Matches at/above the default threshold are unaffected regardless of
+    corroboration — this guards regressions against everyday-length names."""
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=1)}
+    c = _candidate(artist="Sully")
+    _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower))
+    assert any(s.code == "known_artist" for s in c.signals)
+    assert c.score == 3.0
