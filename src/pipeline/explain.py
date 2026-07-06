@@ -28,8 +28,6 @@ from src.pipeline.ranker import (
     _build_relevant_labels,
     _score,
 )
-from src.pipeline.history import recent_recommended_artists
-from src.pipeline.ranker import _RECENCY_WEEKS
 
 
 def _find_history_record(key: str, history):
@@ -189,11 +187,13 @@ def explain_track(selector: str, settings) -> str:
     relevant_labels, label_artist_counts, _ = _build_relevant_labels(
         label_seed if label_seed else all_scored, profiles_lower
     )
-    recent_artists = recent_recommended_artists(settings.data_dir, weeks=_RECENCY_WEEKS)
+    weights = settings.scoring_weights()
+    from src.pipeline.history import recent_recommended_artists
+    recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     # Single scoring pass
     for c in all_scored:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights)
 
     ranked = sorted(all_scored, key=lambda c: c.score, reverse=True)
 
@@ -207,7 +207,7 @@ def explain_track(selector: str, settings) -> str:
             hyp = copy.copy(target_candidate)
             hyp.signals = []
             hyp.score = 0.0
-            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists)
+            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights)
             target_scored = hyp
             hypothetical = True
         else:

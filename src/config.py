@@ -5,6 +5,11 @@ from dotenv import load_dotenv
 
 from src.logger import get_logger
 
+# Import here to avoid circular dependency; Settings doesn't depend on ranker internals
+def _get_scoring_weights_class():
+    from src.pipeline.ranker import ScoringWeights
+    return ScoringWeights
+
 load_dotenv()
 
 logger = get_logger(__name__)
@@ -136,6 +141,23 @@ class Settings:
     @property
     def testing_fixtures_dir(self) -> str:
         return self._data.get("testing", {}).get("fixtures_dir", "fixtures")
+
+    # --- Scoring weights ---
+
+    def scoring_weights(self):
+        """Build ScoringWeights from config, using defaults for missing keys."""
+        ScoringWeights = _get_scoring_weights_class()
+        scoring_config = self._data.get("scoring", {})
+
+        # Ignore unknown keys with a logged warning
+        known_fields = {f.name for f in ScoringWeights.__dataclass_fields__.values()}
+        unknown_keys = set(scoring_config.keys()) - known_fields
+        if unknown_keys:
+            logger.warning(f"[config] Unknown scoring keys ignored: {', '.join(sorted(unknown_keys))}")
+
+        # Build kwargs, filtering out unknown keys
+        kwargs = {k: v for k, v in scoring_config.items() if k in known_fields}
+        return ScoringWeights(**kwargs)
 
     # --- Validation ---
 

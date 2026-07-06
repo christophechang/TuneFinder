@@ -254,6 +254,7 @@ Edit `config/settings.yaml` to:
 - Change Discord channel names
 - `alerts.source_drop_threshold_pct` (default `50`) — alert when a source's count falls below this % of its trailing-4-run average
 - `alerts.min_history_runs` (default `2`) — prior runs required per source before drop detection activates (cold-start guard)
+- **Scoring weights** — the `scoring:` block lets you tune all scoring constants (e.g. `w_known_artist`, `w_recurring`, `w_label_base`) without code changes. Omitted keys use defaults matching the weights listed in "Scoring signals" above.
 
 Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
 

@@ -1,3 +1,5 @@
+import pytest
+
 from src.models import ArtistProfile, Candidate
 from src.pipeline.ranker import _build_genre_set
 
@@ -361,3 +363,81 @@ def test_trace_same_candidate_skipped_in_two_sections_for_different_reasons():
     # Should appear in label_watch and artist_watch (lacks signal)
     assert "label_watch" in sections_seen
     assert "artist_watch" in sections_seen
+
+
+# --- ScoringWeights configuration tests ---
+
+from src.pipeline.ranker import ScoringWeights
+
+
+def test_scoring_weights_defaults_match_legacy_values():
+    """Verify that ScoringWeights defaults equal the old hardcoded values."""
+    w = ScoringWeights()
+    assert w.w_known_artist == 3.0
+    assert w.w_recurring == 2.0
+    assert w.w_label_base == 1.5
+    assert w.w_label_per_artist == 0.5
+    assert w.label_artist_cap == 3
+    assert w.w_cross_source_per == 0.5
+    assert w.cross_source_cap == 4
+    assert w.w_recency_penalty == 0.75
+    assert w.recency_weeks == 4
+    assert w.w_pool_age_per_week == 0.25
+    assert w.pool_age_penalty_max == 1.5
+    assert w.w_genre == 0.5
+    assert w.genre_match_cap == 2
+    assert w.w_fresh == 0.5
+    assert w.fresh_days == 7
+    assert w.w_chart_top == 1.5
+    assert w.w_bandcamp == 1.0
+    assert w.max_artist_score == 10.0
+    assert w.recurring_threshold == 3
+
+
+def test_scoring_weights_custom_w_known_artist_changes_score():
+    """Verify that overriding w_known_artist changes candidate score."""
+    profiles_lower = {"sully": ArtistProfile(name="Sully", play_count=2)}
+    c = _candidate(artist="Sully")
+
+    # Default weight
+    default_weights = ScoringWeights()
+    _score(c, profiles_lower, set(), {}, _build_genre_set({}), weights=default_weights)
+    default_score = c.score
+    assert default_score == 2 * 3.0  # 2 * 3.0 = 6.0
+
+    # Overridden weight
+    c2 = _candidate(artist="Sully")
+    custom_weights = ScoringWeights(w_known_artist=5.0)
+    _score(c2, profiles_lower, set(), {}, _build_genre_set({}), weights=custom_weights)
+    custom_score = c2.score
+    assert custom_score == 2 * 5.0  # 2 * 5.0 = 10.0
+    assert custom_score != default_score
+
+
+def test_scoring_weights_custom_w_label_base_changes_score():
+    """Verify that overriding w_label_base changes label bonus."""
+    profiles_lower = {"sully": ArtistProfile(name="Sully")}
+    candidates = [_candidate(artist="Sully", label="Astrophonica")]
+    _, counts, _ = _build_relevant_labels(candidates, profiles_lower)
+
+    # Default weight
+    c1 = _candidate(artist="Other", label="Astrophonica")
+    default_weights = ScoringWeights()
+    _score(c1, profiles_lower, {"astrophonica"}, counts, _build_genre_set({}), weights=default_weights)
+    default_score = c1.score
+    assert default_score == 2.0  # 1.5 + 0.5 * 1 = 2.0
+
+    # Overridden weight
+    c2 = _candidate(artist="Other", label="Astrophonica")
+    custom_weights = ScoringWeights(w_label_base=3.0)
+    _score(c2, profiles_lower, {"astrophonica"}, counts, _build_genre_set({}), weights=custom_weights)
+    custom_score = c2.score
+    assert custom_score == 3.5  # 3.0 + 0.5 * 1 = 3.5
+    assert custom_score != default_score
+
+
+def test_scoring_weights_is_frozen():
+    """Verify that ScoringWeights is immutable (frozen dataclass)."""
+    w = ScoringWeights()
+    with pytest.raises(Exception):  # dataclass frozen raises
+        w.w_known_artist = 5.0

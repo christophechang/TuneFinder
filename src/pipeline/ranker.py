@@ -11,6 +11,7 @@ Candidates are then split into report sections:
   artist_watch — known_artist signal, not already in top_picks/label_watch
   wildcards    — highest scoring remainder
 """
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from src.logger import get_logger
@@ -19,6 +20,31 @@ from src.pipeline.dedup import normalise_artist
 from src.pipeline.profile import _split_artists
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class ScoringWeights:
+    """Configuration-driven scoring weights — tunable via config/settings.yaml."""
+    w_known_artist: float = 3.0      # multiplied by play_count, per matched artist in track
+    w_recurring: float = 2.0         # extra if any matched artist has play_count >= threshold
+    w_label_base: float = 1.5        # base bonus for any label match
+    w_label_per_artist: float = 0.5  # per additional known artist on the label, up to cap
+    label_artist_cap: int = 3        # max known artists on a label that contribute to the bonus
+    w_cross_source_per: float = 0.5  # per source seen on, up to cap (only credited when len >= 2)
+    cross_source_cap: int = 4        # max source count that contributes to the bonus
+    w_recency_penalty: float = 0.75  # subtract once if any matched artist was recommended in window
+    recency_weeks: int = 4
+    w_pool_age_per_week: float = 0.25  # subtracted per week since pool entry was added
+    pool_age_penalty_max: float = 1.5  # cap total pool-age penalty
+    w_genre: float = 0.5             # per matching genre tag
+    genre_match_cap: int = 2         # cross-source dedup unions tags; cap prevents same popularity fact paid twice
+    w_fresh: float = 0.5             # released within fresh_days
+    fresh_days: int = 7              # genuinely just-out; inside a 28-day-filtered corpus, 30 was a constant
+    w_chart_top: float = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
+    w_bandcamp: float = 1.0          # discovery bonus for Bandcamp (no chart data available)
+    max_artist_score: float = 10.0   # cap so one mega-artist doesn't dominate
+    recurring_threshold: int = 3     # play_count needed to earn the recurring bonus
+
 
 _GENRE_AUGMENT_MIN_ARTISTS = 3
 
@@ -44,28 +70,7 @@ def _build_genre_set(profiles_lower: dict[str, ArtistProfile]) -> set[str]:
     logger.info(f"[ranker] Genre set: {len(_BASELINE_GENRES)} baseline + {len(augmented - _BASELINE_GENRES)} catalog-augmented")
     return result
 
-
-# Scoring weights
-_W_KNOWN_ARTIST = 3.0      # multiplied by play_count, per matched artist in track
-_W_RECURRING = 2.0         # extra if any matched artist has play_count >= threshold
-_W_LABEL_BASE = 1.5        # base bonus for any label match
-_W_LABEL_PER_ARTIST = 0.5  # per additional known artist on the label, up to cap
-_LABEL_ARTIST_CAP = 3      # max known artists on a label that contribute to the bonus
-_W_CROSS_SOURCE_PER = 0.5  # per source seen on, up to cap (only credited when len >= 2)
-_CROSS_SOURCE_CAP = 4      # max source count that contributes to the bonus
-_W_RECENCY_PENALTY = 0.75  # subtract once if any matched artist was recommended in window
-_RECENCY_WEEKS = 4
-_W_POOL_AGE_PER_WEEK = 0.25  # subtracted per week since pool entry was added
-_POOL_AGE_PENALTY_MAX = 1.5  # cap total pool-age penalty
-_W_GENRE = 0.5             # per matching genre tag
-_GENRE_MATCH_CAP = 2       # cross-source dedup unions tags; cap prevents same popularity fact paid twice
-_W_FRESH = 0.5             # released within 30 days
-_W_CHART_TOP = 1.5         # max bonus for chart_position == 1; decays linearly to 0 at position 100
-_W_BANDCAMP = 1.0          # discovery bonus for Bandcamp (no chart data available)
-
-_MAX_ARTIST_SCORE = 10.0   # cap so one mega-artist doesn't dominate
-_RECURRING_THRESHOLD = 3   # play_count needed to earn the recurring bonus
-_FRESH_DAYS = 7  # genuinely just-out; inside a 28-day-filtered corpus, 30 was a constant
+# Chart scale — not a weight, used in scoring calculation
 _CHART_SCALE = 100         # chart positions are 1–100
 
 
@@ -107,8 +112,12 @@ def _score(
     label_artist_counts: dict[str, int],
     genres_set: set[str],
     recent_artists: frozenset[str] | set[str] = frozenset(),
+    weights: ScoringWeights | None = None,
 ) -> None:
     """Mutate candidate in place: assign signals and total score."""
+    if weights is None:
+        weights = ScoringWeights()
+
     score = 0.0
 
     # --- Artist signals ---
@@ -119,12 +128,12 @@ def _score(
     for part in _split_artists(c.artist):
         profile = profiles_lower.get(part.lower().strip())
         if profile:
-            artist_score += profile.play_count * _W_KNOWN_ARTIST
+            artist_score += profile.play_count * weights.w_known_artist
             best_play_count = max(best_play_count, profile.play_count)
             matched.append(profile.name)
 
     if matched:
-        artist_score = min(artist_score, _MAX_ARTIST_SCORE)
+        artist_score = min(artist_score, weights.max_artist_score)
         score += artist_score
         names = ", ".join(matched[:2])
         c.signals.append(RecommendationSignal(
@@ -132,8 +141,8 @@ def _score(
             explanation=f"You play {names} — this is new material from them.",
         ))
 
-        if best_play_count >= _RECURRING_THRESHOLD:
-            score += _W_RECURRING
+        if best_play_count >= weights.recurring_threshold:
+            score += weights.w_recurring
             c.signals.append(RecommendationSignal(
                 code="recurring_artist",
                 explanation=f"{matched[0]} appears in {best_play_count} of your mixes.",
@@ -141,7 +150,7 @@ def _score(
 
         # --- Artist-recency penalty ---
         if any(normalise_artist(name) in recent_artists for name in matched):
-            score -= _W_RECENCY_PENALTY
+            score -= weights.w_recency_penalty
             c.signals.append(RecommendationSignal(
                 code="recent_recommendation",
                 explanation=f"{matched[0]} appeared in a recent report — soft down-weight.",
@@ -150,8 +159,8 @@ def _score(
     # --- Label signal ---
     if c.label and c.label.lower().strip() in relevant_labels:
         label_key = c.label.lower().strip()
-        known_on_label = min(label_artist_counts.get(label_key, 1), _LABEL_ARTIST_CAP)
-        label_bonus = _W_LABEL_BASE + _W_LABEL_PER_ARTIST * known_on_label
+        known_on_label = min(label_artist_counts.get(label_key, 1), weights.label_artist_cap)
+        label_bonus = weights.w_label_base + weights.w_label_per_artist * known_on_label
         score += label_bonus
         c.signals.append(RecommendationSignal(
             code="label_match",
@@ -161,8 +170,8 @@ def _score(
     # --- Cross-source credibility ---
     seen_on = c.raw_metadata.get("seen_on_sources", [c.source])
     if len(seen_on) >= 2:
-        capped = min(len(seen_on), _CROSS_SOURCE_CAP)
-        score += _W_CROSS_SOURCE_PER * capped
+        capped = min(len(seen_on), weights.cross_source_cap)
+        score += weights.w_cross_source_per * capped
         c.signals.append(RecommendationSignal(
             code="cross_source",
             explanation=f"Flagged by {len(seen_on)} sources: {', '.join(seen_on)}.",
@@ -171,7 +180,7 @@ def _score(
     # --- Genre match (soft) ---
     matching = [g for g in c.genre_tags if g in genres_set and g not in _SCORING_EXEMPT_GENRES]
     if matching:
-        score += _W_GENRE * min(len(matching), _GENRE_MATCH_CAP)
+        score += weights.w_genre * min(len(matching), weights.genre_match_cap)
         c.signals.append(RecommendationSignal(
             code="genre_match",
             explanation=f"Tagged: {', '.join(matching[:3])}.",
@@ -182,8 +191,8 @@ def _score(
         try:
             rel = datetime.strptime(c.release_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
             days_old = (datetime.now(timezone.utc) - rel).days
-            if 0 <= days_old <= _FRESH_DAYS:
-                score += _W_FRESH
+            if 0 <= days_old <= weights.fresh_days:
+                score += weights.w_fresh
                 c.signals.append(RecommendationSignal(
                     code="fresh_release",
                     explanation=f"Released {days_old} day{'s' if days_old != 1 else ''} ago.",
@@ -194,7 +203,7 @@ def _score(
     # --- Chart position (any source that sets chart_position, e.g. Beatport) ---
     chart_pos = c.raw_metadata.get("chart_position")
     if chart_pos and isinstance(chart_pos, int) and 1 <= chart_pos <= _CHART_SCALE:
-        chart_bonus = _W_CHART_TOP * (1 - (chart_pos - 1) / _CHART_SCALE)
+        chart_bonus = weights.w_chart_top * (1 - (chart_pos - 1) / _CHART_SCALE)
         score += chart_bonus
         chart_period = c.raw_metadata.get("chart_period", "weekly")
         c.signals.append(RecommendationSignal(
@@ -204,7 +213,7 @@ def _score(
 
     # --- Bandcamp discovery bonus (compensates for no chart_position signal) ---
     if c.source == "bandcamp":
-        score += _W_BANDCAMP
+        score += weights.w_bandcamp
         c.signals.append(RecommendationSignal(
             code="bandcamp_discovery",
             explanation="Bandcamp discovery — independent release outside chart sources.",
@@ -218,7 +227,7 @@ def _score(
                 added = added.replace(tzinfo=timezone.utc)
             days_old = (datetime.now(timezone.utc) - added).days
             weeks_old = max(0, days_old // 7)
-            penalty = min(_W_POOL_AGE_PER_WEEK * weeks_old, _POOL_AGE_PENALTY_MAX)
+            penalty = min(weights.w_pool_age_per_week * weeks_old, weights.pool_age_penalty_max)
             if penalty > 0:
                 score -= penalty
                 c.signals.append(RecommendationSignal(
@@ -343,10 +352,11 @@ def rank_candidates(
     relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
         label_seed if label_seed is not None else candidates, profiles_lower
     )
-    recent_artists = recent_recommended_artists(settings.data_dir, weeks=_RECENCY_WEEKS)
+    weights = settings.scoring_weights()
+    recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -415,10 +425,11 @@ def rank_candidates_mix_prep(
     relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
         label_seed if label_seed is not None else candidates, profiles_lower
     )
-    recent_artists = recent_recommended_artists(settings.data_dir, weeks=_RECENCY_WEEKS)
+    weights = settings.scoring_weights()
+    recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")

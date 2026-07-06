@@ -235,6 +235,46 @@ alerts:
   # Prior runs required per source before drop detection activates.
   min_history_runs: 2
 
+# Scoring weights — tune these to adjust how candidates are ranked
+# All values listed here are the defaults used if a key is omitted.
+# See src/pipeline/ranker.py ScoringWeights for field documentation.
+scoring:
+  # Artist matching and recurrence
+  w_known_artist: 3.0                  # Score per play_count for matched artist
+  w_recurring: 2.0                     # Extra bonus if artist play_count >= recurring_threshold
+  recurring_threshold: 3               # play_count needed to earn the recurring bonus
+  w_recency_penalty: 0.75              # Subtracted if matched artist was recently recommended
+  recency_weeks: 4                     # Lookback window for recent recommendations
+
+  # Label affinity
+  w_label_base: 1.5                    # Base score for any label match
+  w_label_per_artist: 0.5              # Additional score per known artist on label
+  label_artist_cap: 3                  # Max known artists on label that contribute to score
+
+  # Cross-source credibility
+  w_cross_source_per: 0.5              # Score per source (only when len(sources) >= 2)
+  cross_source_cap: 4                  # Max source count that contributes
+
+  # Genre matching
+  w_genre: 0.5                         # Score per matching genre tag
+  genre_match_cap: 2                   # Max genre tags that contribute to score
+
+  # Freshness
+  w_fresh: 0.5                         # Bonus for recent releases
+  fresh_days: 7                        # Release must be <= N days old
+
+  # Chart performance
+  w_chart_top: 1.5                     # Max bonus for chart_position == 1
+                                       # (decays linearly to 0 at position 100)
+
+  # Bandcamp discovery
+  w_bandcamp: 1.0                      # Bonus for Bandcamp sources
+
+  # Artist score cap and pool age
+  max_artist_score: 10.0               # Cap total artist score so one mega-artist doesn't dominate
+  w_pool_age_per_week: 0.25            # Penalty per week in candidate pool
+  pool_age_penalty_max: 1.5            # Cap total pool-age penalty
+
 data_dir: data
 
 testing:
