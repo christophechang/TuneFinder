@@ -214,6 +214,14 @@ pipeline:
   # Minimum score for a track to occupy a report slot — sections may run short.
   # 0 disables the floor (pre-v0.7.1 behaviour).
   section_min_score: 1.0
+  # Remix-aware track identity (issue #9). When true, a *named* remix/VIP/rework is
+  # a distinct track from the original (Original/Extended/Radio still merge), so a
+  # named remix is no longer suppressed just because you own the original.
+  # WARNING: this changes dedup / known-track / history identity keys — enable ONLY
+  # after a home validation run (rebuild data/known_tracks.json via build-profile,
+  # then a --dry-run diff confirming no owned tracks resurface). See issue #9.
+  # Default off keeps behaviour byte-identical to the legacy pipeline.
+  # remix_aware_identity: false
   top_picks_count: 5
   label_watch_count: 5
   artist_watch_count: 5

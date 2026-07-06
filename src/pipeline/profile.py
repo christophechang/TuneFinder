@@ -102,25 +102,36 @@ def build_genre_affinity(tracks: list[Track]) -> dict[str, float]:
     return affinity
 
 
-def build_known_track_keys(tracks: list[Track]) -> set[str]:
+def build_known_track_keys(tracks: list[Track], remix_aware: bool = False) -> set[str]:
     """Return the normalised dedup keys for all known tracks.
 
     Uses make_dedup_key (strips version suffixes like '(Original Mix)', feat
     credits, etc.) so that known tracks match source items regardless of how
     version info is appended.
+
+    When remix_aware is True, emit BOTH the remix-aware key AND the legacy
+    (flag-off) key for every track. The remix-aware key gives named remixes their
+    own identity going forward; the legacy key keeps backward compatibility so an
+    old known_tracks.json (or a track owned under the old regime) still blocks its
+    exact old-style match even with the flag on.
     """
     from src.pipeline.dedup import make_dedup_key
-    return {make_dedup_key(t.artist, t.title) for t in tracks}
+    keys: set[str] = set()
+    for t in tracks:
+        keys.add(make_dedup_key(t.artist, t.title))
+        if remix_aware:
+            keys.add(make_dedup_key(t.artist, t.title, remix_aware=True))
+    return keys
 
 
 # ---------------------------------------------------------------------------
 # Persistence — known tracks
 # ---------------------------------------------------------------------------
 
-def save_known_tracks(tracks: list[Track], data_dir: str) -> None:
+def save_known_tracks(tracks: list[Track], data_dir: str, remix_aware: bool = False) -> None:
     os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _KNOWN_TRACKS_FILE)
-    keys = sorted(build_known_track_keys(tracks))
+    keys = sorted(build_known_track_keys(tracks, remix_aware))
     with open(path, "w", encoding="utf-8") as f:
         json.dump(keys, f, indent=2)
     logger.info(f"[profile] Saved {len(keys)} known track keys to {path}")

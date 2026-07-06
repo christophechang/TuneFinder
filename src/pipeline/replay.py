@@ -112,6 +112,7 @@ def _diff_vs_history(
     recommended: list,
     history: list,
     report_id: str,
+    remix_aware: bool = False,
 ) -> list[str]:
     """Diff the replayed recommendation set against what recommendation_history
     actually recorded for `report_id`, keyed by normalised dedup key."""
@@ -119,8 +120,8 @@ def _diff_vs_history(
     if not hist_records:
         return [f"No recommendation_history records for {report_id} — nothing to diff against."]
 
-    hist_by_key = {make_dedup_key(r.artist, r.title): r for r in hist_records}
-    replay_by_key = {make_dedup_key(c.artist, c.title): c for c in recommended}
+    hist_by_key = {make_dedup_key(r.artist, r.title, remix_aware): r for r in hist_records}
+    replay_by_key = {make_dedup_key(c.artist, c.title, remix_aware): c for c in recommended}
 
     still = sorted(set(replay_by_key) & set(hist_by_key))
     newly = sorted(set(replay_by_key) - set(hist_by_key))
@@ -165,6 +166,8 @@ def replay_week(week: str, overrides: list[str], settings: Settings) -> str:
 
     ref_date = _reference_date(week)
     rep_settings = build_overridden_settings(settings, overrides)
+    # Remix-aware track identity (issue #9) — honour an override too, default off.
+    remix_aware = rep_settings.pipeline_remix_aware_identity
 
     # Corpus is as-of-week (the archived snapshot); everything else as-of-now.
     items = load_archived_source_items(archive_path)
@@ -176,17 +179,17 @@ def replay_week(week: str, overrides: list[str], settings: Settings) -> str:
     # run time that week hadn't been recorded yet, so blocking on it would drop
     # every track it recommended and make "would still recommend" unreachable in
     # the diff below. Every OTHER week's history still filters as-of-now.
-    history_keys = build_history_keys([r for r in history if r.report_id != week])
+    history_keys = build_history_keys([r for r in history if r.report_id != week], remix_aware)
     aliases = rep_settings.artist_aliases()
     label_store = load_label_affinity(data_dir)
 
     # Weekly pipeline order (mirrors cmd_run) — NO pool injection in replay.
-    deduped = deduplicate_source_items(items)
+    deduped = deduplicate_source_items(items, remix_aware)
     candidates = items_to_candidates(deduped)
     label_seed = list(candidates)  # pre-filter, so known artists still inform label relevance
-    candidates = filter_known(candidates, known_keys)
+    candidates = filter_known(candidates, known_keys, remix_aware)
     after_known = len(candidates)
-    candidates = filter_history(candidates, history_keys)
+    candidates = filter_history(candidates, history_keys, remix_aware)
     after_history = len(candidates)
     window_days = rep_settings.pipeline_release_date_window_days
     if window_days:
@@ -215,7 +218,7 @@ def replay_week(week: str, overrides: list[str], settings: Settings) -> str:
     )
 
     recommended = report_order(sections)
-    diff_lines = _diff_vs_history(recommended, history, week)
+    diff_lines = _diff_vs_history(recommended, history, week, remix_aware)
 
     header = [_BANNER, f"Week: {week} (reference date {ref_date.isoformat()})"]
     if overrides:

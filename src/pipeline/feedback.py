@@ -146,6 +146,12 @@ def _resolve_by_string(
             "Use \"Artist - Title\" or a track number."
         )
     artist_part, title_part = selector.split(" - ", 1)
+    # Remix-aware identity (issue #9) is deliberately NOT threaded here: selector
+    # resolution matches a typed "Artist - Title" against stored records using
+    # make_dedup_key on BOTH sides symmetrically, so the flag-off legacy key is
+    # self-consistent regardless of the global setting. Marks reference the
+    # history record captured at recommend-time; matching against the legacy key
+    # keeps `mark` working for records written under either regime.
     target_key = make_dedup_key(artist_part, title_part)
 
     # Search weekly newest-first, then mix-prep newest-first

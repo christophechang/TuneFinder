@@ -33,15 +33,18 @@ from src.pipeline.ranker import (
 )
 
 
-def _find_history_record(key: str, history):
+def _find_history_record(key: str, history, remix_aware: bool = False):
     for r in sorted(history, key=lambda r: r.recommended_at, reverse=True):
-        if make_dedup_key(r.artist, r.title) == key:
+        if make_dedup_key(r.artist, r.title, remix_aware) == key:
             return r
     return None
 
 
 def explain_track(selector: str, settings) -> str:
     """Trace a track through the weekly pipeline. Returns deterministic multi-line text."""
+    # Remix-aware track identity (issue #9) — read once, thread to every identity
+    # call site so explain's reconstruction matches an actual run. Default off.
+    remix_aware = settings.pipeline_remix_aware_identity
     lines = [
         "Reconstruction from current data/ state (source_items.json of the last fetch) "
         "— not a replay of the posted report.",
@@ -55,7 +58,7 @@ def explain_track(selector: str, settings) -> str:
         return "\n".join(lines)
 
     artist_part, title_part = selector.split(" - ", 1)
-    target_key = make_dedup_key(artist_part, title_part)
+    target_key = make_dedup_key(artist_part, title_part, remix_aware)
     lines.append(f"Dedup key: {target_key!r}")
     lines.append("")
 
@@ -65,13 +68,13 @@ def explain_track(selector: str, settings) -> str:
     profiles = load_artist_profiles(settings.data_dir)
     genre_affinity = load_genre_affinity(settings.data_dir)
     history = load_history(settings.data_dir)
-    history_keys = build_history_keys(history)
+    history_keys = build_history_keys(history, remix_aware)
     pool_records = load_pool(settings.data_dir)
     feedback_entries = load_feedback(settings.data_dir)
 
     # --- Fetched ---
     lines.append("=== FETCHED ===")
-    matching_raw = [i for i in source_items if make_dedup_key(i.artist, i.title) == target_key]
+    matching_raw = [i for i in source_items if make_dedup_key(i.artist, i.title, remix_aware) == target_key]
     if matching_raw:
         for item in matching_raw:
             tags = ", ".join(item.genre_tags) if item.genre_tags else "(none)"
@@ -86,8 +89,8 @@ def explain_track(selector: str, settings) -> str:
 
     # --- Dedup ---
     lines.append("=== DEDUP ===")
-    deduped = deduplicate_source_items(source_items)
-    target_deduped = next((i for i in deduped if make_dedup_key(i.artist, i.title) == target_key), None)
+    deduped = deduplicate_source_items(source_items, remix_aware)
+    target_deduped = next((i for i in deduped if make_dedup_key(i.artist, i.title, remix_aware) == target_key), None)
     if target_deduped:
         sources = target_deduped.raw_metadata.get("seen_on_sources", [target_deduped.source])
         tags = ", ".join(target_deduped.genre_tags) if target_deduped.genre_tags else "(none)"
@@ -109,7 +112,7 @@ def explain_track(selector: str, settings) -> str:
     # --- Known-track filter ---
     lines.append("=== KNOWN-TRACK FILTER ===")
     if target_candidate:
-        kept = filter_known([target_candidate], known_keys)
+        kept = filter_known([target_candidate], known_keys, remix_aware)
         if kept:
             lines.append("  PASS — not in known-track exclusion set.")
         else:
@@ -122,11 +125,11 @@ def explain_track(selector: str, settings) -> str:
     # --- History filter ---
     lines.append("=== HISTORY FILTER ===")
     if target_candidate:
-        kept_hist = filter_history([target_candidate], history_keys)
+        kept_hist = filter_history([target_candidate], history_keys, remix_aware)
         if kept_hist:
             lines.append("  PASS — not in recommendation history.")
         else:
-            rec = _find_history_record(target_key, history)
+            rec = _find_history_record(target_key, history, remix_aware)
             if rec:
                 lines.append(
                     f"  FILTERED — previously recommended in {rec.report_id} ({rec.recommended_at[:10]})."
@@ -135,7 +138,7 @@ def explain_track(selector: str, settings) -> str:
                 lines.append("  FILTERED — matches history key.")
     else:
         if target_key in history_keys:
-            rec = _find_history_record(target_key, history)
+            rec = _find_history_record(target_key, history, remix_aware)
             if rec:
                 lines.append(
                     f"  FILTERED — previously recommended in {rec.report_id} ({rec.recommended_at[:10]})."
@@ -175,8 +178,8 @@ def explain_track(selector: str, settings) -> str:
     label_seed = list(all_candidates_fresh)
 
     # Filter pipeline (mirroring cmd_run)
-    scored_candidates = filter_known(all_candidates_fresh, known_keys)
-    scored_candidates = filter_history(scored_candidates, history_keys)
+    scored_candidates = filter_known(all_candidates_fresh, known_keys, remix_aware)
+    scored_candidates = filter_history(scored_candidates, history_keys, remix_aware)
     if window_days:
         scored_candidates = filter_release_date(scored_candidates, window_days)
 

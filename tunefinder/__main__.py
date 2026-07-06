@@ -87,7 +87,7 @@ def cmd_fetch_sources(args):
         print(f"  {source}: {status}")
 
 
-def _load_profile_state(settings, logger, dry_run, post_alert_fn):
+def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=False):
     """Refresh profile, genre affinity, and known-track state, with graceful fallback.
 
     Attempts to fetch fresh tracks from the catalog API. On success, builds and
@@ -139,8 +139,8 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn):
 
     profiles = build_artist_profiles(tracks)
     genre_affinity = build_genre_affinity(tracks)
-    known_keys = build_known_track_keys(tracks)
-    save_known_tracks(tracks, settings.data_dir)
+    known_keys = build_known_track_keys(tracks, remix_aware)
+    save_known_tracks(tracks, settings.data_dir, remix_aware)
     save_artist_profiles(profiles, settings.data_dir)
     save_genre_affinity(genre_affinity, settings.data_dir)
     logger.info(f"[load_profile_state] Refreshed profile state from {len(tracks)} known tracks")
@@ -174,6 +174,9 @@ def cmd_run(args):
     logger = get_logger(__name__)
     start = time.time()
     report_id = make_report_id()
+    # Remix-aware track identity (issue #9) — read once, thread to every identity
+    # call site. Default off ⇒ byte-identical to the legacy pipeline.
+    remix_aware = settings.pipeline_remix_aware_identity
     logger.info(f"[run] Starting report run — {report_id}" + (" (DRY RUN)" if dry_run else ""))
 
     # Create discord client early for alerts (same as anomaly-alert gating pattern)
@@ -185,7 +188,7 @@ def cmd_run(args):
             discord.post_alert(msg)
 
     profiles, genre_affinity, known_keys, used_fallback = _load_profile_state(
-        settings, logger, dry_run, _post_profile_alert
+        settings, logger, dry_run, _post_profile_alert, remix_aware
     )
     if used_fallback:
         logger.warning("[run] Proceeding with last-saved profile state (degraded mode)")
@@ -195,7 +198,7 @@ def cmd_run(args):
 
     # 2. Load recommendation history and candidate pool
     history = load_history(settings.data_dir)
-    history_keys = build_history_keys(history)
+    history_keys = build_history_keys(history, remix_aware)
     pool_records = load_pool(settings.data_dir)
 
     # 3. Fetch external sources
@@ -221,13 +224,13 @@ def cmd_run(args):
             logger.warning(f"[run] ANOMALY (dry-run, not posted): {msg}")
 
     # 4. Dedup + filter
-    source_items = deduplicate_source_items(source_items)
+    source_items = deduplicate_source_items(source_items, remix_aware)
     after_dedup = len(source_items)
     candidates = items_to_candidates(source_items)
     label_seed = list(candidates)  # capture before filtering so known artists inform label relevance
-    candidates = filter_known(candidates, known_keys)
+    candidates = filter_known(candidates, known_keys, remix_aware)
     after_known = len(candidates)
-    candidates = filter_history(candidates, history_keys)
+    candidates = filter_history(candidates, history_keys, remix_aware)
     after_history = len(candidates)
     window_days = settings.pipeline_release_date_window_days
     if window_days:
@@ -426,6 +429,7 @@ def cmd_mix_prep(args):
     settings.validate()
     logger = get_logger(__name__)
     start = time.time()
+    remix_aware = settings.pipeline_remix_aware_identity  # issue #9 — default off
     report_id = f"{make_report_id()}-mix-prep-{genre}"
     logger.info(f"[mix-prep] Starting mix-prep run — genre: {genre} — {report_id}" + (" (DRY RUN)" if dry_run else ""))
 
@@ -438,7 +442,7 @@ def cmd_mix_prep(args):
             discord.post_alert(msg)
 
     profiles, genre_affinity, known_keys, used_fallback = _load_profile_state(
-        settings, logger, dry_run, _post_profile_alert
+        settings, logger, dry_run, _post_profile_alert, remix_aware
     )
     if used_fallback:
         logger.warning("[mix-prep] Proceeding with last-saved profile state (degraded mode)")
@@ -448,18 +452,18 @@ def cmd_mix_prep(args):
 
     # 2. Load mix-prep history (separate from weekly history)
     mix_prep_history = load_mix_prep_history(settings.data_dir)
-    mix_prep_history_keys = build_history_keys(mix_prep_history)
+    mix_prep_history_keys = build_history_keys(mix_prep_history, remix_aware)
 
     # 3. Fetch external sources
     source_items, fetcher_health = fetch_all_sources(settings, target_genre=genre)
     sources_fetched = len(source_items)
 
     # 4. Dedup + filter + genre narrow
-    source_items = deduplicate_source_items(source_items)
+    source_items = deduplicate_source_items(source_items, remix_aware)
     after_dedup = len(source_items)
     candidates = items_to_candidates(source_items)
     label_seed = list(candidates)
-    candidates = filter_known(candidates, known_keys)
+    candidates = filter_known(candidates, known_keys, remix_aware)
     candidates = [c for c in candidates if c.key not in mix_prep_history_keys]
     candidates = filter_genre(candidates, genre)
     candidates = filter_genre_exclusions(candidates, genre, settings.pipeline_genre_exclusions)

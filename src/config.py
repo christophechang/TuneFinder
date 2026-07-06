@@ -111,6 +111,17 @@ class Settings:
     def pipeline_genre_exclusions(self) -> dict[str, list[str]]:
         return self._data.get("pipeline", {}).get("genre_exclusions", {})
 
+    @property
+    def pipeline_remix_aware_identity(self) -> bool:
+        """Whether named remixes get a distinct track identity (issue #9).
+
+        Default False — flag-off behaviour is byte-identical to the legacy
+        make_dedup_key. Enable only after a home validation run (rebuild
+        known_tracks.json, then a dry-run diff that shows no owned tracks
+        resurfacing). See issue #9.
+        """
+        return bool(self._data.get("pipeline", {}).get("remix_aware_identity", False))
+
     # --- Alerts ---
 
     @property

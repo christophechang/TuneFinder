@@ -44,8 +44,119 @@ def normalise_artist(artist: str) -> str:
     return ", ".join(parts)
 
 
-def make_dedup_key(artist: str, title: str) -> str:
-    return f"{normalise_artist(artist)}||{normalise_title(title)}"
+# ---------------------------------------------------------------------------
+# Remix-aware track identity (issue #9) — OFF by default
+#
+# Today _VERSION_RE strips ALL version suffixes, so owning "Title (Original Mix)"
+# suppresses every future named remix of that title. When remix-awareness is on,
+# a *named* remix/VIP/rework becomes a distinct identity (an extra `rmx:<name>`
+# qualifier), while Original/Extended/Radio/album versions keep merging exactly
+# as they do today.
+#
+# Classification of a parenthetical/bracketed version tag:
+#   GENERIC (merge — no qualifier, key identical to today):
+#     original mix, extended mix, extended, radio edit, radio version, club mix,
+#     album version, ep version, vocal mix, instrumental, dub — plus anything with
+#     no recognised remix keyword (e.g. "(Reprise)", "(Original)").
+#     JUDGEMENT: "instrumental" and a plain "dub" are borderline distinct works,
+#     but we treat them as GENERIC to stay conservative about duplicate
+#     recommendations — a DJ who owns the vocal almost never wants the
+#     instrumental/dub resurfaced as a fresh discovery.
+#   NAMED (distinct — qualifier `rmx:<name>`):
+#     "<name> <keyword>" where keyword ∈ {remix, mix, edit, rework, bootleg, vip,
+#     flip, refix, remake, version} and <name> is non-empty after removing the
+#     keyword and any leading/trailing GENERIC modifier words (extended, radio,
+#     club). So "(Calibre Remix)"/"(Calibre remix)"/"[Calibre Remix]" → rmx:calibre;
+#     "(Break's Deep Mix)" → rmx:break's deep; "(Extended Remix)" → empty name →
+#     GENERIC (merges with the original). A bare "(VIP)" → rmx:vip (a VIP is a
+#     distinct work by the same artist).
+# ---------------------------------------------------------------------------
+
+# Exact version tags that always merge (kept verbatim so multi-word generics whose
+# lead word is not itself a generic modifier — e.g. "album version", "vocal mix" —
+# are recognised without over-stripping).
+_GENERIC_VERSIONS = {
+    "original mix", "extended mix", "extended", "radio edit", "radio version",
+    "club mix", "album version", "ep version", "vocal mix", "instrumental", "dub",
+}
+# Modifier words stripped from a remix name before deciding named-vs-generic, so
+# "(Extended Remix)"/"(Radio Mix)"/"(Club Edit)" collapse to an empty name → merge.
+_GENERIC_MODIFIERS = {"extended", "radio", "club"}
+# Remix keywords, longest-first in the alternation so "remix" wins over "mix".
+_NAMED_RE = re.compile(
+    r"^(?P<name>.*?)\b(?P<kw>remix|rework|bootleg|refix|remake|flip|version|vip|edit|mix)\b\s*$"
+)
+# Any parenthesised or bracketed group (inner text captured).
+_PAREN_GROUP_RE = re.compile(r"[\(\[]([^)\]]*)[\)\]]")
+
+
+def _strip_generic_modifiers(name: str) -> str:
+    words = name.split()
+    while words and words[0] in _GENERIC_MODIFIERS:
+        words.pop(0)
+    while words and words[-1] in _GENERIC_MODIFIERS:
+        words.pop()
+    return " ".join(words)
+
+
+def _classify_version(inner: str) -> str | None:
+    """Return an `rmx:<name>` qualifier for a NAMED remix tag, or None if the tag
+    is generic (merges). `inner` is the text inside the parens, lowercased.
+    """
+    s = " ".join(inner.split())  # collapse whitespace
+    if not s or s in _GENERIC_VERSIONS:
+        return None
+    m = _NAMED_RE.match(s)
+    if not m:
+        return None
+    name = _strip_generic_modifiers(m.group("name").strip())
+    if not name:
+        # Keyword with no distinguishing name. A bare "VIP" is still a distinct
+        # work by the same artist; everything else (bare "Remix", "Mix", …) merges.
+        return "rmx:vip" if m.group("kw") == "vip" else None
+    return f"rmx:{name}"
+
+
+def make_dedup_key(artist: str, title: str, remix_aware: bool = False) -> str:
+    """Canonical (artist, title) identity key.
+
+    remix_aware=False (default) is the legacy behaviour, byte-for-byte: version
+    suffixes and feat. credits are stripped so every version of a title collapses
+    to `artist||title`. All existing callers rely on this exact output — do not
+    change it.
+
+    remix_aware=True keeps generic versions merging but gives a *named* remix its
+    own identity: `artist||title||rmx:<name>` (see the module comment above).
+    """
+    if not remix_aware:
+        return f"{normalise_artist(artist)}||{normalise_title(title)}"
+
+    a = normalise_artist(artist)
+    t = title.strip().lower()
+
+    # Find the (last) named-remix group and note its span so it can be removed
+    # from the base title. Generic groups are left for _VERSION_RE to strip below,
+    # which keeps the base identical to the legacy key for every generic tag.
+    qualifier: str | None = None
+    named_span: tuple[int, int] | None = None
+    for m in _PAREN_GROUP_RE.finditer(t):
+        q = _classify_version(m.group(1))
+        if q is not None:
+            qualifier = q
+            named_span = m.span()
+    if named_span is not None:
+        t = t[: named_span[0]] + t[named_span[1] :]
+
+    # Extract remaining version parentheticals first, then feat-strip the base —
+    # same order as the legacy path (normalise_title): _VERSION_RE before _FEAT_RE.
+    t = _VERSION_RE.sub("", t)
+    t = _FEAT_RE.sub("", t)
+    base = t.strip()
+
+    key = f"{a}||{base}"
+    if qualifier:
+        key += f"||{qualifier}"
+    return key
 
 
 # ---------------------------------------------------------------------------
@@ -89,14 +200,17 @@ def _merge_group(items: list[SourceItem]) -> SourceItem:
     return best
 
 
-def deduplicate_source_items(items: list[SourceItem]) -> list[SourceItem]:
+def deduplicate_source_items(items: list[SourceItem], remix_aware: bool = False) -> list[SourceItem]:
     """
     Group items by normalised (artist, title) key and merge duplicates.
     Items seen on multiple sources are merged into one with all sources recorded.
+
+    When remix_aware is True, named remixes group separately from the original
+    (see make_dedup_key); generic versions still merge exactly as today.
     """
     groups: dict[str, list[SourceItem]] = {}
     for item in items:
-        key = make_dedup_key(item.artist, item.title)
+        key = make_dedup_key(item.artist, item.title, remix_aware)
         groups.setdefault(key, []).append(item)
 
     merged = [_merge_group(group) for group in groups.values()]
@@ -128,23 +242,28 @@ def items_to_candidates(items: list[SourceItem]) -> list[Candidate]:
     ]
 
 
-def filter_known(candidates: list[Candidate], known_keys: set[str]) -> list[Candidate]:
+def filter_known(candidates: list[Candidate], known_keys: set[str], remix_aware: bool = False) -> list[Candidate]:
     """Remove candidates that match a track in the known-track exclusion set.
 
     Checks both the release-level title and any individual tracks nested in
     raw_metadata["tracks"], so a release whose tracks are already owned is
     correctly excluded.
+
+    `c.key` is the raw artist||title property (unaffected by remix-awareness); the
+    make_dedup_key checks are where remix-awareness lands. Under remix_aware, an
+    owned original no longer blocks a named remix of the same title, and vice
+    versa — provided known_keys was built remix-aware too (build_known_track_keys).
     """
     result = []
     removed = 0
     for c in candidates:
-        if c.key in known_keys or make_dedup_key(c.artist, c.title) in known_keys:
+        if c.key in known_keys or make_dedup_key(c.artist, c.title, remix_aware) in known_keys:
             removed += 1
             continue
         # Also check individual tracks embedded in the release
         tracks = c.raw_metadata.get("tracks", [])
         if any(
-            make_dedup_key(t.get("artist", c.artist), t["title"]) in known_keys
+            make_dedup_key(t.get("artist", c.artist), t["title"], remix_aware) in known_keys
             for t in tracks if t.get("title")
         ):
             removed += 1
@@ -218,12 +337,18 @@ def filter_release_date(
     return result
 
 
-def filter_history(candidates: list[Candidate], history_keys: set[str]) -> list[Candidate]:
-    """Remove candidates that have been previously recommended."""
+def filter_history(candidates: list[Candidate], history_keys: set[str], remix_aware: bool = False) -> list[Candidate]:
+    """Remove candidates that have been previously recommended.
+
+    Under remix_aware, a previously recommended named remix no longer blocks the
+    original (or a different remix) — provided history_keys was built remix-aware
+    (build_history_keys), which also keeps the legacy key so old records still
+    block their exact old-style matches.
+    """
     result = []
     removed = 0
     for c in candidates:
-        if c.key in history_keys or make_dedup_key(c.artist, c.title) in history_keys:
+        if c.key in history_keys or make_dedup_key(c.artist, c.title, remix_aware) in history_keys:
             removed += 1
         else:
             result.append(c)
