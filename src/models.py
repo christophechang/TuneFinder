@@ -55,7 +55,7 @@ class ArtistProfile:
 
 @dataclass
 class RecommendationSignal:
-    code: str         # e.g. "known_artist", "label_match", "adjacent_scene"
+    code: str         # e.g. "known_artist", "label_match", "scene_adjacent"
     explanation: str  # human-readable, used verbatim in the report
 
 

@@ -829,3 +829,218 @@ def test_long_name_match_unaffected_by_guard():
     _score(c, profiles_lower, set(), {}, _build_genre_set(profiles_lower))
     assert any(s.code == "known_artist" for s in c.signals)
     assert c.score == 3.0
+
+
+# ---------------------------------------------------------------------------
+# Scene one-hop signal (issue #6): _build_scene_data
+# ---------------------------------------------------------------------------
+
+from src.pipeline.ranker import _build_scene_data
+
+
+def test_build_scene_data_anchor_picks_highest_play_count():
+    profiles_lower = {
+        "amit": ArtistProfile(name="Amit", play_count=2),
+        "calibre": ArtistProfile(name="Calibre", play_count=5),
+    }
+    label_artist_names = {"signature": ["Amit", "Calibre"]}
+    anchor_by_label, _ = _build_scene_data([], label_artist_names, profiles_lower, None)
+    assert anchor_by_label["signature"] == "Calibre"
+
+
+def test_build_scene_data_anchor_ties_break_alphabetically():
+    """label_artist_names values are always pre-sorted — equal play_count ties
+    resolve to whichever name is encountered first, i.e. alphabetically."""
+    profiles_lower = {
+        "amit": ArtistProfile(name="Amit", play_count=5),
+        "calibre": ArtistProfile(name="Calibre", play_count=5),
+    }
+    label_artist_names = {"signature": ["Amit", "Calibre"]}
+    anchor_by_label, _ = _build_scene_data([], label_artist_names, profiles_lower, None)
+    assert anchor_by_label["signature"] == "Amit"
+
+
+def test_build_scene_data_unresolvable_name_gives_no_anchor():
+    """A label whose every associated name fails to resolve to a live profile
+    (e.g. stale memory data with no matching profile) gets no anchor entry —
+    the scene_adjacent signal cannot fire for it."""
+    label_artist_names = {"signature": ["Ghost"]}
+    anchor_by_label, _ = _build_scene_data([], label_artist_names, {}, None)
+    assert "signature" not in anchor_by_label
+
+
+def test_build_scene_data_anchor_resolves_via_alias():
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    aliases = {"dave skinner": "calibre"}
+    label_artist_names = {"signature": ["Dave Skinner"]}
+    anchor_by_label, _ = _build_scene_data([], label_artist_names, profiles_lower, aliases)
+    assert anchor_by_label["signature"] == "Calibre"
+
+
+def test_build_scene_data_roster_counts_distinct_normalised_artists():
+    candidates = [
+        _candidate(artist="Sully", label="Astrophonica"),
+        _candidate(artist="sully", label="Astrophonica"),   # same artist, different case — collapses
+        _candidate(artist="Skee Mask", label="Astrophonica"),
+        _candidate(artist="Someone Else", label="Other Label"),
+    ]
+    _, roster_by_label = _build_scene_data(candidates, {}, {}, None)
+    assert roster_by_label["astrophonica"] == 2
+    assert roster_by_label["other label"] == 1
+
+
+def test_build_scene_data_ignores_candidates_without_label():
+    candidates = [_candidate(artist="X", label=None)]
+    _, roster_by_label = _build_scene_data(candidates, {}, {}, None)
+    assert roster_by_label == {}
+
+
+# ---------------------------------------------------------------------------
+# Scene one-hop signal (issue #6): _score
+# ---------------------------------------------------------------------------
+
+def test_scene_adjacent_fires_for_unknown_artist_on_relevant_label():
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    scene_data = ({"signature": "Calibre"}, {"signature": 2})
+    c = _candidate(artist="Unknown Artist", label="Signature")
+    _score(
+        c, profiles_lower, {"signature"}, {"signature": 1}, _build_genre_set(profiles_lower),
+        scene_data=scene_data,
+    )
+    scene_sig = next(s for s in c.signals if s.code == "scene_adjacent")
+    assert scene_sig.explanation == "Label-mate of Calibre on Signature."
+    # discovery axis carries it: label_match (1.5 + 0.5*1 = 2.0) + scene_adjacent (0.75)
+    assert c.discovery_score == pytest.approx(2.75)
+    assert c.score == pytest.approx(2.75)
+
+
+def test_scene_adjacent_does_not_fire_when_known_artist_matched():
+    """A candidate whose own artist we already play doesn't need a label-mate
+    nudge — known_artist scoring already covers it."""
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    scene_data = ({"signature": "Calibre"}, {"signature": 2})
+    c = _candidate(artist="Calibre", label="Signature")
+    _score(
+        c, profiles_lower, {"signature"}, {"signature": 1}, _build_genre_set(profiles_lower),
+        scene_data=scene_data,
+    )
+    assert not any(s.code == "scene_adjacent" for s in c.signals)
+
+
+def test_scene_adjacent_skipped_when_roster_exceeds_cap():
+    """A mega-label (more distinct artists this week than the roster cap) is
+    not evidence of a scene — the signal must not fire."""
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    scene_data = ({"big label": "Calibre"}, {"big label": 31})
+    c = _candidate(artist="Unknown Artist", label="Big Label")
+    _score(
+        c, profiles_lower, {"big label"}, {"big label": 1}, _build_genre_set(profiles_lower),
+        scene_data=scene_data,
+    )
+    assert not any(s.code == "scene_adjacent" for s in c.signals)
+
+
+def test_scene_adjacent_fires_at_roster_cap_boundary():
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    scene_data = ({"big label": "Calibre"}, {"big label": 30})
+    c = _candidate(artist="Unknown Artist", label="Big Label")
+    _score(
+        c, profiles_lower, {"big label"}, {"big label": 1}, _build_genre_set(profiles_lower),
+        scene_data=scene_data,
+    )
+    assert any(s.code == "scene_adjacent" for s in c.signals)
+
+
+def test_scene_adjacent_disabled_when_scene_data_none():
+    """Backwards compatibility: every direct _score call elsewhere in this
+    suite omits scene_data, and must keep scoring exactly as before."""
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    c = _candidate(artist="Unknown Artist", label="Signature")
+    _score(c, profiles_lower, {"signature"}, {"signature": 1}, _build_genre_set(profiles_lower))
+    assert not any(s.code == "scene_adjacent" for s in c.signals)
+
+
+def test_scene_adjacent_disabled_by_zero_weight():
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    scene_data = ({"signature": "Calibre"}, {"signature": 1})
+    weights = ScoringWeights(w_scene_adjacent=0.0)
+    c = _candidate(artist="Unknown Artist", label="Signature")
+    _score(
+        c, profiles_lower, {"signature"}, {"signature": 1}, _build_genre_set(profiles_lower),
+        weights=weights, scene_data=scene_data,
+    )
+    assert not any(s.code == "scene_adjacent" for s in c.signals)
+
+
+def test_scene_adjacent_stacks_with_label_match():
+    """Deliberate: both fire off the same 'label is relevant' fact — they're
+    two different modest signals, not a double-charge for one thing."""
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    scene_data = ({"signature": "Calibre"}, {"signature": 1})
+    c = _candidate(artist="Unknown Artist", label="Signature")
+    _score(
+        c, profiles_lower, {"signature"}, {"signature": 1}, _build_genre_set(profiles_lower),
+        scene_data=scene_data,
+    )
+    codes = {s.code for s in c.signals}
+    assert {"label_match", "scene_adjacent"} <= codes
+
+
+def test_scene_adjacent_does_not_fire_for_irrelevant_label():
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    scene_data = ({"signature": "Calibre"}, {"signature": 1})
+    c = _candidate(artist="Unknown Artist", label="Other Label")
+    _score(
+        c, profiles_lower, {"signature"}, {}, _build_genre_set(profiles_lower),
+        scene_data=scene_data,
+    )
+    assert not any(s.code == "scene_adjacent" for s in c.signals)
+
+
+def test_scene_adjacent_no_anchor_does_not_fire():
+    """Label is relevant and roster is small, but no artist in scene_data's
+    anchor map resolved to a live profile — no anchor, no signal."""
+    scene_data = ({}, {"signature": 1})
+    c = _candidate(artist="Unknown Artist", label="Signature")
+    _score(c, {}, {"signature"}, {"signature": 1}, _build_genre_set({}), scene_data=scene_data)
+    assert not any(s.code == "scene_adjacent" for s in c.signals)
+
+
+def test_scene_adjacent_missing_roster_entry_defaults_permissive():
+    """A label absent from roster_by_label (no roster evidence this week —
+    e.g. only a pool-injected candidate carries it) defaults to roster size 0,
+    which is <= any positive cap, so the signal can still fire."""
+    scene_data = ({"signature": "Calibre"}, {})  # no roster entry at all
+    profiles_lower = {"calibre": ArtistProfile(name="Calibre", play_count=5)}
+    c = _candidate(artist="Unknown Artist", label="Signature")
+    _score(
+        c, profiles_lower, {"signature"}, {"signature": 1}, _build_genre_set(profiles_lower),
+        scene_data=scene_data,
+    )
+    assert any(s.code == "scene_adjacent" for s in c.signals)
+
+
+# ---------------------------------------------------------------------------
+# Scene one-hop signal (issue #6): rank_candidates end-to-end
+# ---------------------------------------------------------------------------
+
+def test_rank_candidates_scene_adjacent_via_current_corpus(tmp_path):
+    from src.pipeline.ranker import rank_candidates
+
+    class _RankSettings(_MockSettings):
+        data_dir = str(tmp_path)
+
+        @staticmethod
+        def scoring_weights():
+            return ScoringWeights()
+
+    profiles = {"Calibre": ArtistProfile(name="Calibre", play_count=5)}
+    known = _candidate(artist="Calibre", title="Old One", label="Signature")
+    unknown = _candidate(artist="New Kid", title="Debut", label="Signature")
+    candidates = [known, unknown]
+
+    rank_candidates(candidates, profiles, _RankSettings(), label_seed=candidates)
+
+    scene_sig = next(s for s in unknown.signals if s.code == "scene_adjacent")
+    assert scene_sig.explanation == "Label-mate of Calibre on Signature."
+    assert not any(s.code == "scene_adjacent" for s in known.signals)

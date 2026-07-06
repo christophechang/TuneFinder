@@ -42,6 +42,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | `known_artist` | ×3.0 per play_count (max 10) | Artist appears in your mix history |
 | `recurring_artist` | +2.0 | Artist has ≥3 mixes |
 | `label_match` | +1.5 to +3.0 | Scales with how many of your known artists appear on the label (cap 3) |
+| `scene_adjacent` | +0.75 | Unknown artist releasing on a label your known artists are on — "Label-mate of X on Label" (skipped for mega-labels; see below) |
 | `cross_source` | +1.0 to +2.0 | Scales with source count (cap 4) — only credited when seen on 2+ |
 | `chart_position` | +0–1.5 | Linear decay from #1 (Beatport, Traxsource, Mixupload when enabled) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
@@ -50,7 +51,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 | `recent_recommendation` | −0.75 | Artist appeared in weekly or mix-prep history within last 4 weeks |
 | `pool_age` | −0.25 per week (cap −1.5) | Carried over from the persistent pool — older entries lose ground |
 
-Every candidate also gets two sub-totals alongside the combined score: **familiarity** (`known_artist`, `recurring_artist`, `recent_recommendation`) and **discovery** (`label_match`, `cross_source`, `genre_match`, `chart_position`, `fresh_release`, `bandcamp_discovery`). Top Picks, Label Watch, and Artist Watch still rank by the combined score — only Wildcards selection reads the discovery axis (see below). The `pool_age` penalty is deducted from the combined total only; both axes stay gross.
+Every candidate also gets two sub-totals alongside the combined score: **familiarity** (`known_artist`, `recurring_artist`, `recent_recommendation`) and **discovery** (`label_match`, `scene_adjacent`, `cross_source`, `genre_match`, `chart_position`, `fresh_release`, `bandcamp_discovery`). Top Picks, Label Watch, and Artist Watch still rank by the combined score — only Wildcards selection reads the discovery axis (see below). The `pool_age` penalty is deducted from the combined total only; both axes stay gross.
 
 `genre_match` is scaled by genre affinity: `tunefinder build-profile` computes each genre's share of your mix catalogue (weighted by how often each track recurs) into `data/genre_affinity.json`, and every matching tag's contribution is multiplied by that share relative to your most-played genre, clamped to `scoring.genre_affinity_min`–`scoring.genre_affinity_max` (default 0.5–2.0). So a genre you play constantly scores near the max multiplier per tag, a genre you've barely touched scores near the floor, and a genre with no data at all (missing `genre_affinity.json`) falls back to a flat ×1.0 — today's behaviour.
 
@@ -61,6 +62,10 @@ Every candidate also gets two sub-totals alongside the combined score: **familia
 `label_match` used to be re-derived from scratch every run — a label only "existed" if one of your known artists released there *that week*. `data/label_affinity.json` (`src/pipeline/labels.py`) now persists artist↔label associations across runs, so a label you've connected to your taste in the past keeps informing Label Watch and `label_match` scoring even on a quiet week with no known-artist release on that label. Associations older than `scoring.label_memory_max_age_weeks` (default `26` weeks) are treated as stale and excluded. Every `run` and `mix-prep` reads the fresh memory before scoring and writes newly observed associations back after scoring (live runs only — `--dry-run` never touches the store). `tunefinder explain` reads the same memory for consistency but never writes it.
 
 Use `tunefinder backfill-labels` to seed the store from your archived weekly fetches (`data/archive/source_items_*.json.gz`) — handy the first time you enable this, or after a gap in runs. It's read-only against your live state (no Discord, no history/pool writes) and idempotent — re-running it converges to the same store.
+
+### Scene one-hop signal
+
+`scene_adjacent` (issue #6) gives an artist you don't know at all a small, explainable nudge when they release on a label your known artists are on: "Label-mate of Calibre on Signature." It requires no `known_artist` match on the candidate at all (it's not needed — a known artist already scores via `known_artist`), and it deliberately stacks with `label_match` on the same track, since they're two modest signals about the same label fact rather than a double-charge for one. Guard against mega-labels: a label is only eligible if it has at most `scoring.scene_label_roster_cap` (default `30`) distinct artists in *that week's* candidate corpus — a label with hundreds of artists isn't a scene, it's a distributor. Set `scoring.w_scene_adjacent` to `0` to disable the signal entirely.
 
 ## Report sections
 

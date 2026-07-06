@@ -51,6 +51,9 @@ class ScoringWeights:
     # --- Two-axis scoring (Wildcards selection) ---
     wildcards_axis: str = "discovery"        # "discovery" (rank by discovery_score only) | "combined" (pre-P2 behaviour: rank by total score)
     wildcards_max_familiarity: float = 0.0   # in "discovery" mode, wildcards require familiarity_score <= this
+    # --- Scene one-hop signal (issue #6) ---
+    w_scene_adjacent: float = 0.75           # bonus for an unknown artist releasing on a label your known artists are on
+    scene_label_roster_cap: int = 30         # labels with more distinct artists than this (in the current week's corpus) don't fire scene_adjacent — a 500-artist label is not a scene
 
 
 _GENRE_AUGMENT_MIN_ARTISTS = 3
@@ -151,6 +154,65 @@ def _merge_label_knowledge(
     return merged_relevant, merged_counts, merged_names
 
 
+def _build_scene_data(
+    roster_candidates: list[Candidate],
+    label_artist_names: dict[str, list[str]],
+    profiles_lower: dict[str, ArtistProfile],
+    aliases: dict[str, str] | None,
+) -> tuple[dict[str, str], dict[str, int]]:
+    """Return (anchor_by_label, roster_by_label) for the scene-adjacent signal
+    (issue #6): an unknown artist releasing on a label your known artists are
+    on gets a small nudge and an explainable "Label-mate of X on Label" reason.
+
+    anchor_by_label: per label, the display name of the known artist with the
+    highest play_count among that label's merged label_artist_names (per-run
+    derivation + label affinity memory, via `_merge_label_knowledge`). Ties
+    (equal play_count) resolve to the alphabetically-first name, since
+    label_artist_names values are already sorted — deterministic, no need for
+    a secondary tiebreak key. A label absent here (every name in the list
+    fails to resolve to a live profile) gets no anchor and the signal cannot
+    fire for it.
+
+    roster_by_label: per label, the count of DISTINCT artists
+    (`dedup.normalise_artist`) releasing on that label in the CURRENT
+    candidate set (`roster_candidates` — pass label_seed, the pre-filter
+    weekly corpus, same seed `_build_relevant_labels` uses).
+
+    Deliberate choice of roster source: the label affinity store
+    (`src/pipeline/labels.py`) only ever records associations for KNOWN
+    artists, so counting its per-label artist total would badly undercount a
+    label's true size (a 500-artist label reads as "3 artists" if only 3 of
+    them are ones you happen to play) — exactly backwards for a mega-label
+    guard. Counting distinct artists in this week's actual candidate set is
+    the honest "how big is this label right now" measure the roster cap is
+    meant to check, at the cost of a label with zero releases this week
+    having no roster data at all (handled at the call site — see `_score`).
+    """
+    anchor_by_label: dict[str, str] = {}
+    for label_key, names in label_artist_names.items():
+        best_name = None
+        best_play_count = -1
+        for name in names:
+            profile = resolve_profile(name, profiles_lower, aliases)
+            if profile is None:
+                continue
+            if profile.play_count > best_play_count:
+                best_play_count = profile.play_count
+                best_name = profile.name
+        if best_name is not None:
+            anchor_by_label[label_key] = best_name
+
+    roster_sets: dict[str, set[str]] = {}
+    for c in roster_candidates:
+        if not c.label:
+            continue
+        label_key = c.label.lower().strip()
+        roster_sets.setdefault(label_key, set()).add(normalise_artist(c.artist))
+    roster_by_label = {k: len(v) for k, v in roster_sets.items()}
+
+    return anchor_by_label, roster_by_label
+
+
 def _genre_affinity_multiplier(
     tag: str,
     genre_affinity: dict[str, float] | None,
@@ -184,8 +246,15 @@ def _score(
     weights: ScoringWeights | None = None,
     genre_affinity: dict[str, float] | None = None,
     aliases: dict[str, str] | None = None,
+    scene_data: tuple[dict[str, str], dict[str, int]] | None = None,
 ) -> None:
-    """Mutate candidate in place: assign signals and total score."""
+    """Mutate candidate in place: assign signals and total score.
+
+    scene_data: (anchor_by_label, roster_by_label) from `_build_scene_data`
+    (issue #6) — None disables the scene_adjacent signal entirely (backwards
+    compatible default; every direct `_score` call in the existing test suite
+    omits it and must keep scoring exactly as before).
+    """
     if weights is None:
         weights = ScoringWeights()
 
@@ -262,6 +331,37 @@ def _score(
             code="label_match",
             explanation=f"{c.label} — a label you've played artists from.",
         ))
+
+    # --- Scene one-hop signal (discovery axis; issue #6) ---
+    # An artist we have NO known-artist match for at all, releasing on a label
+    # where our known artists release, is a weak-but-real scene-adjacency
+    # fact: "Label-mate of Calibre on Signature." Deliberately independent of
+    # (and stacks with) label_match above — both fire off the same
+    # `c.label in relevant_labels` fact, but they're two different modest
+    # signals (label relevance in general vs. this candidate's own
+    # label-mate story), not a double-charge for one thing. Requires `matched`
+    # to be empty: a candidate whose own artist we already play doesn't need
+    # a label-mate nudge — that's what known_artist scoring is for.
+    if not matched and c.label and scene_data is not None and weights.w_scene_adjacent > 0:
+        label_key = c.label.lower().strip()
+        if label_key in relevant_labels:
+            anchor_by_label, roster_by_label = scene_data
+            anchor = anchor_by_label.get(label_key)
+            # Roster size: distinct artists on this label in THIS WEEK's
+            # candidate set (see _build_scene_data). A label with no roster
+            # entry (e.g. only a pool-injected candidate carries it, so it
+            # never appeared in label_seed) has no current-size evidence —
+            # treated as 0 (permissive) rather than blocking the signal on
+            # missing data, since the mega-label guard is about labels we can
+            # SEE are huge, not about labels we simply have no data for.
+            roster_size = roster_by_label.get(label_key, 0)
+            if anchor is not None and roster_size <= weights.scene_label_roster_cap:
+                score += weights.w_scene_adjacent
+                discovery += weights.w_scene_adjacent
+                c.signals.append(RecommendationSignal(
+                    code="scene_adjacent",
+                    explanation=f"Label-mate of {anchor} on {c.label}.",
+                ))
 
     # --- Cross-source credibility (discovery axis) ---
     seen_on = c.raw_metadata.get("seen_on_sources", [c.source])
@@ -524,23 +624,30 @@ def rank_candidates(
     — persisted artist<->label associations from past runs (issue #5), unioned
     with this run's per-run label derivation via _merge_label_knowledge. None
     reproduces today's amnesiac (per-run-only) behaviour.
+
+    scene_data (anchor_by_label, roster_by_label) for the scene_adjacent
+    signal (issue #6) is built internally from the merged label knowledge and
+    roster_source (label_seed, or candidates if not given) — always enabled
+    here; pass scene_data=None directly to `_score` to disable it.
     """
     from src.pipeline.history import recent_recommended_artists
 
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
     aliases = settings.artist_aliases()
+    roster_source = label_seed if label_seed is not None else candidates
     relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
-        label_seed if label_seed is not None else candidates, profiles_lower, aliases
+        roster_source, profiles_lower, aliases
     )
     relevant_labels, label_artist_counts, label_artist_names = _merge_label_knowledge(
         relevant_labels, label_artist_counts, label_artist_names, label_memory
     )
+    scene_data = _build_scene_data(roster_source, label_artist_names, profiles_lower, aliases)
     weights = settings.scoring_weights()
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -612,17 +719,19 @@ def rank_candidates_mix_prep(
     profiles_lower = {k.lower(): v for k, v in profiles.items()}
     genres_set = _build_genre_set(profiles_lower)
     aliases = settings.artist_aliases()
+    roster_source = label_seed if label_seed is not None else candidates
     relevant_labels, label_artist_counts, label_artist_names = _build_relevant_labels(
-        label_seed if label_seed is not None else candidates, profiles_lower, aliases
+        roster_source, profiles_lower, aliases
     )
     relevant_labels, label_artist_counts, label_artist_names = _merge_label_knowledge(
         relevant_labels, label_artist_counts, label_artist_names, label_memory
     )
+    scene_data = _build_scene_data(roster_source, label_artist_names, profiles_lower, aliases)
     weights = settings.scoring_weights()
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")

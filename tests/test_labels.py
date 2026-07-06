@@ -331,6 +331,40 @@ def test_rank_candidates_mix_prep_label_memory_fires_label_match(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Scene one-hop signal (issue #6) — end-to-end through rank_candidates with a
+# memory-only label (the label affinity store remembers "Amit" on this label,
+# but no known artist appears anywhere in this week's corpus)
+# ---------------------------------------------------------------------------
+
+def test_rank_candidates_scene_adjacent_fires_via_memory_only_label(tmp_path):
+    profiles = {"Amit": ArtistProfile(name="Amit", play_count=3)}
+    candidate = _candidate(artist="Totally Unknown", title="New One", label="Old Label")
+    label_memory = ({"old label": 1}, {"old label": ["Amit"]})
+
+    sections, label_artists = rank_candidates(
+        [candidate], profiles, _RankSettings(str(tmp_path)), label_memory=label_memory,
+    )
+
+    scene_sig = next(s for s in candidate.signals if s.code == "scene_adjacent")
+    assert scene_sig.explanation == "Label-mate of Amit on Old Label."
+    # Deliberately stacks with label_match — both fired off the same
+    # memory-derived label relevance fact.
+    assert any(s.code == "label_match" for s in candidate.signals)
+
+
+def test_rank_candidates_scene_adjacent_absent_without_memory(tmp_path):
+    """Sanity check: without label_memory, the same setup has no relevant
+    label at all this week, so neither label_match nor scene_adjacent fire —
+    proves the fixture above is genuinely memory-driven."""
+    profiles = {"Amit": ArtistProfile(name="Amit", play_count=3)}
+    candidate = _candidate(artist="Totally Unknown", title="New One", label="Old Label")
+
+    rank_candidates([candidate], profiles, _RankSettings(str(tmp_path)))
+
+    assert not any(s.code == "scene_adjacent" for s in candidate.signals)
+
+
+# ---------------------------------------------------------------------------
 # cmd_run / cmd_mix_prep — dry-run must not write, live run must
 # ---------------------------------------------------------------------------
 

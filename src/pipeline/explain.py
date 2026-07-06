@@ -27,6 +27,7 @@ from src.pipeline.ranker import (
     _assign_sections,
     _build_genre_set,
     _build_relevant_labels,
+    _build_scene_data,
     _merge_label_knowledge,
     _score,
 )
@@ -200,13 +201,18 @@ def explain_track(selector: str, settings) -> str:
     relevant_labels, label_artist_counts, label_artist_names = _merge_label_knowledge(
         relevant_labels, label_artist_counts, label_artist_names, label_memory
     )
+    # Scene one-hop signal (issue #6) — build identically to rank_candidates so
+    # explain's reconstruction matches an actual run.
+    scene_data = _build_scene_data(
+        label_seed if label_seed else all_scored, label_artist_names, profiles_lower, aliases
+    )
 
     from src.pipeline.history import recent_recommended_artists
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     # Single scoring pass
     for c in all_scored:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data)
 
     ranked = sorted(all_scored, key=lambda c: c.score, reverse=True)
 
@@ -220,7 +226,7 @@ def explain_track(selector: str, settings) -> str:
             hyp = copy.copy(target_candidate)
             hyp.signals = []
             hyp.score = 0.0
-            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases)
+            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data)
             target_scored = hyp
             hypothetical = True
         else:

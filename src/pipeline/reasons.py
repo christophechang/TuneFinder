@@ -204,6 +204,14 @@ def compose_reason(
     if "label_match" in signal_codes:
         return _fill("{label} — a label connected to artists you play.")
 
+    if "scene_adjacent" in signal_codes and label_names:
+        row = _pick([
+            "Label-mate of {names} on {label}.",
+            "{label} — same label as {names} in your crates.",
+        ])
+        if row:
+            return _fill(row)
+
     if chart is not None:
         row = _pick([
             "#{pos} on the {source_disp} {g} chart this week.",

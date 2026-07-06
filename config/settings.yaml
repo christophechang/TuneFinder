@@ -291,6 +291,10 @@ scoring:
   wildcards_axis: discovery             # "discovery" (rank Wildcards by discovery_score only) | "combined" (pre-v0.8 behaviour: rank by total score)
   wildcards_max_familiarity: 0.0        # Wildcards require familiarity_score <= this value when axis is "discovery"
 
+  # Scene one-hop signal — label-mates of your known artists (issue #6)
+  # w_scene_adjacent: 0.75              # Bonus for an unknown artist releasing on a label your known artists are on (0 disables the signal)
+  # scene_label_roster_cap: 30          # Labels with more distinct artists than this in the current week's corpus don't fire scene_adjacent — a 500-artist label is not a scene
+
 data_dir: data
 
 testing:
