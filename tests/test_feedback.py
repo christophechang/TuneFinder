@@ -12,6 +12,10 @@ from src.pipeline.feedback import (
     append_feedback,
     resolve_selector,
     summarise_feedback,
+    latest_marks,
+    skipped_artists,
+    tune_report,
+    _MIN_MARKS_FOR_CONCLUSIONS,
 )
 
 
@@ -249,3 +253,228 @@ def test_by_signal_counts_all_codes_on_record():
     sig = result["weekly"]["by_signal"]
     assert sig["known_artist"]["marked"] == 1
     assert sig["label_match"]["marked"] == 1
+
+
+# ---------------------------------------------------------------------------
+# latest_marks (shared latest-mark-per-(history,key) helper)
+# ---------------------------------------------------------------------------
+
+def test_latest_marks_collapses_to_newest_per_history_key():
+    old = _entry(outcome="skip", history="weekly", days_ago=5)
+    new = _entry(outcome="bought", history="weekly", days_ago=0)
+    result = latest_marks([old, new])
+    assert len(result) == 1
+    assert result[0].outcome == "bought"
+
+
+def test_latest_marks_keeps_distinct_histories():
+    w = _entry(outcome="bought", history="weekly")
+    mp = _entry(outcome="skip", history="mix-prep")
+    result = latest_marks([w, mp])
+    assert len(result) == 2
+    assert {e.history for e in result} == {"weekly", "mix-prep"}
+
+
+# ---------------------------------------------------------------------------
+# skipped_artists — skip-derived negative signal (issue #11)
+# ---------------------------------------------------------------------------
+
+def test_skipped_artists_below_threshold_not_included():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=2),
+    ]
+    assert "sully" not in skipped_artists(entries, min_skips=2)
+
+
+def test_skipped_artists_meets_threshold_included():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == {"sully"}
+
+
+def test_skipped_artists_positive_mark_disqualifies_even_with_enough_skips():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T3", outcome="liked", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == set()
+
+
+def test_skipped_artists_bought_also_disqualifies():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T3", outcome="bought", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == set()
+
+
+def test_skipped_artists_latest_mark_semantics_skip_then_liked_supersedes():
+    """A track re-marked 'liked' after an earlier 'skip' on the SAME track means
+    only the latest mark (liked) counts for that (history, key) — the earlier
+    skip is superseded, not counted at all."""
+    from src.pipeline.dedup import make_dedup_key
+    entries = [
+        FeedbackEntry(
+            key=make_dedup_key("Sully", "Same Track"), artist="Sully", title="Same Track",
+            outcome="skip", marked_at=_iso(5), report_id="2026-W20", track_no=1, history="weekly",
+        ),
+        FeedbackEntry(
+            key=make_dedup_key("Sully", "Same Track"), artist="Sully", title="Same Track",
+            outcome="liked", marked_at=_iso(1), report_id="2026-W20", track_no=1, history="weekly",
+        ),
+        # A second, distinct track still skipped and un-superseded.
+        _entry(artist="Sully", title="Other Track", outcome="skip", days_ago=2),
+    ]
+    # Only 1 surviving 'skip' (the second track) — below threshold of 2, and
+    # the surviving 'liked' mark disqualifies the artist regardless.
+    assert skipped_artists(entries, min_skips=2) == set()
+
+
+def test_skipped_artists_own_outcome_is_neutral():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T3", outcome="own", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == {"sully"}
+
+
+def test_skipped_artists_combines_both_histories():
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", history="weekly", days_ago=2),
+        _entry(artist="Sully", title="T2", outcome="skip", history="mix-prep", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == {"sully"}
+
+
+def test_skipped_artists_splits_collaborative_artist_string():
+    entries = [
+        _entry(artist="Bakey, Kasia", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Bakey, Kasia", title="T2", outcome="skip", days_ago=2),
+    ]
+    result = skipped_artists(entries, min_skips=2)
+    assert result == {"bakey", "kasia"}
+
+
+def test_skipped_artists_split_collaborator_positive_only_disqualifies_that_artist():
+    entries = [
+        _entry(artist="Bakey, Kasia", title="T1", outcome="skip", days_ago=4),
+        _entry(artist="Bakey, Kasia", title="T2", outcome="skip", days_ago=3),
+        _entry(artist="Bakey", title="Solo Track", outcome="liked", days_ago=1),
+    ]
+    result = skipped_artists(entries, min_skips=2)
+    assert result == {"kasia"}
+
+
+def test_skipped_artists_empty_entries_returns_empty_set():
+    assert skipped_artists([], min_skips=2) == set()
+
+
+# ---------------------------------------------------------------------------
+# tune_report — feedback-driven per-signal/source/genre report
+# ---------------------------------------------------------------------------
+
+def test_tune_report_header_and_baseline():
+    w = [
+        _weekly_record(artist="A", title="1", track_no=1, source="beatport",
+                       signal_codes=["known_artist"], genre_tags=["dnb"]),
+        _weekly_record(artist="B", title="2", track_no=2, source="bandcamp",
+                       signal_codes=["label_match"], genre_tags=["house"]),
+        _weekly_record(artist="C", title="3", track_no=3, source="beatport",
+                       signal_codes=["known_artist"], genre_tags=["dnb"]),
+    ]
+    entries = [
+        _entry(artist="A", title="1", outcome="bought"),
+        _entry(artist="B", title="2", outcome="skip"),
+        _entry(artist="C", title="3", outcome="liked"),
+    ]
+    out = tune_report(w, [], entries)
+    # 3 recommended, 3 marked, baseline positive = 2/3 = 66.7%
+    assert "Recommended: 3" in out
+    assert "Marked: 3" in out
+    assert "Baseline positive rate: 66.7%" in out
+
+
+def test_tune_report_lift_computation():
+    w = [
+        _weekly_record(artist="A", title="1", track_no=1, signal_codes=["known_artist"]),
+        _weekly_record(artist="B", title="2", track_no=2, signal_codes=["label_match"]),
+        _weekly_record(artist="C", title="3", track_no=3, signal_codes=["known_artist"]),
+    ]
+    entries = [
+        _entry(artist="A", title="1", outcome="bought"),
+        _entry(artist="B", title="2", outcome="skip"),
+        _entry(artist="C", title="3", outcome="liked"),
+    ]
+    out = tune_report(w, [], entries)
+    # known_artist: 2/2 positive = 100% vs baseline 66.7% -> lift 1.50
+    assert "known_artist: recommended=2 marked=2 positive=2 rate=100.0% lift=1.50" in out
+    # label_match: 0/1 positive = 0% -> lift 0.00
+    assert "label_match: recommended=1 marked=1 positive=0 rate=0.0% lift=0.00" in out
+
+
+def test_tune_report_own_excluded_from_rate():
+    w = [
+        _weekly_record(artist="A", title="1", track_no=1, source="beatport"),
+        _weekly_record(artist="B", title="2", track_no=2, source="beatport"),
+    ]
+    entries = [
+        _entry(artist="A", title="1", outcome="bought"),
+        _entry(artist="B", title="2", outcome="own"),
+    ]
+    out = tune_report(w, [], entries)
+    # beatport: marked=2 but non-own denominator is 1 (own excluded) -> rate 100%
+    assert "beatport: recommended=2 marked=2 positive=1 rate=100.0% lift=" in out
+    # Baseline also excludes own: 1 positive / 1 non-own = 100%
+    assert "Baseline positive rate: 100.0%" in out
+
+
+def test_tune_report_lift_dash_when_unmarked():
+    w = [
+        _weekly_record(artist="A", title="1", track_no=1, signal_codes=["known_artist"]),
+        _weekly_record(artist="B", title="2", track_no=2, signal_codes=["scene_adjacent"]),
+    ]
+    entries = [_entry(artist="A", title="1", outcome="bought")]
+    out = tune_report(w, [], entries)
+    # scene_adjacent recommended but never marked -> rate '—', lift '—'
+    assert "scene_adjacent: recommended=1 marked=0 positive=0 rate=— lift=—" in out
+
+
+def _many(n, outcome="bought"):
+    records = []
+    entries = []
+    for i in range(n):
+        a, t = f"Artist{i}", f"Track{i}"
+        records.append(_weekly_record(artist=a, title=t, track_no=i + 1,
+                                      signal_codes=["known_artist"]))
+        entries.append(_entry(artist=a, title=t, outcome=outcome))
+    return records, entries
+
+
+def test_tune_report_thin_data_caveat_below_threshold():
+    records, entries = _many(_MIN_MARKS_FOR_CONCLUSIONS - 1)
+    out = tune_report(records, [], entries)
+    assert "anecdote, not evidence" in out
+    # table still prints
+    assert "By signal:" in out
+
+
+def test_tune_report_no_caveat_at_threshold():
+    records, entries = _many(_MIN_MARKS_FOR_CONCLUSIONS)
+    out = tune_report(records, [], entries)
+    assert "anecdote, not evidence" not in out
+
+
+def test_tune_report_latest_mark_wins():
+    """A later re-mark must drive the aggregation (reuses latest_marks)."""
+    w = [_weekly_record(artist="A", title="1", track_no=1, signal_codes=["known_artist"])]
+    entries = [
+        _entry(artist="A", title="1", outcome="skip", days_ago=5),
+        _entry(artist="A", title="1", outcome="bought", days_ago=0),
+    ]
+    out = tune_report(w, [], entries)
+    assert "known_artist: recommended=1 marked=1 positive=1 rate=100.0%" in out

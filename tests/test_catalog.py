@@ -1,4 +1,6 @@
-from src.fetchers.catalog import _clean_artist
+import pytest
+
+from src.fetchers.catalog import _clean_artist, fetch_all_mixes, fetch_all_tracks
 from src.pipeline.profile import _dict_to_profile
 
 
@@ -43,3 +45,20 @@ def test_dict_to_profile_ignores_associated_labels():
     assert p.name == "Calibre"
     assert p.play_count == 12
     assert p.track_titles == ["Falling"]
+
+
+# --- catalog.user_url required (issue #12 — no hardcoded default URL) ---
+
+class _EmptyUrlSettings:
+    testing_use_fixtures = False
+    catalog_user_url = ""
+
+
+def test_fetch_all_tracks_empty_user_url_raises_clean_error():
+    with pytest.raises(ValueError, match="catalog.user_url not configured"):
+        fetch_all_tracks(_EmptyUrlSettings())
+
+
+def test_fetch_all_mixes_empty_user_url_raises_clean_error():
+    with pytest.raises(ValueError, match="catalog.user_url not configured"):
+        fetch_all_mixes(_EmptyUrlSettings())

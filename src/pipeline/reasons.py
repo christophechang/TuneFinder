@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from src.models import ArtistProfile, Candidate
-from src.pipeline.profile import _split_artists
+from src.pipeline.profile import _split_artists, resolve_profile
 
 
 def _variant(key: str, n: int) -> int:
@@ -33,11 +33,15 @@ def compose_reason(
     profiles_lower: dict[str, ArtistProfile],
     label_artists: Optional[dict[str, list[str]]] = None,
     today: Optional[date] = None,
+    aliases: Optional[dict[str, str]] = None,
 ) -> str:
     """Return a one-sentence reason string for the candidate.
 
     today must be injected in tests (and the renderer passes it) to keep
     days_old deterministic. Defaults to UTC today in production.
+
+    aliases: {alias_lower: canonical_lower} from Settings.artist_aliases();
+    None/omitted preserves today's direct-match-only behaviour.
     """
     if today is None:
         today = datetime.now(timezone.utc).date()
@@ -46,9 +50,11 @@ def compose_reason(
 
     # --- Fact extraction ---
     matched_profiles = [
-        profiles_lower[part.lower().strip()]
-        for part in _split_artists(c.artist)
-        if part.lower().strip() in profiles_lower
+        p for p in (
+            resolve_profile(part, profiles_lower, aliases)
+            for part in _split_artists(c.artist)
+        )
+        if p is not None
     ]
 
     play_count = max((p.play_count for p in matched_profiles), default=0)
@@ -197,6 +203,14 @@ def compose_reason(
 
     if "label_match" in signal_codes:
         return _fill("{label} — a label connected to artists you play.")
+
+    if "scene_adjacent" in signal_codes and label_names:
+        row = _pick([
+            "Label-mate of {names} on {label}.",
+            "{label} — same label as {names} in your crates.",
+        ])
+        if row:
+            return _fill(row)
 
     if chart is not None:
         row = _pick([

@@ -5,6 +5,11 @@ from dotenv import load_dotenv
 
 from src.logger import get_logger
 
+# Import here to avoid circular dependency; Settings doesn't depend on ranker internals
+def _get_scoring_weights_class():
+    from src.pipeline.ranker import ScoringWeights
+    return ScoringWeights
+
 load_dotenv()
 
 logger = get_logger(__name__)
@@ -21,6 +26,7 @@ _CONFIG_PATH = os.path.join(
     "config",
     "settings.yaml",
 )
+_ALIASES_PATH = os.path.join(os.path.dirname(_CONFIG_PATH), "aliases.yaml")
 
 
 class Settings:
@@ -105,6 +111,17 @@ class Settings:
     def pipeline_genre_exclusions(self) -> dict[str, list[str]]:
         return self._data.get("pipeline", {}).get("genre_exclusions", {})
 
+    @property
+    def pipeline_remix_aware_identity(self) -> bool:
+        """Whether named remixes get a distinct track identity (issue #9).
+
+        Default False — flag-off behaviour is byte-identical to the legacy
+        make_dedup_key. Enable only after a home validation run (rebuild
+        known_tracks.json, then a dry-run diff that shows no owned tracks
+        resurfacing). See issue #9.
+        """
+        return bool(self._data.get("pipeline", {}).get("remix_aware_identity", False))
+
     # --- Alerts ---
 
     @property
@@ -136,6 +153,54 @@ class Settings:
     @property
     def testing_fixtures_dir(self) -> str:
         return self._data.get("testing", {}).get("fixtures_dir", "fixtures")
+
+    # --- Scoring weights ---
+
+    def scoring_weights(self):
+        """Build ScoringWeights from config, using defaults for missing keys."""
+        ScoringWeights = _get_scoring_weights_class()
+        scoring_config = self._data.get("scoring", {})
+
+        # Ignore unknown keys with a logged warning
+        known_fields = {f.name for f in ScoringWeights.__dataclass_fields__.values()}
+        unknown_keys = set(scoring_config.keys()) - known_fields
+        if unknown_keys:
+            logger.warning(f"[config] Unknown scoring keys ignored: {', '.join(sorted(unknown_keys))}")
+
+        # Build kwargs, filtering out unknown keys
+        kwargs = {k: v for k, v in scoring_config.items() if k in known_fields}
+        return ScoringWeights(**kwargs)
+
+    # --- Artist aliases ---
+
+    def artist_aliases(self) -> dict[str, str]:
+        """Load config/aliases.yaml and invert to {alias_lower: canonical_lower}.
+
+        Format: `canonical_name: [alias1, alias2, ...]`. A missing file or
+        empty/commented-only content is the expected default state — returns
+        {} with no warning. A malformed file (not a mapping of str -> list)
+        logs a warning and also returns {} — never raises.
+        """
+        if not os.path.exists(_ALIASES_PATH):
+            return {}
+        try:
+            with open(_ALIASES_PATH, "r") as f:
+                data = yaml.safe_load(f)
+            if not data:
+                return {}
+            if not isinstance(data, dict):
+                raise ValueError(f"expected a mapping at top level, got {type(data).__name__}")
+
+            aliases: dict[str, str] = {}
+            for canonical, alias_list in data.items():
+                if not isinstance(alias_list, list):
+                    raise ValueError(f"aliases for {canonical!r} must be a list")
+                for alias in alias_list:
+                    aliases[str(alias).lower().strip()] = str(canonical).lower().strip()
+            return aliases
+        except Exception as exc:
+            logger.warning(f"[config] Malformed aliases file {_ALIASES_PATH}: {exc}")
+            return {}
 
     # --- Validation ---
 

@@ -15,6 +15,7 @@ from src.pipeline.explain import explain_track
 # ---------------------------------------------------------------------------
 
 def _settings(data_dir, window_days=28, min_score=0.0):
+    from src.pipeline.ranker import ScoringWeights
     s = MagicMock()
     s.data_dir = data_dir
     s.pipeline_release_date_window_days = window_days
@@ -23,6 +24,7 @@ def _settings(data_dir, window_days=28, min_score=0.0):
     s.pipeline_label_watch_count = 5
     s.pipeline_artist_watch_count = 5
     s.pipeline_wildcard_count = 3
+    s.scoring_weights = MagicMock(return_value=ScoringWeights())
     return s
 
 

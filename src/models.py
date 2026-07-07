@@ -51,11 +51,17 @@ class ArtistProfile:
     play_count: int = 0
     genres_seen: list[str] = field(default_factory=list)
     track_titles: list[str] = field(default_factory=list)
+    # Recency-weighted play count (issue #11) — half-life decayed sum of track
+    # occurrences across dated mixes (see src/pipeline/profile.apply_recency_weights).
+    # 0.0 means "never seen in a dated mix" (either mixes fetch was unavailable, or
+    # this artist genuinely has no dated occurrence) — scoring falls back to the
+    # raw play_count in that case rather than treating 0.0 as "plays never happened".
+    recency_weighted_play_count: float = 0.0
 
 
 @dataclass
 class RecommendationSignal:
-    code: str         # e.g. "known_artist", "label_match", "adjacent_scene"
+    code: str         # e.g. "known_artist", "label_match", "scene_adjacent"
     explanation: str  # human-readable, used verbatim in the report
 
 
@@ -89,6 +95,8 @@ class Candidate:
     release_name: Optional[str] = None
     signals: list[RecommendationSignal] = field(default_factory=list)
     score: float = 0.0
+    familiarity_score: float = 0.0  # known_artist / recurring_artist / recent_recommendation axis
+    discovery_score: float = 0.0    # label/cross_source/genre/chart/fresh/bandcamp axis
     genre_tags: list[str] = field(default_factory=list)
     raw_metadata: dict = field(default_factory=dict)
     pool_added_at: Optional[str] = None

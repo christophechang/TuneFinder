@@ -90,18 +90,24 @@ def append_records(new_records: list[RecommendationRecord], data_dir: str) -> No
 # Lookup
 # ---------------------------------------------------------------------------
 
-def build_history_keys(records: list[RecommendationRecord]) -> set[str]:
+def build_history_keys(records: list[RecommendationRecord], remix_aware: bool = False) -> set[str]:
     """Return keys for all previously recommended tracks.
 
     Includes both the raw key (as stored) and the normalised key (version
     suffixes and feat. credits stripped) so that a track saved as
     "Title (Original Mix)" still blocks "Title" in a future run.
+
+    When remix_aware is True, ALSO include the remix-aware key. The legacy key is
+    still emitted for backward compatibility so old history records keep blocking
+    their exact old-style matches under both regimes.
     """
     from src.pipeline.dedup import make_dedup_key
     keys: set[str] = set()
     for r in records:
         keys.add(r.key)
         keys.add(make_dedup_key(r.artist, r.title))
+        if remix_aware:
+            keys.add(make_dedup_key(r.artist, r.title, remix_aware=True))
     return keys
 
 

@@ -2,6 +2,24 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## v0.10.0 — 2026-07-07
+
+### Discovery quality (audit follow-up)
+
+Work from the 2026-07-06 discovery audit (`docs/audit/2026-07-06-tunefinder-audit.md`, plan alongside it). Issues #1–#9, #11, #12; #9's flag stays off and #10 (label-roster fetcher) awaits its live spike.
+
+- **Config-driven scoring weights** (#1). All ranker constants moved to a `scoring:` block in `config/settings.yaml`; defaults unchanged.
+- **Two-axis scoring** (#2). Familiarity and discovery sub-scores accumulate alongside the total; Wildcards now ranks by discovery score with a familiarity ceiling — a genuine exploration channel instead of known-artist overflow. `scoring.wildcards_axis: combined` restores the old selection.
+- **Genre affinity weights** (#3). `data/genre_affinity.json` (built from catalogue genre shares) scales `genre_match` per tag between `genre_affinity_min`/`_max`; missing data keeps flat behaviour. Run `build-profile` once to generate it.
+- **Alias map + short-name guard** (#4). `config/aliases.yaml` resolves release aliases to canonical artists everywhere matching happens; artist matches under 4 characters need label/genre corroboration before claiming "You play X".
+- **Label affinity memory** (#5). `data/label_affinity.json` persists artist↔label associations across runs (26-week freshness window) so Label Watch fires on quiet weeks; `tunefinder backfill-labels` seeds it from archived snapshots.
+- **Scene one-hop signal** (#6). Unknown artists on labels your artists release on earn `scene_adjacent` (+0.75, discovery axis), with a mega-label roster guard.
+- **Replay harness + tune-report** (#7). `tunefinder replay --week 2026-Wnn [--set path=value]` reconstructs a past report offline from the archive (window evaluated against that week) and diffs it against what was recommended; `tunefinder tune-report` turns feedback into per-signal/source/genre positive rates with lift and a thin-data caveat.
+- **BPM/key-aware mix-prep** (#8). `mix-prep <genre> --bpm 170-180 [--key 8A] [--no-bpm-flex]` — Camelot-compatible key matching, half/double-time flex; unknown-metadata tracks are demoted, never dropped.
+- **Remix-aware identity, flag off** (#9). `pipeline.remix_aware_identity: true` makes named remixes distinct works (owning the original no longer suppresses them) while generic versions keep merging; do not enable before the dry-run diff checklist on issue #9.
+- **Taste recency + skip penalty** (#11). Play counts decay with an 18-month half-life via mix publish dates (`fetch_all_mixes` finally has its caller); artists with ≥2 unredeemed skips get a −1.0 penalty with a visible reason.
+- **Robustness bundle** (#12). Catalog-API failure now falls back to last-saved profiles instead of killing the run; per-source share cap on weekly report slots (`scoring.max_share_per_source`); personal catalog URL moved out of code into `catalog.user_url`; Mixupload download counts wired as a small `source_popularity` signal; assorted doc drift fixed.
+
 ## v0.9.0 — 2026-06-12
 
 ### Audition queue & explain (Phase 2b)

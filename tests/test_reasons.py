@@ -452,3 +452,112 @@ def test_today_injection_controls_freshness():
     assert "dnb" in r_today
     assert "dnb" in r_later
     assert r_today != r_later
+
+
+# --- alias resolution (issue #4) ---
+
+def test_compose_reason_alias_release_shows_canonical_name():
+    """A release credited to an alias resolves through the alias map to the
+    canonical profile — the reason text names the canonical artist, not the
+    alias that appeared on the release."""
+    c = _c(
+        artist="Dave Skinner",
+        title="New One",
+        signals=["known_artist"],
+    )
+    profs = _profiles(("Calibre", 8, ["Swandive"]))
+    aliases = {"dave skinner": "calibre"}
+    reason = compose_reason(c, profs, today=TODAY, aliases=aliases)
+    assert "Calibre" in reason
+    assert "Dave Skinner" not in reason
+
+
+def test_compose_reason_without_aliases_alias_release_is_unknown():
+    """Without the alias map threaded through, the same release has no
+    known-artist fact to draw on — proves the canonical name above came from
+    alias resolution, not some other source."""
+    c = _c(
+        artist="Dave Skinner",
+        title="New One",
+        signals=["known_artist"],
+    )
+    profs = _profiles(("Calibre", 8, ["Swandive"]))
+    reason = compose_reason(c, profs, today=TODAY)
+    assert "Calibre" not in reason
+
+
+# --- scene_adjacent (issue #6) ---
+
+def test_scene_adjacent_with_label_names():
+    c = _c(
+        artist="New Artist",
+        title="Fresh Cut",
+        label="Signature",
+        signals=["scene_adjacent"],
+    )
+    la = {"signature": ["Calibre"]}
+    reason = compose_reason(c, {}, label_artists=la, today=TODAY)
+    assert "Signature" in reason
+    assert "Calibre" in reason
+
+
+def test_scene_adjacent_variant_matches_computed_index():
+    c = _c(
+        artist="New Artist",
+        title="Fresh Cut",
+        label="Signature",
+        signals=["scene_adjacent"],
+    )
+    la = {"signature": ["Calibre"]}
+    variants = [
+        "Label-mate of {names} on {label}.",
+        "{label} — same label as {names} in your crates.",
+    ]
+    idx = _variant(c.key, len(variants))
+    expected = variants[idx].replace("{names}", "Calibre").replace("{label}", "Signature")
+    reason = compose_reason(c, {}, label_artists=la, today=TODAY)
+    assert reason == expected
+
+
+def test_scene_adjacent_determinism_same_result_twice():
+    c = _c(
+        artist="New Artist",
+        title="Fresh Cut",
+        label="Signature",
+        signals=["scene_adjacent"],
+    )
+    la = {"signature": ["Calibre"]}
+    r1 = compose_reason(c, {}, label_artists=la, today=TODAY)
+    r2 = compose_reason(c, {}, label_artists=la, today=TODAY)
+    assert r1 == r2
+
+
+def test_scene_adjacent_no_label_names_falls_through():
+    """Without label_artists supplied (label_names empty), the scene_adjacent
+    row is ineligible and composition falls through to a later row instead of
+    raising or emitting an empty-placeholder line."""
+    c = _c(
+        artist="New Artist",
+        title="Fresh Cut",
+        label="Signature",
+        signals=["scene_adjacent"],
+    )
+    reason = compose_reason(c, {}, today=TODAY)
+    assert "New release" in reason
+    assert "Signature" in reason
+    assert "{names}" not in reason
+
+
+def test_label_match_precedes_scene_adjacent_when_both_present():
+    """label_match is checked earlier in the template table — when both
+    signals are present (the normal case; scene_adjacent always co-occurs
+    with label_match, see ranker._score), label_match's phrasing wins."""
+    c = _c(
+        artist="New Artist",
+        title="Fresh Cut",
+        label="Signature",
+        signals=["label_match", "scene_adjacent"],
+    )
+    la = {"signature": ["Calibre"]}
+    reason = compose_reason(c, {}, label_artists=la, today=TODAY)
+    assert "Label-mate of" not in reason

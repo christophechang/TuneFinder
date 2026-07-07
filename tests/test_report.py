@@ -56,6 +56,29 @@ def test_format_weekly_stats_empty_returns_empty_string():
     assert _format_weekly_stats({"top_picks": []}, None) == ""
 
 
+def test_format_weekly_stats_counts_alias_release_as_known_artist(sample_profiles):
+    """A release credited to an alias resolves to its canonical profile and
+    is counted once as a known artist, same as a direct-name match."""
+    sections = {
+        "top_picks": [
+            Candidate(artist="Dave Skinner", title="T1", link="", source="s", label="L1"),
+        ],
+    }
+    aliases = {"dave skinner": "calibre"}
+    line = _format_weekly_stats(sections, sample_profiles, aliases=aliases)
+    assert "1 known artists" in line
+
+
+def test_format_weekly_stats_without_aliases_alias_release_not_counted(sample_profiles):
+    sections = {
+        "top_picks": [
+            Candidate(artist="Dave Skinner", title="T1", link="", source="s", label="L1"),
+        ],
+    }
+    line = _format_weekly_stats(sections, sample_profiles)
+    assert "0 known artists" in line
+
+
 def test_format_mix_prep_stats_omits_labels_and_known_artists():
     sections = {
         "top_picks": [
@@ -392,3 +415,133 @@ def test_report_order_unknown_key_raises():
     sections = {"top_picks": [], "unknown_section": []}
     with pytest.raises(ValueError, match="unknown_section"):
         report_order(sections)
+
+
+# ---------------------------------------------------------------------------
+# BPM/key-aware mix-prep report changes (issue #8)
+# ---------------------------------------------------------------------------
+
+def test_mix_prep_no_filters_snapshot_unchanged():
+    """Sanity re-check: omitting filters_desc (the default) reproduces the
+    existing mix-prep snapshot byte-for-byte — no header line, no BPM/key
+    track suffixes, even though the fixture candidates carry no bpm/key data."""
+    profiles, sections = _make_mix_prep_fixture()
+    result = generate_mix_prep_report(
+        sections, "2026-W24-mix-prep-dnb",
+        {"sources_fetched": 50, "after_dedup": 40, "after_genre": 20, "pool_injected": 2},
+        "dnb",
+        object(),
+        profiles=profiles,
+        label_artists={"signature": ["Calibre"]},
+        today=TODAY,
+    )
+    assert result == _MIX_PREP_SNAPSHOT
+    assert "Filters:" not in result
+
+
+def test_mix_prep_header_shows_filters_desc_when_active():
+    profiles, sections = _make_mix_prep_fixture()
+    result = generate_mix_prep_report(
+        sections, "2026-W24-mix-prep-dnb",
+        {"sources_fetched": 50, "after_dedup": 40, "after_genre": 20, "pool_injected": 2},
+        "dnb",
+        object(),
+        profiles=profiles,
+        label_artists={"signature": ["Calibre"]},
+        today=TODAY,
+        filters_desc="Filters: BPM 170–180 (±half/double) · key 8A±compat",
+    )
+    assert "Filters: BPM 170–180 (±half/double) · key 8A±compat" in result
+    # Header line comes right after Date:
+    lines = result.split("\n")
+    date_idx = next(i for i, l in enumerate(lines) if l.startswith("Date:"))
+    assert lines[date_idx + 1] == "Filters: BPM 170–180 (±half/double) · key 8A±compat"
+
+
+def test_mix_prep_track_line_shows_bpm_key_when_filters_active():
+    profiles = {
+        "Calibre": ArtistProfile(name="Calibre", play_count=8, genres_seen=["dnb"]),
+    }
+    c = _c("Calibre", "Soul On Fire", "beatport", label="Signature",
+           link="https://beatport.com/track/soul/3", signals=["known_artist"],
+           genre_tags=["dnb"], raw_metadata={"bpm": 174, "keysign": "Am"})
+    sections = {"top_picks": [c]}
+    result = generate_mix_prep_report(
+        sections, "TEST", {}, "dnb", object(), profiles=profiles, today=TODAY,
+        filters_desc="Filters: BPM 170–180 (±half/double)",
+    )
+    assert "174 BPM · 8A" in result
+
+
+def test_mix_prep_track_line_omits_bpm_key_when_filters_inactive():
+    profiles = {
+        "Calibre": ArtistProfile(name="Calibre", play_count=8, genres_seen=["dnb"]),
+    }
+    c = _c("Calibre", "Soul On Fire", "beatport", label="Signature",
+           link="https://beatport.com/track/soul/3", signals=["known_artist"],
+           genre_tags=["dnb"], raw_metadata={"bpm": 174, "keysign": "Am"})
+    sections = {"top_picks": [c]}
+    result = generate_mix_prep_report(
+        sections, "TEST", {}, "dnb", object(), profiles=profiles, today=TODAY,
+    )
+    assert "174 BPM" not in result
+    assert "8A" not in result
+
+
+def test_mix_prep_track_line_partial_metadata_only_shows_present_value():
+    profiles: dict = {}
+    c = _c("Nobody", "No Key Track", "beatport",
+           raw_metadata={"bpm": 174})  # no key
+    sections = {"top_picks": [c]}
+    result = generate_mix_prep_report(
+        sections, "TEST", {}, "dnb", object(), profiles=profiles, today=TODAY,
+        filters_desc="Filters: BPM 170–180",
+    )
+    assert "174 BPM" in result
+
+
+def test_mix_prep_track_line_no_metadata_shows_nothing_extra():
+    profiles: dict = {}
+    c = _c("Nobody", "No Data Track", "beatport", raw_metadata={})
+    sections = {"top_picks": [c]}
+    result = generate_mix_prep_report(
+        sections, "TEST", {}, "dnb", object(), profiles=profiles, today=TODAY,
+        filters_desc="Filters: BPM 170–180",
+    )
+    line = next(l for l in result.split("\n") if "No Data Track" in l)
+    assert line == "1. **Nobody — No Data Track** [Beatport]"
+
+
+def test_build_footer_shows_after_harmonic_when_present():
+    from src.pipeline.report import _build_footer
+    footer = _build_footer("TEST", {"sources_fetched": 10, "after_harmonic": 4})
+    assert "🎚️ After BPM/key filter: **4**" in footer
+
+
+def test_build_footer_omits_after_harmonic_when_absent():
+    from src.pipeline.report import _build_footer
+    footer = _build_footer("TEST", {"sources_fetched": 10})
+    assert "After BPM/key filter" not in footer
+
+
+def test_weekly_report_track_line_never_shows_harmonic_suffix():
+    """Weekly report must stay untouched regardless of bpm/key raw_metadata —
+    generate_report never threads a filters_desc/show_harmonic flag."""
+    profiles, sections = _make_weekly_fixture()
+    # Inject bpm/key metadata onto a weekly candidate to prove it's still ignored.
+    sections["top_picks"][0].raw_metadata = {"bpm": 174, "keysign": "Am"}
+    label_artists = {
+        "signature": ["Calibre", "Sully"],
+        "metalheadz": ["Calibre", "Sully"],
+    }
+    result = generate_report(
+        sections, "2026-W24",
+        {"sources_fetched": 100, "after_dedup": 80, "after_known": 60,
+         "after_history": 55, "after_release_date": 40, "pool_injected": 5},
+        object(),
+        profiles=profiles,
+        label_artists=label_artists,
+        today=TODAY,
+    )
+    assert "174 BPM" not in result
+    assert " 8A" not in result

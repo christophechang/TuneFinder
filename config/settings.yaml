@@ -1,5 +1,5 @@
 catalog:
-  user_url: ""  # e.g. https://api.changsta.com
+  user_url: "https://api.changsta.com"  # Personal catalog API endpoint
 
 discord:
   guild_id: ""  # Override with DISCORD_GUILD_ID env var
@@ -163,7 +163,7 @@ sources:
       - tf_tag: ukg
         chart: style-part/uk-garage
       - tf_tag: uk-bass
-        genre: UKBass     # no chart page — uses /genres/{slug}/tracks
+        genre: UKBass     # no chart page — uses /genres/{slug}/page1
 
   volumo:
     enabled: true
@@ -209,11 +209,19 @@ sources:
       # uk-bass, funk-soul-jazz, hip-hop intentionally not mapped — Volumo has no true-fit genre for them (see docs/improvement-plan.md §3).
 
 pipeline:
-  # Release date window applied to all sources with known dates. Bandcamp items always pass (no date available).
+  # Release date window applied to all sources with known dates. Undated items always pass (e.g. some Bandcamp releases).
   release_date_window_days: 28
   # Minimum score for a track to occupy a report slot — sections may run short.
   # 0 disables the floor (pre-v0.7.1 behaviour).
   section_min_score: 1.0
+  # Remix-aware track identity (issue #9). When true, a *named* remix/VIP/rework is
+  # a distinct track from the original (Original/Extended/Radio still merge), so a
+  # named remix is no longer suppressed just because you own the original.
+  # WARNING: this changes dedup / known-track / history identity keys — enable ONLY
+  # after a home validation run (rebuild data/known_tracks.json via build-profile,
+  # then a --dry-run diff confirming no owned tracks resurface). See issue #9.
+  # Default off keeps behaviour byte-identical to the legacy pipeline.
+  # remix_aware_identity: false
   top_picks_count: 5
   label_watch_count: 5
   artist_watch_count: 5
@@ -234,6 +242,85 @@ alerts:
   source_drop_threshold_pct: 50
   # Prior runs required per source before drop detection activates.
   min_history_runs: 2
+
+# Scoring weights — tune these to adjust how candidates are ranked
+# All values listed here are the defaults used if a key is omitted.
+# See src/pipeline/ranker.py ScoringWeights for field documentation.
+scoring:
+  # Artist matching and recurrence
+  w_known_artist: 3.0                  # Score per play_count for matched artist
+  w_recurring: 2.0                     # Extra bonus if artist play_count >= recurring_threshold
+  recurring_threshold: 3               # play_count needed to earn the recurring bonus
+  w_recency_penalty: 0.75              # Subtracted if matched artist was recently recommended
+  recency_weeks: 4                     # Lookback window for recent recommendations
+  # min_artist_match_len: 4            # Matched artist-name parts shorter than this need independent
+                                        # corroboration (label or genre match on the same candidate) to
+                                        # count toward known_artist/recurring — guards against short-name
+                                        # string collisions producing false "You play X" claims.
+  # Artist aliases (release name -> canonical mix-catalogue name) live in
+  # config/aliases.yaml — see that file for format. Empty by default.
+
+  # Taste recency weighting (issue #11) — known_artist scoring uses a
+  # half-life-decayed play count (data/artist_profiles.json
+  # recency_weighted_play_count, built from dated mixes via `fetch_all_mixes`)
+  # instead of the lifetime play_count, when recency data is available.
+  # taste_half_life_months: 18.0        # Half-life for the recency decay — an artist played 18 months ago counts ~half as much as one played this week
+
+  # Skip-derived negative signal (issue #11) — artists you've repeatedly
+  # skipped (via `tunefinder mark ... skip`) with no offsetting bought/liked
+  # mark get a soft penalty. See src/pipeline/feedback.skipped_artists.
+  # w_skipped_artist: 1.0               # Penalty subtracted once per candidate (total score only) when a matched/named artist is in the skip set
+  # skipped_artist_min_skips: 2         # Latest-mark 'skip' outcomes (zero positives) needed before the penalty applies
+
+  # Label affinity
+  w_label_base: 1.5                    # Base score for any label match
+  w_label_per_artist: 0.5              # Additional score per known artist on label
+  label_artist_cap: 3                  # Max known artists on label that contribute to score
+  # label_memory_max_age_weeks: 26      # Weeks a persisted artist<->label association (data/label_affinity.json,
+                                        # see src/pipeline/labels.py) stays "fresh" enough to count toward Label
+                                        # Watch relevance and label_match scoring, even with no known artist this week.
+
+  # Cross-source credibility
+  w_cross_source_per: 0.5              # Score per source (only when len(sources) >= 2)
+  cross_source_cap: 4                  # Max source count that contributes
+
+  # Genre matching
+  w_genre: 0.5                         # Score per matching genre tag
+  genre_match_cap: 2                   # Max genre tags that contribute to score
+  # genre_affinity_min: 0.5            # Multiplier floor — fringe genres (or genres you don't play), from data/genre_affinity.json
+  # genre_affinity_max: 2.0            # Multiplier ceiling — your most-played genre(s)
+
+  # Freshness
+  w_fresh: 0.5                         # Bonus for recent releases
+  fresh_days: 7                        # Release must be <= N days old
+
+  # Chart performance
+  w_chart_top: 1.5                     # Max bonus for chart_position == 1
+                                       # (decays linearly to 0 at position 100)
+
+  # Bandcamp discovery
+  w_bandcamp: 1.0                      # Bonus for Bandcamp sources
+
+  # Mixupload popularity
+  w_mixupload_popularity: 0.25         # Bonus for Mixupload tracks with popular download count
+  mixupload_popularity_downloads: 100  # Minimum download count to earn the signal
+
+  # Artist score cap and pool age
+  max_artist_score: 10.0               # Cap total artist score so one mega-artist doesn't dominate
+  w_pool_age_per_week: 0.25            # Penalty per week in candidate pool
+  pool_age_penalty_max: 1.5            # Cap total pool-age penalty
+
+  # Wildcards axis (two-axis scoring) — Wildcards is selected separately from
+  # Top Picks/Label Watch/Artist Watch, which always rank by the combined score above.
+  wildcards_axis: discovery             # "discovery" (rank Wildcards by discovery_score only) | "combined" (pre-v0.8 behaviour: rank by total score)
+  wildcards_max_familiarity: 0.0        # Wildcards require familiarity_score <= this value when axis is "discovery"
+
+  # Per-source share cap (weekly only) — limits how many tracks from one source can be in the report
+  # max_share_per_source: 0.6           # Max fraction of total_configured_slots (top_picks + label_watch + artist_watch + wildcards) — 1.0 or higher disables
+
+  # Scene one-hop signal — label-mates of your known artists (issue #6)
+  # w_scene_adjacent: 0.75              # Bonus for an unknown artist releasing on a label your known artists are on (0 disables the signal)
+  # scene_label_roster_cap: 30          # Labels with more distinct artists than this in the current week's corpus don't fire scene_adjacent — a 500-artist label is not a scene
 
 data_dir: data
 
