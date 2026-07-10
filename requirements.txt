@@ -2,3 +2,5 @@ requests
 beautifulsoup4
 pyyaml
 python-dotenv
+fastapi
+uvicorn

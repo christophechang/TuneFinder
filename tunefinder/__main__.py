@@ -357,6 +357,36 @@ def cmd_stats(args):
         _print_section("By report", bucket.get("by_report", {}))
 
 
+def cmd_serve(args):
+    """Run the web API (and optionally the built SPA) with uvicorn.
+
+    Does not hard-require Discord env vars — browsing works without them, and
+    a web-triggered live run would simply skip Discord delivery (the client
+    no-ops without a token, with a logged warning). check-config remains the
+    place to verify full delivery credentials.
+    """
+    import uvicorn
+
+    from src.web.app import create_app
+    from src.web.auth import AuthConfigError
+
+    settings = load_settings()
+    logger = get_logger(__name__)
+    try:
+        settings.validate()
+    except EnvironmentError as exc:
+        logger.warning(f"[serve] {exc} — reports/feedback work; Discord delivery is disabled until set.")
+
+    try:
+        app = create_app(settings)
+    except AuthConfigError as exc:
+        print(f"Error: {exc}")
+        raise SystemExit(1)
+
+    print(f"TuneFinder web API on http://{args.host}:{args.port} — docs at /docs")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+
+
 def main():
     from src.pipeline.feedback import OUTCOMES
     from src.services.runs import MIX_PREP_GENRES
@@ -444,6 +474,12 @@ def main():
         "tune-report",
         help="Feedback-driven per-signal/source/genre positive-rate and lift report",
     )
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Run the web API (tunefinder-web backend) with uvicorn",
+    )
+    serve_parser.add_argument("--host", default="127.0.0.1", help="Bind address (default 127.0.0.1)")
+    serve_parser.add_argument("--port", type=int, default=8420, help="Port (default 8420)")
 
     args = parser.parse_args()
 
@@ -475,6 +511,8 @@ def main():
         cmd_replay(args)
     elif args.command == "tune-report":
         cmd_tune_report(args)
+    elif args.command == "serve":
+        cmd_serve(args)
 
 
 if __name__ == "__main__":
