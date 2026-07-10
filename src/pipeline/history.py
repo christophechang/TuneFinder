@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from src.logger import get_logger
 from src.models import RecommendationRecord
+from src.pipeline.storage import atomic_write_json
 
 logger = get_logger(__name__)
 
@@ -71,10 +72,8 @@ def load_history(data_dir: str) -> list[RecommendationRecord]:
 
 
 def save_history(records: list[RecommendationRecord], data_dir: str) -> None:
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _HISTORY_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([_record_to_dict(r) for r in records], f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, [_record_to_dict(r) for r in records])
     logger.info(f"[history] Saved {len(records)} recommendation records to {path}")
 
 
@@ -124,10 +123,8 @@ def load_mix_prep_history(data_dir: str) -> list[RecommendationRecord]:
 
 
 def save_mix_prep_history(records: list[RecommendationRecord], data_dir: str) -> None:
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _MIX_PREP_HISTORY_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([_record_to_dict(r) for r in records], f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, [_record_to_dict(r) for r in records])
     logger.info(f"[history] Saved {len(records)} mix-prep history records to {path}")
 
 

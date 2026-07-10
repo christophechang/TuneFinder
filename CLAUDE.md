@@ -12,6 +12,8 @@ Key paths:
 - `src/models.py` — shared dataclasses and canonical record shapes
 - `src/fetchers/` — source-specific scraping and ingestion
 - `src/pipeline/` — ranking, dedup, history, reporting, pool/profile logic
+- `src/services/runs.py` — run orchestration shared by CLI and web API
+- `src/web/` — FastAPI web service (`tunefinder serve`); schemas.py is the OpenAPI contract tunefinder-web generates types from
 - `config/settings.yaml` — source toggles, pipeline counts, channel names
 - `tests/` — pytest suite mirroring `src/` layout; mock external IO (Discord)
 

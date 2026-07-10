@@ -12,6 +12,7 @@
 - `src/fetchers/` contains one module per source. Keep source-specific scraping logic isolated to its own module.
 - `src/pipeline/` contains profile building, deduplication, ranking, history, pool management, and report generation.
 - `src/output/discord.py` handles Discord posting. Avoid mixing posting logic into pipeline modules.
+- `src/services/runs.py` holds the weekly/mix-prep run orchestration (CLI and web API both call it). `src/web/` is the FastAPI service behind tunefinder-web; `src/web/schemas.py` is a published contract — change deliberately.
 
 ## Working Style
 - Inspect the existing module before changing behavior. Follow established naming, data flow, and logging patterns.

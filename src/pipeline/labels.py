@@ -41,6 +41,7 @@ from datetime import datetime, timedelta, timezone
 from src.logger import get_logger
 from src.models import ArtistProfile, Candidate
 from src.pipeline.profile import _split_artists, resolve_profile
+from src.pipeline.storage import atomic_write_json
 
 logger = get_logger(__name__)
 
@@ -63,10 +64,8 @@ def load_label_affinity(data_dir: str) -> dict:
 
 
 def save_label_affinity(store: dict, data_dir: str) -> None:
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _LABEL_AFFINITY_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(store, f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, store)
     associations = sum(len(entry.get("artists", {})) for entry in store.values())
     logger.info(f"[labels] Saved label affinity store — {len(store)} labels, {associations} associations to {path}")
 

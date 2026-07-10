@@ -12,6 +12,7 @@ from typing import Optional
 from src.models import RecommendationRecord
 from src.pipeline.dedup import make_dedup_key, normalise_artist
 from src.pipeline.profile import _split_artists
+from src.pipeline.storage import atomic_write_json
 
 OUTCOMES = ("bought", "liked", "skip", "own")
 
@@ -72,10 +73,8 @@ def load_feedback(data_dir: str) -> list[FeedbackEntry]:
 def append_feedback(entry: FeedbackEntry, data_dir: str) -> None:
     existing = load_feedback(data_dir)
     existing.append(entry)
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _FEEDBACK_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([_entry_to_dict(e) for e in existing], f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, [_entry_to_dict(e) for e in existing])
 
 
 # ---------------------------------------------------------------------------
@@ -365,16 +364,37 @@ def _fmt_lift(positive: int, non_own: int, baseline: float, marked: int) -> str:
     return f"{round(rate / baseline, 2):.2f}"
 
 
-def tune_report(
+def _tune_signal_values(rec: RecommendationRecord) -> list[str]:
+    return list(rec.signal_codes) if rec.signal_codes else ["(pre-v0.8.0)"]
+
+
+def _tune_genre_values(rec: RecommendationRecord) -> list[str]:
+    return list(rec.genre_tags) if rec.genre_tags else ["(pre-v0.8.0)"]
+
+
+def _tune_source_values(rec: RecommendationRecord) -> list[str]:
+    return [rec.source or "(unknown)"]
+
+
+# (machine key, display title, extractor) — order is the render order.
+_TUNE_DIMS = (
+    ("signal", "By signal", _tune_signal_values),
+    ("source", "By source", _tune_source_values),
+    ("genre", "By genre", _tune_genre_values),
+)
+
+
+def tune_data(
     weekly: list[RecommendationRecord],
     mix_prep: list[RecommendationRecord],
     entries: list[FeedbackEntry],
-) -> str:
-    """Join feedback marks against recommendation history and report, per signal
-    code / source / genre: recommended count, marked, positive, positive rate,
-    and lift vs. the overall baseline positive rate. Pure — returns plain text,
-    no printing, no IO. `own` is excluded from every positive-rate denominator
-    (an identity-gap miss, not a taste signal — same convention as `stats`).
+) -> dict:
+    """Structured feedback-vs-history aggregation behind tune_report — pure.
+
+    Returns raw counters per dimension value plus overall totals; consumers
+    (the text report below, the web API) derive rate/lift from the counters.
+    `own` is excluded from every positive-rate denominator (an identity-gap
+    miss, not a taste signal — same convention as `stats`).
     """
     # Newest recommendation record per (history, dedup-key). A track can be
     # recommended in both weekly and mix-prep — those are distinct records and
@@ -388,22 +408,8 @@ def tune_report(
 
     marks_by_hk = {(e.history, e.key): e for e in latest_marks(entries)}
 
-    def _signal_values(rec: RecommendationRecord) -> list[str]:
-        return list(rec.signal_codes) if rec.signal_codes else ["(pre-v0.8.0)"]
-
-    def _genre_values(rec: RecommendationRecord) -> list[str]:
-        return list(rec.genre_tags) if rec.genre_tags else ["(pre-v0.8.0)"]
-
-    def _source_values(rec: RecommendationRecord) -> list[str]:
-        return [rec.source or "(unknown)"]
-
-    dims = {
-        "By signal": _signal_values,
-        "By source": _source_values,
-        "By genre": _genre_values,
-    }
-    # dim_title -> value -> counters
-    agg: dict[str, dict[str, dict[str, int]]] = {name: {} for name in dims}
+    # dim key -> value -> counters
+    agg: dict[str, dict[str, dict[str, int]]] = {key: {} for key, _, _ in _TUNE_DIMS}
 
     def _slot(dim: str, value: str) -> dict[str, int]:
         return agg[dim].setdefault(
@@ -412,7 +418,7 @@ def tune_report(
 
     # Pass A — recommended counts over the full recommendation corpus.
     for rec in records_by_hk.values():
-        for dim, extractor in dims.items():
+        for dim, _, extractor in _TUNE_DIMS:
             for value in extractor(rec):
                 _slot(dim, value)["recommended"] += 1
 
@@ -431,7 +437,7 @@ def tune_report(
             overall_non_own += 1
         if is_positive:
             overall_positive += 1
-        for dim, extractor in dims.items():
+        for dim, _, extractor in _TUNE_DIMS:
             for value in extractor(rec):
                 slot = _slot(dim, value)
                 slot["marked"] += 1
@@ -444,23 +450,50 @@ def tune_report(
     coverage = round(overall_marked / recommended_total * 100, 1) if recommended_total else 0.0
     baseline = overall_positive / overall_non_own if overall_non_own else 0.0
 
+    return {
+        "recommended_total": recommended_total,
+        "marked": overall_marked,
+        "non_own": overall_non_own,
+        "positive": overall_positive,
+        "coverage_pct": coverage,
+        "baseline": baseline,
+        "thin_data": overall_non_own < _MIN_MARKS_FOR_CONCLUSIONS,
+        "min_marks_threshold": _MIN_MARKS_FOR_CONCLUSIONS,
+        "dimensions": agg,
+    }
+
+
+def tune_report(
+    weekly: list[RecommendationRecord],
+    mix_prep: list[RecommendationRecord],
+    entries: list[FeedbackEntry],
+) -> str:
+    """Join feedback marks against recommendation history and report, per signal
+    code / source / genre: recommended count, marked, positive, positive rate,
+    and lift vs. the overall baseline positive rate. Pure — returns plain text,
+    no printing, no IO. `own` is excluded from every positive-rate denominator
+    (an identity-gap miss, not a taste signal — same convention as `stats`).
+    """
+    data = tune_data(weekly, mix_prep, entries)
+    baseline = data["baseline"]
+
     lines = ["=== Feedback-Driven Tuning Report ==="]
     lines.append(
-        f"Recommended: {recommended_total}  |  Marked: {overall_marked}  |  "
-        f"Coverage: {coverage}%  |  Baseline positive rate: {_fmt_rate(overall_positive, overall_non_own)}"
+        f"Recommended: {data['recommended_total']}  |  Marked: {data['marked']}  |  "
+        f"Coverage: {data['coverage_pct']}%  |  Baseline positive rate: {_fmt_rate(data['positive'], data['non_own'])}"
     )
-    if overall_non_own < _MIN_MARKS_FOR_CONCLUSIONS:
+    if data["thin_data"]:
         lines.append("")
         lines.append(
-            f"⚠️  Only {overall_non_own} marks — treat everything below as anecdote, not evidence."
+            f"⚠️  Only {data['non_own']} marks — treat everything below as anecdote, not evidence."
         )
 
-    for dim in dims:
-        rows = agg[dim]
+    for dim, title, _ in _TUNE_DIMS:
+        rows = data["dimensions"][dim]
         if not rows:
             continue
         lines.append("")
-        lines.append(f"{dim}:")
+        lines.append(f"{title}:")
         for value, c in sorted(rows.items(), key=lambda kv: (-kv[1]["marked"], kv[0])):
             rate = _fmt_rate(c["positive"], c["non_own"])
             lift = _fmt_lift(c["positive"], c["non_own"], baseline, c["marked"])

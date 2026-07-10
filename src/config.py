@@ -144,6 +144,42 @@ class Settings:
     def audition_base_url(self) -> str:
         return os.getenv("TUNEFINDER_AUDITION_BASE_URL", "").rstrip("/")
 
+    # --- Web service (src/web) ---
+
+    @property
+    def web_api_secret(self) -> str:
+        """Bearer secret required on every /api call (except /api/health)."""
+        return os.getenv("TUNEFINDER_API_SECRET", "")
+
+    @property
+    def web_insecure(self) -> bool:
+        """Explicit opt-out of auth for LAN-only use — TUNEFINDER_WEB_INSECURE=1."""
+        return os.getenv("TUNEFINDER_WEB_INSECURE", "") == "1"
+
+    @property
+    def web_allowed_origins(self) -> list[str]:
+        """CORS origins for the SPA. Env (comma-separated) overrides YAML.
+
+        Empty by default — the zero-CORS paths (static mount, same-origin
+        reverse proxy) need nothing here.
+        """
+        env_val = os.getenv("TUNEFINDER_WEB_ALLOWED_ORIGINS", "")
+        if env_val:
+            return [o.strip() for o in env_val.split(",") if o.strip()]
+        origins = self._data.get("web", {}).get("allowed_origins", [])
+        return [str(o) for o in origins] if isinstance(origins, list) else []
+
+    @property
+    def web_base_url(self) -> str:
+        """Public URL of the web app — when set, Discord reports link to it
+        (superseding the audition-page link)."""
+        return os.getenv("TUNEFINDER_WEB_BASE_URL", "").rstrip("/")
+
+    @property
+    def web_static_dir(self) -> str:
+        """Optional built-SPA directory served by `tunefinder serve` (zero-CORS LAN mode)."""
+        return os.getenv("TUNEFINDER_WEB_STATIC_DIR", "")
+
     # --- Testing ---
 
     @property

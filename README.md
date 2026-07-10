@@ -22,6 +22,21 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 5. **Report** — deterministic renderer: reasons composed from catalog facts (play count, prior titles, chart position, label/artist data) in `src/pipeline/reasons.py`; Discord-formatted report built in `src/pipeline/report.py`
 6. **Post** — sends the report to your Discord `#music-research` channel via Bot token
 
+## Web app
+
+TuneFinder ships a web application — [tunefinder-web](https://github.com/christophechang/tunefinder-web) — over a FastAPI backend in this repo (`tunefinder serve`). It replaces the interactive surfaces that used to be CLI homework: browse weekly and mix-prep reports with inline audition players, mark feedback (`bought / liked / skip / own`) in one tap, run mix prep with BPM and Camelot key filters from a key wheel, trigger weekly runs with live progress, and inspect the engine (per-signal lift, genre/label affinity, candidate pool, `explain` traces).
+
+```bash
+# on the machine that holds data/ (the Mac mini)
+./venv/bin/python -m tunefinder serve          # http://127.0.0.1:8420, docs at /docs
+```
+
+- Auth: `TUNEFINDER_API_SECRET` bearer secret (fail-closed; `TUNEFINDER_WEB_INSECURE=1` opts out on a trusted network).
+- Every live run also writes a structured report artifact (`data/reports/report_{id}.json`) — the web app's data source; older reports render degraded from history records.
+- Runs are serialised by a `data/` lock — web-triggered and scheduled runs can't interleave.
+- Set `TUNEFINDER_WEB_BASE_URL` and the Discord report links to the web report instead of the audition page.
+- Architecture: `docs/architecture/tunefinder-web.md` · deployment runbook: `docs/ops/web-service.md`.
+
 ## Sources
 
 | Source | Method | Status |
@@ -269,6 +284,12 @@ DISCORD_GUILD_ID=         # Your Discord server ID
 
 # Sources (optional)
 VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without this
+
+# Web service (optional — see docs/ops/web-service.md)
+TUNEFINDER_API_SECRET=            # Bearer secret for the web API (required by `serve`)
+TUNEFINDER_WEB_STATIC_DIR=        # Serve a built tunefinder-web bundle from the API origin
+TUNEFINDER_WEB_BASE_URL=          # Discord reports link to the web app when set
+TUNEFINDER_WEB_ALLOWED_ORIGINS=   # CORS origins for a separately-hosted SPA
 ```
 
 ## First-time setup
@@ -330,6 +351,9 @@ VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without th
 
 # Feedback-driven per-signal/source/genre positive-rate and lift report (no Discord env vars needed)
 ./venv/bin/python -m tunefinder tune-report
+
+# Run the web API (tunefinder-web backend) — see docs/ops/web-service.md
+./venv/bin/python -m tunefinder serve --host 127.0.0.1 --port 8420
 ```
 
 ### mark / stats notes
