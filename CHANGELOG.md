@@ -2,6 +2,21 @@
 
 All notable changes to TuneFinder. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Web transformation (issues #14–#16; SPA in [tunefinder-web](https://github.com/christophechang/tunefinder-web))
+
+TuneFinder is now a web application: a FastAPI service in this repo (running on the mini, next to `data/`) plus the tunefinder-web SPA. Architecture and the deliberate divergence from MixLab Anywhere are recorded in `docs/architecture/tunefinder-web.md`; deployment runbook in `docs/ops/web-service.md`.
+
+- **Run services extraction** (#14). `cmd_run`/`cmd_mix_prep` orchestration moved verbatim into `src/services/runs.py` (`run_weekly`/`run_mix_prep` with progress callbacks and a structured `RunOutcome`); the CLI is a thin wrapper — behaviour and snapshots unchanged.
+- **Structured report artifact** (#14). Every live run writes `data/reports/report_{id}.json` — sections, deterministic reasons, signals, two-axis scores, BPM/Camelot key, player embed ids, funnel stats. The web app renders reports from it; artifacts are never pruned. Pre-artifact reports render degraded from history records.
+- **Write safety** (#14). All JSON stores now write atomically (temp + `os.replace`), and a `data/`-scoped file lock serialises pipeline runs across the web service, launchd, and manual CLI use (contention fails cleanly, exit 1 / HTTP 409).
+- **Web API** (#15). `tunefinder serve` (FastAPI/uvicorn, default `127.0.0.1:8420`): reports list/detail with feedback state joined, one-tap feedback marking, feedback stats + structured tune data, explain, profile/pool/source-health/config views, open `/api/health`. Bearer-secret auth (`TUNEFINDER_API_SECRET`, constant-time, fail-closed with an explicit `TUNEFINDER_WEB_INSECURE=1` opt-out), config-driven CORS, optional static SPA mount (`TUNEFINDER_WEB_STATIC_DIR`).
+- **On-demand runs** (#16). `POST /api/runs` starts weekly or mix-prep runs (genre/BPM/key validation matching the CLI) as background jobs with stage progress, log tail, restart-surviving history (`data/web_jobs.json`), and dry-run previews served from memory. One run at a time (409 on conflict).
+- **Discord → web linking** (#16). When `TUNEFINDER_WEB_BASE_URL` is set, report footers link to the web report ("Open in TuneFinder"), superseding the audition-page link.
+- `tune_data()` — structured aggregation behind `tune-report` (text output byte-identical) for the web insights page.
+- New runtime deps: `fastapi`, `uvicorn` (dev: `httpx`). Recorded assumption: authorised by the web-transformation brief.
+
 ## v0.10.0 — 2026-07-07
 
 ### Discovery quality (audit follow-up)

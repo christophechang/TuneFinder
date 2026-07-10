@@ -7,28 +7,36 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Outcome = Literal["bought", "liked", "skip", "own"]
 
 
-class Signal(BaseModel):
+class ApiModel(BaseModel):
+    """Response base: defaulted fields are still marked required in the
+    serialization schema, so the generated TypeScript types are non-optional
+    for fields the API always sends."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+
+class Signal(ApiModel):
     code: str
     explanation: str
 
 
-class Embed(BaseModel):
+class Embed(ApiModel):
     type: Literal["bandcamp", "beatport"]
     album_id: Optional[int] = None
     track_id: Optional[int] = None
 
 
-class TrackFeedback(BaseModel):
+class TrackFeedback(ApiModel):
     outcome: Outcome
     marked_at: str
 
 
-class ReportTrack(BaseModel):
+class ReportTrack(ApiModel):
     track_no: int
     key: str
     artist: str
@@ -55,13 +63,13 @@ class ReportTrack(BaseModel):
     feedback: Optional[TrackFeedback] = None
 
 
-class ReportSection(BaseModel):
+class ReportSection(ApiModel):
     key: str
     label: str
     tracks: list[ReportTrack]
 
 
-class ReportSummary(BaseModel):
+class ReportSummary(ApiModel):
     report_id: str
     kind: Literal["weekly", "mix-prep"]
     genre: Optional[str] = None
@@ -71,11 +79,11 @@ class ReportSummary(BaseModel):
     has_artifact: bool = False
 
 
-class ReportListResponse(BaseModel):
+class ReportListResponse(ApiModel):
     reports: list[ReportSummary]
 
 
-class ReportDetail(BaseModel):
+class ReportDetail(ApiModel):
     report_id: str
     kind: Literal["weekly", "mix-prep"]
     genre: Optional[str] = None
@@ -96,7 +104,7 @@ class FeedbackRequest(BaseModel):
     selector: Optional[str] = None
 
 
-class FeedbackResponse(BaseModel):
+class FeedbackResponse(ApiModel):
     key: str
     artist: str
     title: str
@@ -108,24 +116,24 @@ class FeedbackResponse(BaseModel):
     previous_outcome: Optional[str] = None
 
 
-class FeedbackStatsResponse(BaseModel):
+class FeedbackStatsResponse(ApiModel):
     stats: dict
     tune: dict
 
 
-class ExplainResponse(BaseModel):
+class ExplainResponse(ApiModel):
     selector: str
     text: str
 
 
-class ArtistSummary(BaseModel):
+class ArtistSummary(ApiModel):
     name: str
     play_count: int
     recency_weighted_play_count: float = 0.0
     genres_seen: list[str] = Field(default_factory=list)
 
 
-class LabelAffinitySummary(BaseModel):
+class LabelAffinitySummary(ApiModel):
     label: str
     display_name: str
     artist_count: int
@@ -133,7 +141,7 @@ class LabelAffinitySummary(BaseModel):
     last_seen: Optional[str] = None
 
 
-class ProfileResponse(BaseModel):
+class ProfileResponse(ApiModel):
     artist_count: int
     known_track_count: int
     top_artists: list[ArtistSummary]
@@ -141,7 +149,7 @@ class ProfileResponse(BaseModel):
     labels: list[LabelAffinitySummary] = Field(default_factory=list)
 
 
-class PoolTrack(BaseModel):
+class PoolTrack(ApiModel):
     key: str
     artist: str
     title: str
@@ -154,17 +162,17 @@ class PoolTrack(BaseModel):
     last_score: float = 0.0
 
 
-class PoolResponse(BaseModel):
+class PoolResponse(ApiModel):
     count: int
     cap: int
     tracks: list[PoolTrack]
 
 
-class SourceHealthResponse(BaseModel):
+class SourceHealthResponse(ApiModel):
     runs: list[dict]
 
 
-class ConfigResponse(BaseModel):
+class ConfigResponse(ApiModel):
     sources: dict[str, bool]
     pipeline: dict
     scoring: dict
@@ -172,7 +180,7 @@ class ConfigResponse(BaseModel):
     data_dir: str
 
 
-class HealthResponse(BaseModel):
+class HealthResponse(ApiModel):
     status: str
     version: str
     auth_required: bool
@@ -194,13 +202,13 @@ class RunRequest(BaseModel):
     dry_run: bool = False
 
 
-class JobStage(BaseModel):
+class JobStage(ApiModel):
     stage: str
     detail: str
     at: str
 
 
-class JobSummary(BaseModel):
+class JobSummary(ApiModel):
     id: str
     mode: Literal["weekly", "mix-prep"]
     status: Literal["queued", "running", "succeeded", "failed"]
@@ -221,9 +229,9 @@ class JobDetail(JobSummary):
     artifact: Optional[dict] = None
 
 
-class JobListResponse(BaseModel):
+class JobListResponse(ApiModel):
     jobs: list[JobSummary]
 
 
-class RunAccepted(BaseModel):
+class RunAccepted(ApiModel):
     job_id: str
