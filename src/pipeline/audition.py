@@ -23,6 +23,7 @@ from typing import Optional
 
 from src.pipeline.reasons import compose_reason
 from src.pipeline.report import _SECTION_ORDER, _group_label_watch, report_order
+from src.pipeline.storage import atomic_write_text
 
 _AUDITION_RETAIN = 26
 
@@ -242,8 +243,7 @@ def write_audition_page(html_content: str, data_dir: str, report_id: str) -> str
     os.makedirs(reports_dir, exist_ok=True)
 
     path = os.path.join(reports_dir, f"audition_{report_id}.html")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(html_content)
+    atomic_write_text(path, html_content)
 
     # Prune audition_*.html beyond most recent 26 by mtime
     candidates = sorted(

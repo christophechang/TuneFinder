@@ -12,6 +12,7 @@ import os
 from src.fetchers import bandcamp, beatport, bleep, boomkat, mixupload, ra, traxsource, volumo
 from src.logger import get_logger
 from src.models import SourceItem
+from src.pipeline.storage import atomic_write_json
 
 logger = get_logger(__name__)
 
@@ -97,10 +98,8 @@ def _dict_to_item(d: dict) -> SourceItem:
 
 
 def save_source_items(items: list[SourceItem], data_dir: str) -> None:
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _SOURCE_ITEMS_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([_item_to_dict(i) for i in items], f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, [_item_to_dict(i) for i in items])
     logger.info(f"[sources] Saved {len(items)} source items to {path}")
 
 

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from src.logger import get_logger
 from src.models import ArtistProfile, Mix, Track
+from src.pipeline.storage import atomic_write_json
 
 logger = get_logger(__name__)
 
@@ -196,11 +197,9 @@ def build_known_track_keys(tracks: list[Track], remix_aware: bool = False) -> se
 # ---------------------------------------------------------------------------
 
 def save_known_tracks(tracks: list[Track], data_dir: str, remix_aware: bool = False) -> None:
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _KNOWN_TRACKS_FILE)
     keys = sorted(build_known_track_keys(tracks, remix_aware))
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(keys, f, indent=2)
+    atomic_write_json(path, keys)
     logger.info(f"[profile] Saved {len(keys)} known track keys to {path}")
 
 
@@ -242,11 +241,9 @@ def _dict_to_profile(d: dict) -> ArtistProfile:
 
 
 def save_artist_profiles(profiles: dict[str, ArtistProfile], data_dir: str) -> None:
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _ARTIST_PROFILES_FILE)
     data = {name: _profile_to_dict(p) for name, p in profiles.items()}
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, data)
     logger.info(f"[profile] Saved {len(profiles)} artist profiles to {path}")
 
 
@@ -267,10 +264,8 @@ def load_artist_profiles(data_dir: str) -> dict[str, ArtistProfile]:
 # ---------------------------------------------------------------------------
 
 def save_genre_affinity(affinity: dict[str, float], data_dir: str) -> None:
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _GENRE_AFFINITY_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(affinity, f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, affinity)
     logger.info(f"[profile] Saved genre affinity for {len(affinity)} genres to {path}")
 
 

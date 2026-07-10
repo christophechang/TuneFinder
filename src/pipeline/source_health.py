@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from src.pipeline.storage import atomic_write_json
 
 _HEALTH_FILE = "source_health.json"
 _RETENTION = 26  # keep the most recent N runs (matches archive retention)
@@ -22,10 +23,8 @@ def append_run_health(health: dict, data_dir: str, report_id: str) -> None:
     combined = prior + [entry]
     if len(combined) > _RETENTION:
         combined = combined[-_RETENTION:]
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _HEALTH_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(combined, f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, combined)
 
 
 def load_run_health(data_dir: str) -> list[dict]:

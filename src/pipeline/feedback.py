@@ -12,6 +12,7 @@ from typing import Optional
 from src.models import RecommendationRecord
 from src.pipeline.dedup import make_dedup_key, normalise_artist
 from src.pipeline.profile import _split_artists
+from src.pipeline.storage import atomic_write_json
 
 OUTCOMES = ("bought", "liked", "skip", "own")
 
@@ -72,10 +73,8 @@ def load_feedback(data_dir: str) -> list[FeedbackEntry]:
 def append_feedback(entry: FeedbackEntry, data_dir: str) -> None:
     existing = load_feedback(data_dir)
     existing.append(entry)
-    os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, _FEEDBACK_FILE)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([_entry_to_dict(e) for e in existing], f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, [_entry_to_dict(e) for e in existing])
 
 
 # ---------------------------------------------------------------------------
