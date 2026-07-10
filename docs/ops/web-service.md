@@ -67,12 +67,69 @@ cloudflared tunnel login
 cloudflared tunnel create tunefinder
 # ~/.cloudflared/config.yml → ingress: tunefinder.yourdomain.com → http://127.0.0.1:8420
 cloudflared tunnel route dns tunefinder tunefinder.yourdomain.com
-sudo cloudflared service install   # keep-alive daemon
+sudo cloudflared service install   # keep-alive daemon (system LaunchDaemon)
 ```
 
 Optionally put Cloudflare Access (email OTP) in front of the hostname —
 bearer auth still applies behind it. Alternatives: Tailscale (zero config,
 private) or plain LAN.
+
+### No-sudo variant (remote/agent-driven installs)
+
+Field-tested when deploying over SSH without an interactive sudo password:
+
+- **Don't rely on non-sudo `cloudflared service install`.** It writes
+  `~/Library/LaunchAgents/com.cloudflare.cloudflared.plist` with broken
+  `ProgramArguments` (the bare binary, no `tunnel run <name>`), so launchd
+  spawns a process that exits immediately. Remove it
+  (`launchctl bootout gui/$(id -u)/com.cloudflare.cloudflared; rm` the plist)
+  and write your own LaunchAgent instead:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.openclaw.tunefinder-tunnel</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/cloudflared</string>
+    <string>--config</string>
+    <string>/Users/YOUR_USER/.cloudflared/config.yml</string>
+    <string>tunnel</string>
+    <string>run</string>
+    <string>tunefinder</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOUR_USER/Library/Logs/tunefinder-tunnel.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOUR_USER/Library/Logs/tunefinder-tunnel.log</string>
+</dict>
+</plist>
+```
+
+- **Bootstrap from an SSH session may register the job without spawning it**
+  (`state = not running`, `runs = 0`, no log file). Force the first start:
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.openclaw.tunefinder-tunnel.plist
+launchctl kickstart -p gui/$(id -u)/com.openclaw.tunefinder-tunnel
+```
+
+  `RunAtLoad` fires reliably at real login-time boots; only SSH-context
+  bootstraps need the explicit kickstart.
+
+- **Zero-downtime swap**: a tunnel accepts multiple connectors, so you can run
+  `cloudflared tunnel run tunefinder` manually (nohup) while setting up the
+  LaunchAgent, verify both connectors with `cloudflared tunnel info tunefinder`,
+  then kill the manual PID.
+
+- **Caveats**: a user LaunchAgent starts at login, so reboot survival needs
+  auto-login on the mini. Upgrade to a system daemon later with
+  `sudo cloudflared service install` (bootout + delete the user agent first).
+  The macOS application firewall may block inbound LAN access to Python
+  (curl to the LAN IP times out) — this does not affect the tunnel, which is
+  outbound-only to localhost.
 
 ## 4. The SPA
 
