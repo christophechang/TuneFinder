@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keep-alive launchd unit for the TuneFinder web API (`tunefinder serve`).
+  Replace every YOUR_ADMIN_USER below with your macOS username, and make sure
+  the paths match your actual checkout. Secrets (TUNEFINDER_API_SECRET, etc.)
+  are read from the .env file in WorkingDirectory — no need to inline them here.
+  Install: see docs/ops/web-service.md.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openclaw.tunefinder-web</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/venv/bin/python</string>
+    <string>-m</string>
+    <string>tunefinder</string>
+    <string>serve</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>8420</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/logs/web.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/logs/web.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

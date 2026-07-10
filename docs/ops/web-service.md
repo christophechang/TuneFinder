@@ -22,7 +22,10 @@ Sanity check: `./venv/bin/python -m tunefinder serve` then open
 
 ## 2. launchd unit (keep-alive)
 
-`~/Library/LaunchAgents/com.openclaw.tunefinder-web.plist`:
+A ready-to-edit unit ships in the repo root as `com.openclaw.tunefinder-web.plist`
+(alongside the weekly-run `com.openclaw.tune-finder.plist`). Copy it to
+`~/Library/LaunchAgents/`, replace every `YOUR_ADMIN_USER` with your macOS username,
+and confirm the paths match your checkout. For reference, its contents:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
