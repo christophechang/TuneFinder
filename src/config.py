@@ -65,6 +65,16 @@ class Settings:
     def discord_mix_prep_channel(self) -> str:
         return self._data.get("discord", {}).get("mix_prep_channel", "mix-prep")
 
+    # --- Beatport ---
+
+    @property
+    def beatport_username(self) -> str:
+        return os.getenv("BEATPORT_USERNAME", "")
+
+    @property
+    def beatport_password(self) -> str:
+        return os.getenv("BEATPORT_PASSWORD", "")
+
     # --- Sources ---
 
     def source_enabled(self, source_name: str) -> bool:
@@ -254,6 +264,13 @@ class Settings:
                     f"[config] Optional env var not set: {key} "
                     "(configured provider will be skipped)"
                 )
+
+        beatport = self._data.get("sources", {}).get("beatport", {})
+        if beatport.get("enabled") and not (self.beatport_username and self.beatport_password):
+            logger.warning(
+                "[config] Beatport is enabled but BEATPORT_USERNAME/BEATPORT_PASSWORD "
+                "are not both set — the source will report a failure until they are set."
+            )
 
         logger.info("[config] Validated — all required environment variables present.")
 

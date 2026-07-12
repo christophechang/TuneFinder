@@ -175,3 +175,48 @@ def test_artist_aliases_malformed_alias_value_not_a_list_logs_warning_returns_em
     settings = Settings({})
     assert settings.artist_aliases() == {}
     assert "Malformed aliases file" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Beatport credentials
+# ---------------------------------------------------------------------------
+
+
+def test_beatport_credentials_from_env(monkeypatch):
+    from src.config import Settings
+    monkeypatch.setenv("BEATPORT_USERNAME", "dj_test")
+    monkeypatch.setenv("BEATPORT_PASSWORD", "s3cret")
+    s = Settings({})
+    assert s.beatport_username == "dj_test"
+    assert s.beatport_password == "s3cret"
+
+
+def test_beatport_credentials_default_empty(monkeypatch):
+    from src.config import Settings
+    monkeypatch.delenv("BEATPORT_USERNAME", raising=False)
+    monkeypatch.delenv("BEATPORT_PASSWORD", raising=False)
+    s = Settings({})
+    assert s.beatport_username == ""
+    assert s.beatport_password == ""
+
+
+def test_validate_warns_when_beatport_enabled_without_creds(monkeypatch, caplog):
+    from src.config import Settings
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "x")
+    monkeypatch.setenv("DISCORD_GUILD_ID", "x")
+    monkeypatch.delenv("BEATPORT_USERNAME", raising=False)
+    monkeypatch.delenv("BEATPORT_PASSWORD", raising=False)
+    s = Settings({"sources": {"beatport": {"enabled": True}}})
+    with caplog.at_level("WARNING"):
+        s.validate()
+    assert any("Beatport is enabled" in r.message for r in caplog.records)
+
+
+def test_validate_silent_when_beatport_disabled(monkeypatch, caplog):
+    from src.config import Settings
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "x")
+    monkeypatch.setenv("DISCORD_GUILD_ID", "x")
+    s = Settings({"sources": {"beatport": {"enabled": False}}})
+    with caplog.at_level("WARNING"):
+        s.validate()
+    assert not any("Beatport is enabled" in r.message for r in caplog.records)
