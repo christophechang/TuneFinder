@@ -11,7 +11,7 @@ discord:
 sources:
 
   beatport:
-    enabled: true
+    enabled: false   # Cloudflare "Just a moment" challenge on chart pages since ~2026-07-10 — plain HTTP fetch returns 403. Re-enable once a JS-capable fetch or the official API is wired up.
     chart_pattern: "https://www.beatport.com/genre/{slug}/{id}/top-100"
     genres:
       # Standalone genres
