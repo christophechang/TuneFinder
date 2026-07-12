@@ -4,6 +4,14 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.12.0 — 2026-07-12
+
+### Sources
+
+- **Beatport re-enabled via the internal v4 API.** Replaces the Cloudflare-blocked `__NEXT_DATA__` chart scraper (disabled in v0.11.0) with the internal Beatport v4 API at `api.beatport.com`, which is not behind Cloudflare. New `src/fetchers/beatport_auth.py` handles auth end-to-end: it scrapes the public docs `client_id` at runtime (nothing hardcoded), logs in with stored credentials, runs the OAuth2 PKCE authorization-code flow, and caches/refreshes the ~10-hour Bearer token in `data/beatport_token.json` (mode `0600`). `src/fetchers/beatport.py` fetches each genre's top-100 chart from `/catalog/genres/{id}/top/100/` (following the API's `next` URL) with the **same `SourceItem` contract** as before — `chart_position` preserved — plus additive `raw_metadata` enrichments: musical `key` (which lights up harmonic mixing for Beatport tracks), `mix_name`, and `isrc`. `label` now comes from the nested `release.label`.
+- **Config & failure handling.** Requires `BEATPORT_USERNAME` / `BEATPORT_PASSWORD` in `.env`. An *enabled* Beatport source with missing credentials or an auth failure surfaces as a source-health `FAILED` alert rather than a silent empty result — graceful: the run still completes on the other sources. No new runtime dependencies (`requests` + stdlib PKCE).
+- Design + implementation plan recorded in `docs/superpowers/specs/2026-07-12-beatport-api-migration-design.md` and `docs/superpowers/plans/2026-07-12-beatport-api-migration.md`. Live validation: 1300 tracks across 13/13 genres, `label`/`key` populated on all. (Unofficial API — official access was declined by Beatport; personal, read-only use.)
+
 ## v0.11.0 — 2026-07-12
 
 ### Web transformation (issues #14–#16; SPA in [tunefinder-web](https://github.com/christophechang/tunefinder-web))
