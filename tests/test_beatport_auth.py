@@ -194,6 +194,26 @@ def test_exchange_token_non_200_raises():
         pass
 
 
+def test_exchange_token_missing_access_token_raises():
+    session = MagicMock()
+    session.post.return_value = MagicMock(status_code=200, json=lambda: {})  # 200 but no access_token
+    try:
+        ba._exchange_token(session, "CID", "CODE", "V")
+        assert False, "expected BeatportAuthError"
+    except ba.BeatportAuthError:
+        pass
+
+
+def test_refresh_missing_access_token_raises():
+    session = MagicMock()
+    session.post.return_value = MagicMock(status_code=200, json=lambda: {})
+    try:
+        ba._refresh(session, "CID", "RT")
+        assert False, "expected BeatportAuthError"
+    except ba.BeatportAuthError:
+        pass
+
+
 def test_refresh_posts_client_id_and_token():
     session = MagicMock()
     session.post.return_value = MagicMock(status_code=200, json=lambda: {"access_token": "N"})

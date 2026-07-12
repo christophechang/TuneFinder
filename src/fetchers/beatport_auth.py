@@ -131,7 +131,10 @@ def _exchange_token(session: requests.Session, client_id: str, code: str, verifi
     }, timeout=_TIMEOUT)
     if r.status_code != 200:
         raise BeatportAuthError(f"token exchange failed: HTTP {r.status_code}")
-    return r.json()
+    data = r.json()
+    if not isinstance(data.get("access_token"), str) or not data["access_token"]:
+        raise BeatportAuthError("token response missing access_token")
+    return data
 
 
 def _refresh(session: requests.Session, client_id: str, refresh_token: str) -> dict:
@@ -142,7 +145,10 @@ def _refresh(session: requests.Session, client_id: str, refresh_token: str) -> d
     }, timeout=_TIMEOUT)
     if r.status_code != 200:
         raise BeatportAuthError(f"refresh failed: HTTP {r.status_code}")
-    return r.json()
+    data = r.json()
+    if not isinstance(data.get("access_token"), str) or not data["access_token"]:
+        raise BeatportAuthError("token response missing access_token")
+    return data
 
 
 def get_access_token(settings) -> str:
