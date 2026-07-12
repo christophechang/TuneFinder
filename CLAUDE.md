@@ -56,4 +56,14 @@ Run these on the `develop` branch (the branch work lands on). `main` is the prod
    ```bash
    cd /Users/christophechang/OpenClaw/Automations/TuneFinder && git checkout main && git pull origin main
    ```
-   Confirm the pull succeeded and the working tree is clean before reporting done.
+   Confirm the pull succeeded and the working tree is clean.
+
+10. **Restart the web service** — the resident `tunefinder serve` process imports Python modules once at startup, so `git pull` alone does **not** update code for web-triggered runs (`POST /api/runs`, logged to `logs/web.log`); it keeps executing the code it imported at boot. Config is re-read from disk per run, but code is not — so a deploy silently serves stale code to the web app until the process is restarted. Restart it so the new code loads:
+   ```bash
+   launchctl kickstart -k gui/$(id -u)/com.openclaw.tunefinder-web
+   ```
+   Then confirm it came back up (no sudo needed for this gui-domain LaunchAgent):
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8420/api/health   # expect 200
+   ```
+   Report done only after the health check returns `200`.
