@@ -9,7 +9,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Outcome = Literal["bought", "liked", "skip", "own"]
+Outcome = Literal["bought", "liked", "skip", "own", "heard"]
 
 
 class ApiModel(BaseModel):

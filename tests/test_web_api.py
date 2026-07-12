@@ -195,6 +195,13 @@ def test_feedback_not_found_404(client):
     assert r.status_code == 404
 
 
+def test_feedback_heard_outcome_accepted(client):
+    r = client.post("/api/feedback", headers=AUTH,
+                    json={"outcome": "heard", "report_id": "2026-W27", "track_no": 1})
+    assert r.status_code == 200
+    assert r.json()["outcome"] == "heard"
+
+
 def test_feedback_invalid_outcome_422(client):
     r = client.post("/api/feedback", headers=AUTH,
                     json={"outcome": "meh", "report_id": "2026-W27", "track_no": 1})

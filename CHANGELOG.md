@@ -4,6 +4,12 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.13.0 — 2026-07-12
+
+### Feedback
+
+- **New neutral `heard` outcome.** A fifth feedback state alongside `bought`/`liked`/`skip`/`own`, for "listened, no verdict" — so a revisited report shows which recommendations you've already auditioned. Deliberately inert: it never feeds the skip-derived artist penalty and is excluded from every positive-rate denominator (a new `NEUTRAL_OUTCOMES` groups it with `own`), so a lukewarm play never dents the artist's or genre's stats. Available on the web feedback buttons, the CLI `mark` command, and the audition page.
+
 ## v0.12.0 — 2026-07-12
 
 ### Sources
