@@ -23,6 +23,8 @@ If a change affects commands, config keys, or operator workflow, update `README.
 
 When user says **"deploy release"**:
 
+Run these on the `develop` branch (the branch work lands on). `main` is the production trunk — production pulls `origin/main` — so the release must be fast-forwarded onto `main` before deploying.
+
 1. **Determine version** — inspect `CHANGELOG.md` for the next version to use (or decide based on unreleased changes: patch/minor/major).
 
 2. **Update CHANGELOG.md** — gather all changes that are either:
@@ -30,15 +32,27 @@ When user says **"deploy release"**:
    - Committed but not yet pushed to `origin/develop`
    Add them under a new version header with today's date.
 
-2. **Update README.md** — check readme to check for stale / incorrect details. If inconsistencies found, update the file.
+3. **Update README.md** — check readme to check for stale / incorrect details. If inconsistencies found, update the file.
 
-3. **Commit changelog** — stage and commit `CHANGELOG.md` (and any other uncommitted changes) with message `chore: prepare vX.Y.Z release`.
+4. **Commit changelog** — stage and commit `CHANGELOG.md` (and any other uncommitted changes) with message `chore: prepare vX.Y.Z release`.
 
-4. **Push develop** — `git push origin develop`.
+5. **Push develop** — `git push origin develop`.
 
-5. **Tag the release** — `git tag vX.Y.Z` then `git push origin vX.Y.Z`.
+6. **Fast-forward `main` and push** — bring `main` up to the release commit, then return to `develop`:
+   ```bash
+   git checkout main && git merge --ff-only develop && git push origin main && git checkout develop
+   ```
+   If the fast-forward fails (main has commits develop lacks), stop and reconcile — do not force.
 
-6. **Deploy to production server** — SSH as `christophechang@192.168.1.122` and run:
+7. **Tag the release** — tag the released commit on `main`: `git tag vX.Y.Z` then `git push origin vX.Y.Z`.
+
+8. **Create the GitHub Release** — publish a Release object for the tag so the Releases page stays current (tags alone don't create one):
+   ```bash
+   gh release create vX.Y.Z --verify-tag --latest --title "vX.Y.Z — <short summary>" --notes-file <notes>
+   ```
+   Use the new `CHANGELOG.md` section for the notes (write it to a temp file and pass via `--notes-file`).
+
+9. **Deploy to production server** — SSH as `christophechang@192.168.1.122` and run:
    ```bash
    cd /Users/christophechang/OpenClaw/Automations/TuneFinder && git checkout main && git pull origin main
    ```

@@ -4,6 +4,8 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.11.0 — 2026-07-12
+
 ### Web transformation (issues #14–#16; SPA in [tunefinder-web](https://github.com/christophechang/tunefinder-web))
 
 TuneFinder is now a web application: a FastAPI service in this repo (running on the mini, next to `data/`) plus the tunefinder-web SPA. Architecture and the deliberate divergence from MixLab Anywhere are recorded in `docs/architecture/tunefinder-web.md`; deployment runbook in `docs/ops/web-service.md`.
@@ -16,6 +18,15 @@ TuneFinder is now a web application: a FastAPI service in this repo (running on 
 - **Discord → web linking** (#16). When `TUNEFINDER_WEB_BASE_URL` is set, report footers link to the web report ("Open in TuneFinder"), superseding the audition-page link.
 - `tune_data()` — structured aggregation behind `tune-report` (text output byte-identical) for the web insights page.
 - New runtime deps: `fastapi`, `uvicorn` (dev: `httpx`). Recorded assumption: authorised by the web-transformation brief.
+
+### Sources
+
+- **Beatport disabled.** Beatport put a Cloudflare "Just a moment" managed challenge on its genre chart pages around 2026-07-10 (`cf-mitigated: challenge`, HTTP 403); plain HTTP fetches can no longer pass, and the 2026-07-12 weekly run processed 0 Beatport tracks. Disabled in `config/settings.yaml` (genre list preserved for easy re-enable) until a JS-capable fetch or the official Beatport API is wired up. README source table updated to `blocked (Cloudflare)`.
+
+### Ops & tooling
+
+- **`deploy release` workflow completed** (`CLAUDE.md`). Added the missing `main` fast-forward and GitHub Release creation steps, so tags, `origin/main`, production, and the GitHub Releases page stay in lockstep. Backfilled GitHub Releases for `v0.7.0`–`v0.10.0` (previously tag-only).
+- **cloudflared LaunchAgent** — no-sudo install procedure documented from the live deployment.
 
 ## v0.10.0 — 2026-07-07
 
