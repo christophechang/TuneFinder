@@ -136,6 +136,7 @@ def test_weekly_number_form_commands():
                                   label_artists=label_artists, today=TODAY, mark_by_number=True)
     assert "tunefinder mark 1 bought" in html
     assert "tunefinder mark 2 liked" in html
+    assert "tunefinder mark 1 heard" in html
 
 
 def test_mix_prep_string_form_commands():

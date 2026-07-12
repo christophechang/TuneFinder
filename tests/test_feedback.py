@@ -194,6 +194,10 @@ def _mix_prep_record(**kwargs) -> RecommendationRecord:
     return _rec(report_id="2026-W24-mix-prep-dnb", **kwargs)
 
 
+def test_heard_is_a_recognised_outcome():
+    assert "heard" in OUTCOMES
+
+
 def test_empty_feedback_returns_empty_dict():
     result = summarise_feedback([], [], [])
     assert result == {}
@@ -218,6 +222,20 @@ def test_own_excluded_from_positive_rate():
     assert bucket["own_count"] == 1
     assert bucket["positive_rate"] == 0.0
     assert bucket["marked"] == 1
+
+
+def test_heard_excluded_from_positive_rate():
+    """`heard` is neutral like `own` — it must not enter the positive-rate
+    denominator, so a bought + heard pair reads 100% positive, not 50%."""
+    w = [_weekly_record(track_no=1), _weekly_record(artist="Sully", title="G", track_no=2)]
+    entries = [
+        _entry(outcome="bought"),
+        _entry(artist="Sully", title="G", track_no=2, outcome="heard"),
+    ]
+    result = summarise_feedback(w, [], entries)
+    bucket = result["weekly"]
+    assert bucket["marked"] == 2
+    assert bucket["positive_rate"] == 100.0
 
 
 def test_latest_entry_wins_per_history_key(tmp_path):
@@ -343,6 +361,27 @@ def test_skipped_artists_own_outcome_is_neutral():
     assert skipped_artists(entries, min_skips=2) == {"sully"}
 
 
+def test_skipped_artists_heard_outcome_is_neutral():
+    """`heard` must never contribute to (or cancel) the skip penalty: it neither
+    counts as a skip nor disqualifies like a positive mark."""
+    entries = [
+        _entry(artist="Sully", title="T1", outcome="skip", days_ago=3),
+        _entry(artist="Sully", title="T2", outcome="skip", days_ago=2),
+        _entry(artist="Sully", title="T3", outcome="heard", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == {"sully"}
+
+
+def test_heard_alone_never_skips_artist():
+    """An artist you've only ever 'heard' is never penalised, however many times."""
+    entries = [
+        _entry(artist="Sasha", title="T1", outcome="heard", days_ago=3),
+        _entry(artist="Sasha", title="T2", outcome="heard", days_ago=2),
+        _entry(artist="Sasha", title="T3", outcome="heard", days_ago=1),
+    ]
+    assert skipped_artists(entries, min_skips=2) == set()
+
+
 def test_skipped_artists_combines_both_histories():
     entries = [
         _entry(artist="Sully", title="T1", outcome="skip", history="weekly", days_ago=2),
@@ -430,6 +469,22 @@ def test_tune_report_own_excluded_from_rate():
     # beatport: marked=2 but non-own denominator is 1 (own excluded) -> rate 100%
     assert "beatport: recommended=2 marked=2 positive=1 rate=100.0% lift=" in out
     # Baseline also excludes own: 1 positive / 1 non-own = 100%
+    assert "Baseline positive rate: 100.0%" in out
+
+
+def test_tune_report_heard_excluded_from_rate():
+    """`heard` is excluded from tune's non-own denominator, same as `own`."""
+    w = [
+        _weekly_record(artist="A", title="1", track_no=1, source="beatport"),
+        _weekly_record(artist="B", title="2", track_no=2, source="beatport"),
+    ]
+    entries = [
+        _entry(artist="A", title="1", outcome="bought"),
+        _entry(artist="B", title="2", outcome="heard"),
+    ]
+    out = tune_report(w, [], entries)
+    # beatport: marked=2 but non-own denominator is 1 (heard excluded) -> rate 100%
+    assert "beatport: recommended=2 marked=2 positive=1 rate=100.0% lift=" in out
     assert "Baseline positive rate: 100.0%" in out
 
 

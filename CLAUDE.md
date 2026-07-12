@@ -21,49 +21,21 @@ Validation: `./venv/bin/python -m tunefinder check-config` first. Run tests with
 
 If a change affects commands, config keys, or operator workflow, update `README.md` in the same pass.
 
-When user says **"deploy release"**:
+## Releasing a version
 
-Run these on the `develop` branch (the branch work lands on). `main` is the production trunk — production pulls `origin/main` — so the release must be fast-forwarded onto `main` before deploying.
+When the operator says **"deploy release"**: run the user-level `deploy-release` skill (changelog → README
+staleness check → verify → commit `chore: prepare vX.Y.Z release` → push `develop` → merge `main` → tag →
+GitHub release → back to `develop`). Repo specifics:
 
-1. **Determine version** — inspect `CHANGELOG.md` for the next version to use (or decide based on unreleased changes: patch/minor/major).
-
-2. **Update CHANGELOG.md** — gather all changes that are either:
-   - Uncommitted (working tree / staged), or
-   - Committed but not yet pushed to `origin/develop`
-   Add them under a new version header with today's date.
-
-3. **Update README.md** — check readme to check for stale / incorrect details. If inconsistencies found, update the file.
-
-4. **Commit changelog** — stage and commit `CHANGELOG.md` (and any other uncommitted changes) with message `chore: prepare vX.Y.Z release`.
-
-5. **Push develop** — `git push origin develop`.
-
-6. **Fast-forward `main` and push** — bring `main` up to the release commit, then return to `develop`:
-   ```bash
-   git checkout main && git merge --ff-only develop && git push origin main && git checkout develop
-   ```
-   If the fast-forward fails (main has commits develop lacks), stop and reconcile — do not force.
-
-7. **Tag the release** — tag the released commit on `main`: `git tag vX.Y.Z` then `git push origin vX.Y.Z`.
-
-8. **Create the GitHub Release** — publish a Release object for the tag so the Releases page stays current (tags alone don't create one):
-   ```bash
-   gh release create vX.Y.Z --verify-tag --latest --title "vX.Y.Z — <short summary>" --notes-file <notes>
-   ```
-   Use the new `CHANGELOG.md` section for the notes (write it to a temp file and pass via `--notes-file`).
-
-9. **Deploy to production server** — SSH as `christophechang@192.168.1.122` and run:
-   ```bash
-   cd /Users/christophechang/OpenClaw/Automations/TuneFinder && git checkout main && git pull origin main
-   ```
-   Confirm the pull succeeded and the working tree is clean.
-
-10. **Restart the web service** — the resident `tunefinder serve` process imports Python modules once at startup, so `git pull` alone does **not** update code for web-triggered runs (`POST /api/runs`, logged to `logs/web.log`); it keeps executing the code it imported at boot. Config is re-read from disk per run, but code is not — so a deploy silently serves stale code to the web app until the process is restarted. Restart it so the new code loads:
-   ```bash
-   launchctl kickstart -k gui/$(id -u)/com.openclaw.tunefinder-web
-   ```
-   Then confirm it came back up (no sudo needed for this gui-domain LaunchAgent):
-   ```bash
-   curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8420/api/health   # expect 200
-   ```
-   Report done only after the health check returns `200`.
+- `main` is the production trunk — production pulls `origin/main`. Merge with `git merge --ff-only develop`;
+  if the fast-forward fails (main has commits develop lacks), stop and reconcile — never force.
+- Tag `vX.Y.Z` on `main`. Create the GitHub Release with `--verify-tag --latest`, using the new
+  `CHANGELOG.md` section as notes (write to a temp file, pass via `--notes-file`).
+- Deploy: SSH `christophechang@192.168.1.122`, then
+  `cd /Users/christophechang/OpenClaw/Automations/TuneFinder && git checkout main && git pull origin main`
+  — confirm the pull succeeded and the working tree is clean.
+- Restart the web service — the resident `tunefinder serve` process imports code once at boot, so a pull
+  alone silently serves stale code to web-triggered runs (`POST /api/runs`):
+  `launchctl kickstart -k gui/$(id -u)/com.openclaw.tunefinder-web` (gui-domain LaunchAgent, no sudo).
+- Health check before reporting done (run on the prod box via the same SSH session — the service
+  binds locally): `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8420/api/health` → expect `200`.

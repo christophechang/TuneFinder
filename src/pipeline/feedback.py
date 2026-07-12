@@ -14,7 +14,13 @@ from src.pipeline.dedup import make_dedup_key, normalise_artist
 from src.pipeline.profile import _split_artists
 from src.pipeline.storage import atomic_write_json
 
-OUTCOMES = ("bought", "liked", "skip", "own")
+OUTCOMES = ("bought", "liked", "skip", "own", "heard")
+
+# Outcomes that carry no taste signal and are excluded from every positive-rate
+# denominator. `own` is an identity-gap mark (already in the library); `heard`
+# is "listened, no verdict" — deliberately inert so a lukewarm play never dents
+# the artist's or genre's stats. Neither feeds the skip-derived artist penalty.
+NEUTRAL_OUTCOMES = ("own", "heard")
 
 _FEEDBACK_FILE = "feedback.json"
 
@@ -263,7 +269,7 @@ def summarise_feedback(
         hist_entries = [e for e in effective if e.history == history_name]
         recommended = len(records_by_key)
         marked = len(hist_entries)
-        non_own = [e for e in hist_entries if e.outcome != "own"]
+        non_own = [e for e in hist_entries if e.outcome not in NEUTRAL_OUTCOMES]
         own_count = sum(1 for e in hist_entries if e.outcome == "own")
         positive = sum(1 for e in non_own if e.outcome in ("bought", "liked"))
         coverage_pct = round(marked / recommended * 100, 1) if recommended else 0.0
@@ -430,10 +436,10 @@ def tune_data(
         rec = records_by_hk.get(hk)
         if rec is None:
             continue
-        is_own = entry.outcome == "own"
+        is_neutral = entry.outcome in NEUTRAL_OUTCOMES
         is_positive = entry.outcome in _POSITIVE_OUTCOMES
         overall_marked += 1
-        if not is_own:
+        if not is_neutral:
             overall_non_own += 1
         if is_positive:
             overall_positive += 1
@@ -441,7 +447,7 @@ def tune_data(
             for value in extractor(rec):
                 slot = _slot(dim, value)
                 slot["marked"] += 1
-                if not is_own:
+                if not is_neutral:
                     slot["non_own"] += 1
                 if is_positive:
                     slot["positive"] += 1

@@ -102,7 +102,7 @@ def _copy_button(label: str, outcome: str, cmd: str) -> str:
 
 
 def _build_mark_buttons(n: int, artist: str, title: str, mark_by_number: bool) -> str:
-    outcomes = [("Bought", "bought"), ("Liked", "liked"), ("Skip", "skip"), ("Own", "own")]
+    outcomes = [("Bought", "bought"), ("Liked", "liked"), ("Skip", "skip"), ("Own", "own"), ("Heard", "heard")]
     buttons = []
     for label, outcome in outcomes:
         if mark_by_number:
