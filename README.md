@@ -16,7 +16,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 ## How it works
 
 1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
-2. **Fetch** — scrapes new releases from Beatport, Bandcamp, Volumo, and Mixupload (Traxsource and Resident Advisor are available but disabled by default)
+2. **Fetch** — fetches new releases from Beatport (via the v4 API), Bandcamp, Volumo, and Mixupload (Traxsource and Resident Advisor are available but disabled by default)
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches; embed metadata (`beatport_id`, `bandcamp_album_id`, `bpm`, `keysign`, etc.) is backfilled from merged-away duplicates so cross-source tracks retain all embed ids. By default all version suffixes collapse (`Title (Original Mix)` ≡ `Title`), so owning/recommending one version suppresses the rest. Enabling `pipeline.remix_aware_identity` (see Configuration) keeps generic versions (Original/Extended/Radio) merging but gives a *named* remix its own identity, so a "(Calibre Remix)" is no longer suppressed just because you own the original
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
 5. **Report** — deterministic renderer: reasons composed from catalog facts (play count, prior titles, chart position, label/artist data) in `src/pipeline/reasons.py`; Discord-formatted report built in `src/pipeline/report.py`
@@ -41,7 +41,7 @@ TuneFinder ships a web application — [tunefinder-web](https://github.com/chris
 
 | Source | Method | Status |
 |---|---|---|
-| Beatport | Genre top-100 chart (`__NEXT_DATA__` JSON) | blocked (Cloudflare challenge since ~2026-07-10) |
+| Beatport | Genre top-100 chart (v4 API) | ✅ |
 | Bandcamp | `discover_web` JSON API | ✅ |
 | Volumo | REST API (`/api/v1/albums`) | ✅ (no preview URLs in API — rows are link-only in audition page) |
 | Mixupload | HTML scrape (chart + genre pages) | ✅ |
@@ -222,7 +222,7 @@ Pool candidates injected into mix-prep are exempt from the release-date window (
 
 ### BPM/key filtering
 
-`mix-prep` can narrow results to a tempo range and/or a harmonically compatible key — the facts a DJ actually filters by when building a set. BPM and key metadata come from `raw_metadata` (Volumo: `bpm` + `keysign`; Beatport: `bpm`; Mixupload: `bpm` + `key`) — coverage is partial across sources, so tracks with unknown BPM/key are **kept but demoted** below matching tracks, never dropped.
+`mix-prep` can narrow results to a tempo range and/or a harmonically compatible key — the facts a DJ actually filters by when building a set. BPM and key metadata come from `raw_metadata` (Volumo: `bpm` + `keysign`; Beatport: `bpm` + `key`; Mixupload: `bpm` + `key`) — coverage is partial across sources, so tracks with unknown BPM/key are **kept but demoted** below matching tracks, never dropped.
 
 ```bash
 # Only 170-180 BPM dnb
@@ -260,7 +260,7 @@ Each internal genre maps to one or more genre feeds on each source. Sources not 
 | `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul | — | — |
 | `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap | style/hip-hop | — |
 
-¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the page data are used to split them into the correct internal tags.
+¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the API data are used to split them into the correct internal tags.
 
 ## Setup
 
@@ -284,6 +284,8 @@ DISCORD_GUILD_ID=         # Your Discord server ID
 
 # Sources (optional)
 VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without this
+BEATPORT_USERNAME=        # Beatport login — enables the Beatport source (unofficial API, personal use)
+BEATPORT_PASSWORD=
 
 # Web service (optional — see docs/ops/web-service.md)
 TUNEFINDER_API_SECRET=            # Bearer secret for the web API (required by `serve`)
@@ -414,7 +416,8 @@ src/
   logger.py          # Structured logging setup
   fetchers/
     catalog.py       # SoundCloud AI Mix Recommender API (mix history + known tracks)
-    beatport.py      # Beatport genre top-100 chart (__NEXT_DATA__)
+    beatport.py      # Beatport genre top-100 chart (v4 API)
+    beatport_auth.py # Beatport OAuth (login + PKCE + token cache)
     bandcamp.py      # Bandcamp discover_web API
     volumo.py        # Volumo REST API (/api/v1/albums)
     mixupload.py     # Mixupload HTML scrape (chart + genre pages)
