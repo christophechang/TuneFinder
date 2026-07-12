@@ -96,3 +96,91 @@ def _save_cache(data_dir: str, tok: dict) -> None:
         os.chmod(path, 0o600)
     except OSError:
         pass
+
+
+def _login(session: requests.Session, username: str, password: str) -> None:
+    r = session.post(_LOGIN_URL, json={"username": username, "password": password}, timeout=_TIMEOUT)
+    if r.status_code not in (200, 201, 204):
+        raise BeatportAuthError(f"login rejected: HTTP {r.status_code}")
+
+
+def _authorize(session: requests.Session, client_id: str, challenge: str) -> str:
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": _REDIRECT_URI,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": secrets.token_urlsafe(16),
+    }
+    r = session.get(_AUTHORIZE_URL, params=params, allow_redirects=False, timeout=_TIMEOUT)
+    location = r.headers.get("location", "")
+    code = urllib.parse.parse_qs(urllib.parse.urlparse(location).query).get("code", [None])[0]
+    if not code:
+        raise BeatportAuthError(f"authorize returned no code (HTTP {r.status_code})")
+    return code
+
+
+def _exchange_token(session: requests.Session, client_id: str, code: str, verifier: str) -> dict:
+    r = session.post(_TOKEN_URL, data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": _REDIRECT_URI,
+        "client_id": client_id,
+        "code_verifier": verifier,
+    }, timeout=_TIMEOUT)
+    if r.status_code != 200:
+        raise BeatportAuthError(f"token exchange failed: HTTP {r.status_code}")
+    return r.json()
+
+
+def _refresh(session: requests.Session, client_id: str, refresh_token: str) -> dict:
+    r = session.post(_TOKEN_URL, data={
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+    }, timeout=_TIMEOUT)
+    if r.status_code != 200:
+        raise BeatportAuthError(f"refresh failed: HTTP {r.status_code}")
+    return r.json()
+
+
+def get_access_token(settings) -> str:
+    """Return a valid Bearer access token, or raise BeatportAuthError."""
+    username = settings.beatport_username
+    password = settings.beatport_password
+    if not username or not password:
+        raise BeatportAuthError("credentials not set (BEATPORT_USERNAME/BEATPORT_PASSWORD)")
+
+    data_dir = settings.data_dir
+    cache = _load_cache(data_dir)
+    if cache and (cache.get("expires_at", 0) - time.time()) > _EXPIRY_MARGIN_S:
+        return cache["access_token"]
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": _UA, "Accept": "application/json",
+                            "Origin": "https://www.beatport.com", "Referer": _DOCS_URL})
+
+    client_id = _scrape_client_id(session)
+
+    if cache and cache.get("refresh_token"):
+        try:
+            tok = _refresh(session, client_id, cache["refresh_token"])
+            # OAuth servers often omit refresh_token on refresh — keep the old one
+            # so we don't force a full login at the next expiry.
+            if not tok.get("refresh_token"):
+                tok["refresh_token"] = cache["refresh_token"]
+            _save_cache(data_dir, tok)
+            return tok["access_token"]
+        except (requests.RequestException, BeatportAuthError) as exc:
+            logger.warning(f"[beatport-auth] refresh failed ({exc}); doing full login")
+
+    try:
+        verifier, challenge = _pkce_pair()
+        _login(session, username, password)
+        code = _authorize(session, client_id, challenge)
+        tok = _exchange_token(session, client_id, code, verifier)
+    except requests.RequestException as exc:
+        raise BeatportAuthError(f"login flow failed: {exc}") from exc
+    _save_cache(data_dir, tok)
+    return tok["access_token"]
