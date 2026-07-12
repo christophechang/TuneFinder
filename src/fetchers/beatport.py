@@ -1,28 +1,29 @@
 """
-Beatport source fetcher — top-100 chart via __NEXT_DATA__ JSON extraction.
+Beatport source fetcher — genre top-100 chart via the internal v4 API.
 
-Beatport uses Next.js with React Query. The full track listing is embedded
-in a <script id="__NEXT_DATA__"> JSON blob, so no HTML scraping is needed.
-We extract the dehydrated React Query cache and find the results array.
+Replaces the former __NEXT_DATA__ HTML scrape (Cloudflare-blocked since 2026-07).
+Auth (login -> PKCE -> Bearer token, cached/refreshed) lives in beatport_auth.
+Endpoint: GET /v4/catalog/genres/{id}/top/100/.
 
-Chart URL pattern: https://www.beatport.com/genre/{slug}/{id}/top-100
-Track URL pattern: https://www.beatport.com/track/{slug}/{id}
-
-Key signals extracted:
-  - chart_position: rank on the Beatport genre top-100 chart (results are ordered)
-  - bpm: tempo from track metadata
+Key signals: chart_position (rank in the genre top-100), bpm, key (harmonic mixing).
 """
-from src.fetchers.common import get_html, extract_next_data, find_in_next_data, polite_sleep
+import requests
+
+from src.fetchers import beatport_auth
+from src.fetchers.common import polite_sleep
 from src.logger import get_logger
 from src.models import SourceItem
 
 logger = get_logger(__name__)
 
+_BASE = "https://api.beatport.com/v4"
 _TRACK_URL = "https://www.beatport.com/track/{slug}/{id}"
+_CHART_SIZE = 100
+_PER_PAGE = 100
+_TIMEOUT = 25
 
-# Maps Beatport genre slugs to internal genre tags.
-# Handles merged genres (e.g. breaks-breakbeat-uk-bass → both tags)
-# and sub-genres that all roll up to a parent (house sub-genres → house).
+# Maps Beatport genre slugs to internal genre tags. KEEP VERBATIM from the prior
+# implementation (merged feeds + house sub-genres roll-ups).
 _SLUG_TO_TAGS: dict[str, list[str]] = {
     "drum-bass": ["dnb"],
     "breaks-breakbeat-uk-bass": ["breaks", "uk-bass"],
@@ -40,64 +41,33 @@ _SLUG_TO_TAGS: dict[str, list[str]] = {
 }
 
 
-def _extract_tracks_from_next_data(data: dict) -> list[dict]:
-    """
-    Navigate the __NEXT_DATA__ dehydrated state to find the track results list.
-    Beatport stores this under:
-      props.pageProps.dehydratedState.queries[*].state.data.pages[*].results
-    Falls back to a recursive search if the path has changed.
-    """
-    try:
-        queries = (
-            data.get("props", {})
-                .get("pageProps", {})
-                .get("dehydratedState", {})
-                .get("queries", [])
-        )
-        for query in queries:
-            pages = query.get("state", {}).get("data", {}).get("pages", [])
-            for page in pages:
-                results = page.get("results", [])
-                if results and isinstance(results[0], dict) and "name" in results[0]:
-                    return results
-    except Exception:
-        pass
-
-    # Fallback: recursive search for any "results" list containing track-like objects
-    candidates = find_in_next_data(data, "results")
-    if candidates and isinstance(candidates[0], dict) and "name" in candidates[0]:
-        return candidates
-
-    return []
+def _get_json(url: str, session: requests.Session) -> dict:
+    resp = session.get(url, timeout=_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _parse_track(raw: dict, fallback_tags: list[str], chart_position: int | None = None) -> SourceItem | None:
-    title = raw.get("name", "").strip()
+    title = (raw.get("name") or "").strip()
     if not title:
         return None
-
-    artists = raw.get("artists", [])
-    if not artists:
-        return None
+    artists = raw.get("artists") or []
     artist = ", ".join(a.get("name", "") for a in artists if a.get("name"))
-
-    label_obj = raw.get("label") or {}
-    label = label_obj.get("name") or None
+    if not artist:
+        return None
 
     track_id = raw.get("id", "")
     slug = raw.get("slug", "")
     link = _TRACK_URL.format(slug=slug, id=track_id) if slug and track_id else ""
 
-    release_date = raw.get("publish_date", "") or raw.get("release_date", "") or ""
+    release = raw.get("release") or {}
+    release_name = release.get("name") or None
+    label = (release.get("label") or {}).get("name") or None
+    release_date = raw.get("publish_date") or raw.get("new_release_date") or ""
 
-    release_obj = raw.get("release") or {}
-    release_name = release_obj.get("name") or None
-
-    # Derive genre tags from the track's own genre slug if available,
-    # falling back to the feed-level tags. This correctly handles merged
-    # feeds (e.g. breaks-breakbeat-uk-bass) and house sub-genres.
     genre_slug = (raw.get("genre") or {}).get("slug", "")
     genre_tags = _SLUG_TO_TAGS.get(genre_slug) or fallback_tags
+    key = (raw.get("key") or {}).get("name") or None
 
     return SourceItem(
         source="beatport",
@@ -108,8 +78,36 @@ def _parse_track(raw: dict, fallback_tags: list[str], chart_position: int | None
         release_date=release_date,
         release_name=release_name,
         genre_tags=genre_tags,
-        raw_metadata={"beatport_id": track_id, "bpm": raw.get("bpm"), "chart_position": chart_position},
+        raw_metadata={
+            "beatport_id": track_id,
+            "bpm": raw.get("bpm"),
+            "chart_position": chart_position,
+            "key": key,
+            "mix_name": raw.get("mix_name"),
+            "isrc": raw.get("isrc"),
+        },
     )
+
+
+def _fetch_genre_top(session: requests.Session, genre_id) -> list[dict]:
+    """Return up to 100 raw track dicts in rank order for a genre's top-100 chart.
+
+    Follows the API's own `next` URL (an absolute URL, per DRF pagination) rather
+    than hand-building a `page=N` param. This is robust to whatever scheme the
+    endpoint uses (page number, cursor, or `per_page` honoured in one shot) and
+    cannot re-request the same page into duplicates. Stops at `next=None`, an
+    empty page, or 100 tracks.
+    """
+    tracks: list[dict] = []
+    url = f"{_BASE}/catalog/genres/{genre_id}/top/{_CHART_SIZE}/?per_page={_PER_PAGE}"
+    while url and len(tracks) < _CHART_SIZE:
+        data = _get_json(url, session)
+        results = data.get("results", []) if isinstance(data, dict) else []
+        if not results:
+            break
+        tracks.extend(results)
+        url = data.get("next") if isinstance(data, dict) else None
+    return tracks[:_CHART_SIZE]
 
 
 def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
@@ -117,58 +115,52 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
     if not cfg.get("enabled", False):
         return []
 
-    chart_pattern = cfg.get("chart_pattern", "")
     genres: list[dict] = cfg.get("genres", [])
     if target_genre is not None:
         genres = [
-            genre for genre in genres
-            if target_genre in (_SLUG_TO_TAGS.get(genre.get("slug", "")) or [genre.get("name", "")])
+            g for g in genres
+            if target_genre in (_SLUG_TO_TAGS.get(g.get("slug", "")) or [g.get("name", "")])
         ]
+    if not genres:
+        return []
+
+    token = beatport_auth.get_access_token(settings)  # raises BeatportAuthError
+    session = requests.Session()
+    session.headers.update({"Authorization": f"Bearer {token}", "Accept": "application/json"})
 
     all_items: list[SourceItem] = []
+    attempted = 0
+    completed = 0
 
     for genre in genres:
         slug = genre.get("slug", "")
         genre_id = genre.get("id", "")
         name = genre.get("name", slug)
-        # fallback_tags used if the track's own genre slug isn't in _SLUG_TO_TAGS
         fallback_tags = _SLUG_TO_TAGS.get(slug) or [name]
-
         if not slug or not genre_id:
             logger.warning(f"[beatport] Skipping genre with missing slug/id: {genre}")
             continue
 
-        url = chart_pattern.replace("{slug}", slug).replace("{id}", str(genre_id))
-        logger.info(f"[beatport] Fetching top-100 chart for {name}: {url}")
-
+        attempted += 1
         try:
-            html = get_html(url)
+            raw_tracks = _fetch_genre_top(session, genre_id)
         except Exception as e:
-            logger.warning(f"[beatport] Failed to fetch {url}: {e}")
+            logger.warning(f"[beatport] {name}: fetch failed: {e}")
             polite_sleep(2.0)
             continue
-
-        next_data = extract_next_data(html)
-        if not next_data:
-            logger.warning(f"[beatport] No __NEXT_DATA__ found on {url}")
-            polite_sleep(2.0)
-            continue
-
-        raw_tracks = _extract_tracks_from_next_data(next_data)
-        if not raw_tracks:
-            logger.warning(f"[beatport] No tracks extracted from __NEXT_DATA__ for {name}")
-            polite_sleep(2.0)
-            continue
+        completed += 1
 
         genre_items = []
         for pos, raw in enumerate(raw_tracks, start=1):
             item = _parse_track(raw, fallback_tags, chart_position=pos)
             if item:
                 genre_items.append(item)
-
         logger.info(f"[beatport] {name}: {len(genre_items)} tracks")
         all_items.extend(genre_items)
         polite_sleep(2.0)
 
-    logger.info(f"[beatport] Total: {len(all_items)} items across {len(genres)} genres")
+    if attempted > 0 and completed == 0:
+        raise RuntimeError(f"beatport: all {attempted} genres failed to fetch")
+
+    logger.info(f"[beatport] Total: {len(all_items)} items across {completed}/{attempted} genres")
     return all_items
