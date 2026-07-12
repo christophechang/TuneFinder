@@ -161,7 +161,10 @@ def get_access_token(settings) -> str:
     session.headers.update({"User-Agent": _UA, "Accept": "application/json",
                             "Origin": "https://www.beatport.com", "Referer": _DOCS_URL})
 
-    client_id = _scrape_client_id(session)
+    try:
+        client_id = _scrape_client_id(session)
+    except requests.RequestException as exc:
+        raise BeatportAuthError(f"client_id scrape failed: {exc}") from exc
 
     if cache and cache.get("refresh_token"):
         try:
@@ -172,7 +175,7 @@ def get_access_token(settings) -> str:
                 tok["refresh_token"] = cache["refresh_token"]
             _save_cache(data_dir, tok)
             return tok["access_token"]
-        except (requests.RequestException, BeatportAuthError) as exc:
+        except (requests.RequestException, BeatportAuthError, ValueError) as exc:
             logger.warning(f"[beatport-auth] refresh failed ({exc}); doing full login")
 
     try:
@@ -180,7 +183,7 @@ def get_access_token(settings) -> str:
         _login(session, username, password)
         code = _authorize(session, client_id, challenge)
         tok = _exchange_token(session, client_id, code, verifier)
-    except requests.RequestException as exc:
+    except (requests.RequestException, ValueError) as exc:
         raise BeatportAuthError(f"login flow failed: {exc}") from exc
     _save_cache(data_dir, tok)
     return tok["access_token"]

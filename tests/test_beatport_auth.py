@@ -109,6 +109,20 @@ def test_refresh_failure_falls_back_to_login(tmp_path):
     login.assert_called_once()
 
 
+def test_client_id_scrape_failure_raises_auth_error(tmp_path):
+    # No cache in tmp_path, so get_access_token proceeds past the cache check
+    # to the scrape, which fails with a raw requests exception (e.g. a 5xx /
+    # Cloudflare-challenge response from the docs page via raise_for_status()).
+    # get_access_token must not let that raw exception escape.
+    import requests as _rq
+    with patch.object(ba, "_scrape_client_id", side_effect=_rq.HTTPError("docs 503")):
+        try:
+            ba.get_access_token(_settings(data_dir=str(tmp_path)))
+            assert False, "expected BeatportAuthError"
+        except ba.BeatportAuthError:
+            pass
+
+
 def test_login_failure_raises(tmp_path):
     with patch.object(ba, "_scrape_client_id", return_value="CID"), \
          patch.object(ba, "_login", side_effect=ba.BeatportAuthError("bad creds")):
