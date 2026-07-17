@@ -40,6 +40,10 @@ def _settings(data_dir):
     settings.pipeline_section_min_score = 0.0
     settings.pipeline_mix_prep_top_picks_count = 20
     settings.pipeline_mix_prep_deep_cuts_count = 20
+    settings.pipeline_free_download_sources = []
+    settings.pipeline_free_downloads_count = 5
+    settings.pipeline_mix_prep_free_downloads_count = 10
+    settings.pipeline_free_downloads_min_score = 0.0
     settings.pipeline_genre_exclusions = {}
     settings.discord_mix_prep_channel = "mix-prep"
     settings.validate = MagicMock()

@@ -24,6 +24,10 @@ def _settings(data_dir, window_days=28, min_score=0.0):
     s.pipeline_label_watch_count = 5
     s.pipeline_artist_watch_count = 5
     s.pipeline_wildcard_count = 3
+    s.pipeline_free_download_sources = []
+    s.pipeline_free_downloads_count = 5
+    s.pipeline_mix_prep_free_downloads_count = 10
+    s.pipeline_free_downloads_min_score = 0.0
     s.scoring_weights = MagicMock(return_value=ScoringWeights())
     return s
 

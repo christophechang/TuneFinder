@@ -565,6 +565,19 @@ def _assign_sections(
     min_score = settings.pipeline_section_min_score
     weights = settings.scoring_weights()
 
+    # Free-download lane (exclusive): lane candidates never compete for store
+    # sections, store candidates never take lane slots. See
+    # docs/superpowers/specs/2026-07-17-free-downloads-section-design.md.
+    lane_sources = set(settings.pipeline_free_download_sources)
+    lane_n = settings.pipeline_free_downloads_count
+    lane_floor = settings.pipeline_free_downloads_min_score
+    free_dl_pool = [c for c in ranked if c.source in lane_sources]
+    if lane_sources:
+        ranked = [c for c in ranked if c.source not in lane_sources]
+        if trace is not None:
+            for c in free_dl_pool:
+                trace.setdefault(id(c), []).append(("sections", "routed to free_downloads lane"))
+
     used: set[int] = set()
     MAX_PER_ARTIST = 2
     MAX_PER_RELEASE = 2
@@ -687,17 +700,42 @@ def _assign_sections(
     else:
         wildcards = pick(wildcard_n, section_name="wildcards")
 
+    def _pick_free_downloads() -> list[Candidate]:
+        if lane_n <= 0:
+            return []
+        artist_counts: dict[str, int] = {}
+        result: list[Candidate] = []
+        for c in free_dl_pool:  # already score-descending
+            if c.score < lane_floor:
+                if trace is not None:
+                    trace.setdefault(id(c), []).append(("free_downloads", f"below lane floor {lane_floor}"))
+                continue
+            artist_key = normalise_artist(c.artist)
+            if artist_counts.get(artist_key, 0) >= MAX_PER_ARTIST:
+                if trace is not None:
+                    trace.setdefault(id(c), []).append(("free_downloads", "artist cap"))
+                continue
+            artist_counts[artist_key] = artist_counts.get(artist_key, 0) + 1
+            result.append(c)
+            if len(result) >= lane_n:
+                break
+        return result
+
+    free_downloads = _pick_free_downloads()
+
     genre_summary = ", ".join(f"{g}: {n}" for g, n in sorted(genre_counts.items()))
     logger.info(
         f"[ranker] Sections — top_picks: {len(top_picks)}, "
         f"label_watch: {len(label_watch)}, artist_watch: {len(artist_watch)}, "
-        f"wildcards: {len(wildcards)} (floor={min_score}) | genres: {genre_summary or 'none tagged'}"
+        f"wildcards: {len(wildcards)} (floor={min_score}), "
+        f"free_downloads: {len(free_downloads)} (lane floor={lane_floor}) | genres: {genre_summary or 'none tagged'}"
     )
     return {
         "top_picks": top_picks,
         "label_watch": label_watch,
         "artist_watch": artist_watch,
         "wildcards": wildcards,
+        "free_downloads": free_downloads,
     }
 
 

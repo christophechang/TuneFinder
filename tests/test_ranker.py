@@ -236,6 +236,10 @@ class _MockSettings:
     pipeline_mix_prep_top_picks_count = 5
     pipeline_mix_prep_deep_cuts_count = 5
     pipeline_section_min_score = 1.0
+    pipeline_free_download_sources = []
+    pipeline_free_downloads_count = 5
+    pipeline_mix_prep_free_downloads_count = 10
+    pipeline_free_downloads_min_score = 0.0
 
     @staticmethod
     def scoring_weights():
@@ -250,6 +254,56 @@ def _scored_candidate(score, artist="X", title="T", source="s", **kw):
     c = _candidate(artist=artist, title=title, source=source, **kw)
     c.score = score
     return c
+
+
+class _LaneSettings(_MockSettings):
+    pipeline_free_download_sources = ["soundcloud"]
+
+
+def test_free_download_lane_is_exclusive():
+    """A lane candidate never enters store sections (even with a huge score);
+    a store candidate never enters free_downloads."""
+    sc = _scored_candidate(99.0, artist="Lane Artist", source="soundcloud")
+    store = _scored_candidate(50.0, artist="Store Artist", source="beatport")
+    sections = _assign_sections([sc, store], _LaneSettings(), _build_genre_set({}))
+    all_store = [c for k in ("top_picks", "label_watch", "artist_watch", "wildcards")
+                 for c in sections[k]]
+    assert sc not in all_store
+    assert sc in sections["free_downloads"]
+    assert store not in sections["free_downloads"]
+
+
+def test_free_download_lane_floor_and_cap():
+    lane = [_scored_candidate(0.5, artist=f"DJ {i}", title=f"Boot {i}", source="soundcloud")
+            for i in range(8)]
+    sections = _assign_sections(lane, _LaneSettings(), _build_genre_set({}))
+    assert len(sections["free_downloads"]) == 5  # cap 5; lane floor 0 admits 0.5-scorers
+
+
+def test_free_download_lane_own_floor():
+    class _FlooredLane(_LaneSettings):
+        pipeline_free_downloads_min_score = 0.5
+
+    c = _scored_candidate(0.4, source="soundcloud")
+    sections = _assign_sections([c], _FlooredLane(), _build_genre_set({}))
+    assert sections["free_downloads"] == []
+
+
+def test_free_download_lane_count_zero_disables():
+    class _ZeroLane(_LaneSettings):
+        pipeline_free_downloads_count = 0
+
+    c = _scored_candidate(5.0, source="soundcloud")
+    sections = _assign_sections([c], _ZeroLane(), _build_genre_set({}))
+    assert sections["free_downloads"] == []
+
+
+def test_lane_disabled_when_no_sources_configured():
+    sc = _scored_candidate(5.0, source="soundcloud")
+    sections = _assign_sections([sc], _MockSettings(), _build_genre_set({}))
+    assert sections["free_downloads"] == []
+    # with no lane configured the candidate competes normally
+    assert sc in sections["top_picks"]
 
 
 def test_section_floor_skips_below_threshold():
