@@ -26,9 +26,10 @@ class Signal(ApiModel):
 
 
 class Embed(ApiModel):
-    type: Literal["bandcamp", "beatport"]
+    type: Literal["bandcamp", "beatport", "soundcloud"]
     album_id: Optional[int] = None
     track_id: Optional[int] = None
+    url: Optional[str] = None  # soundcloud: track permalink for the widget player
 
 
 class TrackFeedback(ApiModel):

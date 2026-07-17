@@ -220,3 +220,48 @@ def test_validate_silent_when_beatport_disabled(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         s.validate()
     assert not any("Beatport is enabled" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# SoundCloud credentials
+# ---------------------------------------------------------------------------
+
+
+def test_soundcloud_credentials_from_env(monkeypatch):
+    from src.config import Settings
+    monkeypatch.setenv("SOUNDCLOUD_CLIENT_ID", "app-id")
+    monkeypatch.setenv("SOUNDCLOUD_CLIENT_SECRET", "app-s3cret")
+    s = Settings({})
+    assert s.soundcloud_client_id == "app-id"
+    assert s.soundcloud_client_secret == "app-s3cret"
+
+
+def test_soundcloud_credentials_default_empty(monkeypatch):
+    from src.config import Settings
+    monkeypatch.delenv("SOUNDCLOUD_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SOUNDCLOUD_CLIENT_SECRET", raising=False)
+    s = Settings({})
+    assert s.soundcloud_client_id == ""
+    assert s.soundcloud_client_secret == ""
+
+
+def test_validate_warns_when_soundcloud_enabled_without_creds(monkeypatch, caplog):
+    from src.config import Settings
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "x")
+    monkeypatch.setenv("DISCORD_GUILD_ID", "x")
+    monkeypatch.delenv("SOUNDCLOUD_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SOUNDCLOUD_CLIENT_SECRET", raising=False)
+    s = Settings({"sources": {"soundcloud": {"enabled": True}}})
+    with caplog.at_level("WARNING"):
+        s.validate()
+    assert any("SoundCloud is enabled" in r.message for r in caplog.records)
+
+
+def test_validate_silent_when_soundcloud_disabled(monkeypatch, caplog):
+    from src.config import Settings
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "x")
+    monkeypatch.setenv("DISCORD_GUILD_ID", "x")
+    s = Settings({"sources": {"soundcloud": {"enabled": False}}})
+    with caplog.at_level("WARNING"):
+        s.validate()
+    assert not any("SoundCloud is enabled" in r.message for r in caplog.records)
