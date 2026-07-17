@@ -186,6 +186,20 @@ def test_pool_age_penalty_handles_bad_iso_string():
     assert c.score == 0.0
 
 
+def test_mixupload_popularity_never_fires_for_soundcloud():
+    """download_count is no longer Mixupload-only (SoundCloud carries it since
+    v0.14.0) — the Mixupload signal must be source-gated."""
+    c = _candidate(source="soundcloud", raw_metadata={"download_count": 500})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert not any("Mixupload" in s.explanation for s in c.signals)
+
+
+def test_mixupload_popularity_still_fires_for_mixupload():
+    c = _candidate(source="mixupload", raw_metadata={"download_count": 500})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert any(s.code == "source_popularity" and "Mixupload" in s.explanation for s in c.signals)
+
+
 # --- Commit 4: per-section score floor ---
 
 from src.pipeline.ranker import _assign_sections, _assign_sections_mix_prep

@@ -500,8 +500,10 @@ def _score(
         ))
 
     # --- Mixupload popularity signal (discovery axis; issue #12) ---
+    # Source-gated: SoundCloud also carries download_count (v0.14.0) and must
+    # never earn a "downloads on Mixupload" signal.
     download_count = c.raw_metadata.get("download_count")
-    if (download_count is not None and isinstance(download_count, int) and
+    if (c.source == "mixupload" and download_count is not None and isinstance(download_count, int) and
         download_count >= weights.mixupload_popularity_downloads):
         score += weights.w_mixupload_popularity
         discovery += weights.w_mixupload_popularity
