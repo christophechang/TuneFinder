@@ -62,7 +62,7 @@ TuneFinder ships a web application — [tunefinder-web](https://github.com/chris
 | `cross_source` | +1.0 to +2.0 | Scales with source count (cap 4) — only credited when seen on 2+ |
 | `chart_position` | +0–1.5 | Linear decay from #1 (Beatport, Traxsource, Mixupload when enabled) |
 | `bandcamp_discovery` | +1.0 | Bandcamp — compensates for no chart data |
-| `source_popularity` | +0.25 | Popular free-DL — source-gated: Mixupload tracks need ≥100 downloads, SoundCloud tracks ≥50; each store's threshold applies only to its own tracks |
+| `source_popularity` | +0.25 | Popular free-DL — source-gated: Mixupload tracks need ≥100 downloads, SoundCloud tracks need ≥50 downloads OR ≥25 reposts (`scoring.soundcloud_popularity_reposts`); each store's threshold applies only to its own tracks |
 | `genre_match` | +0.5 per tag (cap 2), scaled ×0.5–×2.0 by genre affinity | Soft match against catalog-augmented genre set; `electronic` excluded (too broad); capped at 2 tags (highest-affinity tags counted first) to prevent cross-source tag inflation |
 | `fresh_release` | +0.5 | Released within 7 days |
 | `recent_recommendation` | −0.75 | Artist appeared in weekly or mix-prep history within last 4 weeks |
@@ -245,6 +245,23 @@ Pool candidates injected into mix-prep are exempt from the release-date window (
 - Only tracks with a **known** BPM/key that actually *fails* a specified filter are dropped. Unknown values for an active filter never drop a track — they're kept and sorted below every matching track in both Top Picks and Deep Cuts.
 - The report header shows which filters were active, and matched track lines show their BPM/key inline; with no `--bpm`/`--key`, the report is unchanged from before this feature.
 
+### free-downloads
+
+`free-downloads <genre>` reuses the mix-prep engine but restricts it to a single purpose: the best free SoundCloud downloads for a genre, native and gated together.
+
+```bash
+./venv/bin/python -m tunefinder free-downloads dnb
+
+# Same BPM/key/dry-run flags as mix-prep
+./venv/bin/python -m tunefinder free-downloads dnb --bpm 170-180 --key 8A --dry-run
+```
+
+- Fetching is restricted to `pipeline.free_download_sources` (default `[soundcloud]`) — no store sources are queried, so this is strictly a free-downloads report, not a Free Downloads *section* bolted onto a bigger one.
+- Results are capped at `pipeline.free_downloads_mode_count` (default `30`) slots in a single report, rather than the smaller `free_downloads_count`/`mix_prep_free_downloads_count` lane sizes used inside weekly/mix-prep reports.
+- With `sources.soundcloud.include_gated_free: true` (the default), Hypeddit/ToneDen-style "Free DL" gated tracks (uploader disabled direct download, but posted a gate link) are included alongside natively downloadable tracks — a track line shows `⬇️` for a native download or `🔗 [Get](url)` for a gate the DJ has to click through (follow/like/email-gate pages, not a direct file). Set `include_gated_free: false` to keep this report to natively downloadable tracks only.
+- Reports post to the same Discord `#mix-prep` channel as `mix-prep`, and share its history file (`data/mix_prep_history.json`) — a track surfaced by `mix-prep` won't be re-recommended by `free-downloads` for the same genre, and vice versa.
+- `--bpm` sends `bpm[from]`/`bpm[to]` to the SoundCloud API server-side (with half/double-time ranges added automatically unless `--no-bpm-flex`) so the fetch itself is narrowed before scoring — this has not been live-verified against SoundCloud's API behaviour (whether it honours `bpm[]` strictly). Either way, the client-side BPM/key filter (see BPM/key filtering above) is the authoritative filter and applies identically to `free-downloads`, so results are correct regardless of how the API treats the parameter.
+
 ## Genre coverage
 
 Each internal genre maps to one or more genre feeds on each source. Sources not listed for a genre don't contribute to that genre's results.
@@ -338,6 +355,12 @@ TUNEFINDER_WEB_ALLOWED_ORIGINS=   # CORS origins for a separately-hosted SPA
 
 # Mix-prep narrowed by BPM range and Camelot-compatible key
 ./venv/bin/python -m tunefinder mix-prep dnb --bpm 170-180 --key 8A
+
+# Genre-focused report of the best free SoundCloud downloads (native + gated)
+./venv/bin/python -m tunefinder free-downloads dnb
+
+# Dry-run free-downloads, narrowed by BPM range and Camelot-compatible key
+./venv/bin/python -m tunefinder free-downloads dnb --bpm 170-180 --key 8A --dry-run
 
 # Record an outcome for a recommended track (no Discord env vars needed)
 ./venv/bin/python -m tunefinder mark 3 bought          # by track number (latest weekly report)

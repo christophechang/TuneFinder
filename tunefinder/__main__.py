@@ -125,16 +125,11 @@ def cmd_run(args):
           + (" (DRY RUN — no writes)" if dry_run else ""))
 
 
-def cmd_mix_prep(args):
+def _parse_filter_args(args) -> tuple[tuple[float, float] | None, str | None, bool]:
+    """Fail-fast --bpm/--key/--no-bpm-flex parsing shared by mix-prep and
+    free-downloads. Exits with a clean message on invalid values."""
     from src.pipeline.harmonic import to_camelot
-    from src.pipeline.storage import RunLockHeldError
-    from src.services.runs import MixPrepOptions, run_mix_prep
 
-    genre = args.genre
-    dry_run = getattr(args, "dry_run", False)
-
-    # BPM/key filters (issue #8) — parsed and validated up front, before any
-    # fetching, so a bad --bpm/--key value fails fast with a clean message.
     bpm_range = None
     bpm_arg = getattr(args, "bpm", None)
     if bpm_arg:
@@ -155,7 +150,19 @@ def cmd_mix_prep(args):
             )
             raise SystemExit(1)
 
-    bpm_flex = not getattr(args, "no_bpm_flex", False)
+    return bpm_range, key_camelot, not getattr(args, "no_bpm_flex", False)
+
+
+def cmd_mix_prep(args):
+    from src.pipeline.storage import RunLockHeldError
+    from src.services.runs import MixPrepOptions, run_mix_prep
+
+    genre = args.genre
+    dry_run = getattr(args, "dry_run", False)
+
+    # BPM/key filters (issue #8) — parsed and validated up front, before any
+    # fetching, so a bad --bpm/--key value fails fast with a clean message.
+    bpm_range, key_camelot, bpm_flex = _parse_filter_args(args)
 
     settings = load_settings()
     settings.validate()
@@ -173,6 +180,32 @@ def cmd_mix_prep(args):
     if outcome.no_candidates:
         return
     print(f"Mix-prep complete — {outcome.report_id} — {outcome.recommended_count} tracks in {outcome.duration_seconds}s"
+          + (" (DRY RUN — no writes)" if dry_run else ""))
+
+
+def cmd_free_downloads(args):
+    from src.pipeline.storage import RunLockHeldError
+    from src.services.runs import MixPrepOptions, run_mix_prep
+
+    bpm_range, key_camelot, bpm_flex = _parse_filter_args(args)
+    dry_run = getattr(args, "dry_run", False)
+
+    settings = load_settings()
+    settings.validate()
+
+    options = MixPrepOptions(
+        genre=args.genre, bpm_range=bpm_range, key_camelot=key_camelot,
+        bpm_flex=bpm_flex, dry_run=dry_run, free_only=True,
+    )
+    try:
+        outcome = run_mix_prep(settings, options)
+    except RunLockHeldError as exc:
+        print(f"Error: {exc}")
+        raise SystemExit(1)
+
+    if outcome.no_candidates:
+        return
+    print(f"Free-downloads run complete — {outcome.report_id} — {outcome.recommended_count} tracks in {outcome.duration_seconds}s"
           + (" (DRY RUN — no writes)" if dry_run else ""))
 
 
@@ -434,6 +467,32 @@ def main():
         "--no-bpm-flex", action="store_true",
         help="Disable half/double-time BPM matching (flex is on by default for --bpm).",
     )
+    free_dl_parser = subparsers.add_parser(
+        "free-downloads",
+        help="Genre-focused report of the best free downloads (SoundCloud native + gated)",
+    )
+    free_dl_parser.add_argument("genre", choices=list(MIX_PREP_GENRES), help="Genre to focus on")
+    free_dl_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Run the full pipeline but skip Discord posts and history writes",
+    )
+    free_dl_parser.add_argument(
+        "--bpm", metavar="MIN-MAX", default=None,
+        help="Filter to a BPM range, e.g. 170-180. Half/double-time matches are "
+             "included by default (e.g. 85 matches 170-180) — see --no-bpm-flex. "
+             "Tracks with no known BPM are kept but demoted, never dropped.",
+    )
+    free_dl_parser.add_argument(
+        "--key", default=None,
+        help="Filter to a Camelot code (e.g. 8A) or musical key (e.g. Am, C major, "
+             "F# minor). Keeps exact matches, adjacent wheel positions (±1), and the "
+             "relative major/minor. Tracks with no known key are kept but demoted, "
+             "never dropped.",
+    )
+    free_dl_parser.add_argument(
+        "--no-bpm-flex", action="store_true",
+        help="Disable half/double-time BPM matching (flex is on by default for --bpm).",
+    )
     mark_parser = subparsers.add_parser("mark", help="Record an outcome for a recommended track")
     mark_parser.add_argument(
         "selector",
@@ -499,6 +558,8 @@ def main():
         cmd_run(args)
     elif args.command == "mix-prep":
         cmd_mix_prep(args)
+    elif args.command == "free-downloads":
+        cmd_free_downloads(args)
     elif args.command == "mark":
         cmd_mark(args)
     elif args.command == "stats":
