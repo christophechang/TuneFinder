@@ -150,7 +150,8 @@ def _parse_release_date(created_at) -> str | None:
 def _parse_track(track: dict, tag: str) -> SourceItem | None:
     title = (track.get("title") or "").strip()
     artist = ((track.get("user") or {}).get("username") or "").strip()
-    link = track.get("permalink_url") or ""
+    # The API appends utm_* tracking params to permalink_url — keep links clean.
+    link = (track.get("permalink_url") or "").split("?", 1)[0]
     if not title or not artist or not link:
         return None
 

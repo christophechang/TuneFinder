@@ -128,6 +128,18 @@ def test_release_date_normalises_legacy_format(tmp_path):
     assert items[0].release_date == "2026-07-10"
 
 
+def test_link_strips_tracking_query_params(tmp_path):
+    """The API appends utm_* query params to permalink_url — links must be clean."""
+    settings = _make_settings(tmp_path)
+    track = _track()
+    track["permalink_url"] = "https://soundcloud.com/dj/track-1?utm_medium=api&utm_source=id_123"
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([track])
+        items = soundcloud.fetch(settings)
+
+    assert items[0].link == "https://soundcloud.com/dj/track-1"
+
+
 def test_parse_track_missing_username_skipped(tmp_path):
     settings = _make_settings(tmp_path)
     bad = _track()
