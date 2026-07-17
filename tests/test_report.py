@@ -350,6 +350,13 @@ def test_mix_prep_report_renders_free_downloads_section():
     assert text.index("## 🆓 Free Downloads") > text.index("## 🎧 Deep Cuts")
 
 
+def test_track_line_soundcloud_brand_casing():
+    sections = {"free_downloads": [_c(title="Boot", source="soundcloud")]}
+    text = generate_report(sections, "TEST", {}, object(), today=TODAY)
+    assert "[SoundCloud]" in text
+    assert "[Soundcloud]" not in text
+
+
 def test_empty_free_downloads_section_omitted():
     sections = {"top_picks": [_c(title="Only")], "free_downloads": []}
     text = generate_report(sections, "TEST", {}, object(), today=TODAY)

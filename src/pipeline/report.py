@@ -225,9 +225,13 @@ def _build_mix_prep_header(report_id: str, today: str, genre: str, filters_desc:
 # Track line formatter
 # ---------------------------------------------------------------------------
 
+# Brand names naive .title() gets wrong ("Soundcloud"). Other sources are unaffected.
+_SOURCE_DISPLAY = {"soundcloud": "SoundCloud"}
+
+
 def _track_line(n: int, c: Candidate, show_harmonic: bool = False) -> str:
     label_str = f" [{c.label}]" if c.label else ""
-    source_str = f" [{c.source.title()}]"
+    source_str = f" [{_SOURCE_DISPLAY.get(c.source, c.source.title())}]"
     link_str = f" → [Listen](<{c.link}>)" if c.link else ""
     harmonic_str = ""
     if show_harmonic:
