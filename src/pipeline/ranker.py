@@ -512,6 +512,16 @@ def _score(
             explanation=f"{download_count} downloads on Mixupload.",
         ))
 
+    # --- SoundCloud popularity signal (discovery axis; free-DL lane) ---
+    if (c.source == "soundcloud" and download_count is not None and isinstance(download_count, int) and
+        download_count >= weights.soundcloud_popularity_downloads):
+        score += weights.w_soundcloud_popularity
+        discovery += weights.w_soundcloud_popularity
+        c.signals.append(RecommendationSignal(
+            code="source_popularity",
+            explanation=f"{download_count} downloads on SoundCloud.",
+        ))
+
     # --- Pool age penalty ---
     # Applied to the TOTAL score only, not either axis. Decision: pool age is an
     # artefact of the queue (how long a candidate sat unrecommended), not a fact

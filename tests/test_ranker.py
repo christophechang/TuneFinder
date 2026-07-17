@@ -200,6 +200,29 @@ def test_mixupload_popularity_still_fires_for_mixupload():
     assert any(s.code == "source_popularity" and "Mixupload" in s.explanation for s in c.signals)
 
 
+def test_soundcloud_popularity_fires_at_threshold():
+    c = _candidate(source="soundcloud", raw_metadata={"download_count": 50})
+    base = _candidate(source="soundcloud", raw_metadata={})
+    gs = _build_genre_set({})
+    _score(c, {}, set(), {}, gs)
+    _score(base, {}, set(), {}, gs)
+    assert any(s.code == "source_popularity" and "SoundCloud" in s.explanation for s in c.signals)
+    assert c.score == pytest.approx(base.score + 0.25)
+    assert c.discovery_score == pytest.approx(base.discovery_score + 0.25)
+
+
+def test_soundcloud_popularity_below_threshold_silent():
+    c = _candidate(source="soundcloud", raw_metadata={"download_count": 49})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert not any(s.code == "source_popularity" for s in c.signals)
+
+
+def test_soundcloud_popularity_not_for_other_sources():
+    c = _candidate(source="bandcamp", raw_metadata={"download_count": 500})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert not any("SoundCloud" in s.explanation for s in c.signals)
+
+
 # --- Commit 4: per-section score floor ---
 
 from src.pipeline.ranker import _assign_sections, _assign_sections_mix_prep
