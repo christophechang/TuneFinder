@@ -528,3 +528,34 @@ def test_gate_url_query_string_preserved(tmp_path):
         mock_get.return_value = _page([gated])
         items = soundcloud.fetch(settings)
     assert items[0].raw_metadata["acquisition_url"] == "https://hypeddit.com/dl/xyz?sig=abc123&fan=1"
+
+
+# ---------------------------------------------------------------------------
+# Server-side BPM ranges
+# ---------------------------------------------------------------------------
+
+def test_build_search_url_includes_bpm_params():
+    url = soundcloud._build_search_url({"tf_tag": "dnb", "genres": "dnb"}, "2026-06-19", 50,
+                                       bpm_range=(170.0, 180.0))
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    assert q["bpm[from]"] == ["170"] and q["bpm[to]"] == ["180"]
+
+
+def test_build_search_url_without_bpm_unchanged():
+    url = soundcloud._build_search_url({"tf_tag": "dnb", "genres": "dnb"}, "2026-06-19", 50)
+    assert "bpm" not in url
+
+
+def test_fetch_multi_range_searches_and_dedupes(tmp_path):
+    settings = _make_settings(tmp_path)
+    shared, half_only = _track(track_id=1), _track(track_id=2)
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        # range 1 returns [shared]; range 2 returns [shared, half_only]; range 3 empty
+        mock_get.side_effect = [_page([shared]), _page([shared, half_only]), _page([])]
+        items = soundcloud.fetch(settings, bpm_ranges=[(170, 180), (85, 90), (340, 360)])
+
+    assert mock_get.call_count == 3
+    assert [i.raw_metadata["soundcloud_id"] for i in items] == [1, 2]
+    called_urls = [c.args[0] for c in mock_get.call_args_list]
+    assert "bpm%5Bfrom%5D=170" in called_urls[0]
+    assert "bpm%5Bfrom%5D=85" in called_urls[1]

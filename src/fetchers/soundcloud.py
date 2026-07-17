@@ -124,12 +124,16 @@ def _get_json(url: str, session: requests.Session) -> dict:
     return resp.json()
 
 
-def _build_search_url(target: dict, created_from: str, limit: int) -> str:
+def _build_search_url(target: dict, created_from: str, limit: int,
+                      bpm_range: tuple[float, float] | None = None) -> str:
     params: dict = {}
     for key in ("q", "genres", "tags"):
         val = (target.get(key) or "").strip()
         if val:
             params[key] = val
+    if bpm_range is not None:
+        params["bpm[from]"] = f"{bpm_range[0]:g}"
+        params["bpm[to]"] = f"{bpm_range[1]:g}"
     params["created_at[from]"] = f"{created_from} 00:00:00"
     params["limit"] = limit
     params["linked_partitioning"] = "true"
@@ -226,7 +230,8 @@ def _parse_track(track: dict, tag: str, free_gate: bool = False) -> SourceItem |
 # Main fetcher
 # ---------------------------------------------------------------------------
 
-def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None,
+          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("soundcloud")
     if not cfg.get("enabled", False):
         return []
@@ -262,34 +267,54 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
         attempted += 1
 
         tag_items: list[SourceItem] = []
-        url: str | None = _build_search_url(target, created_from, limit)
-        page = 0
-        try:
-            while url and page < _MAX_PAGES:
-                logger.info(f"[soundcloud] {tag}: page {page + 1} — {url}")
-                data = _get_json(url, session)
-                page += 1
-                for track in (data.get("collection") or []):
-                    gate = include_gated and _is_free_gate(track)
-                    if downloadable_only and track.get("downloadable") is not True and not gate:
-                        continue
-                    # Search results mix single tracks with full DJ sets/mixes —
-                    # anything over the duration cap is a set, not a release.
-                    duration = track.get("duration")
-                    if max_duration_ms and duration and duration > max_duration_ms:
-                        continue
-                    item = _parse_track(track, tag, free_gate=gate)
-                    if item is None:
-                        continue
-                    # The API ignores created_at[from] (verified live 2026-07-17),
-                    # so the lookback window is enforced here. Undated items pass,
-                    # matching the pipeline's release-date-window semantics.
-                    if item.release_date is not None and item.release_date < created_from:
-                        continue
-                    tag_items.append(item)
-                url = data.get("next_href")
-        except Exception as e:
-            logger.warning(f"[soundcloud] {tag}: fetch failed: {e}")
+        seen_ids: set = set()
+        target_ok = False
+        search_ranges: list[tuple[float, float] | None] = list(bpm_ranges) if bpm_ranges else [None]
+        for range_no, bpm_range in enumerate(search_ranges):
+            if range_no:
+                polite_sleep(1.0)
+            # try/except sits INSIDE the range loop: one flaky range must not
+            # discard tag_items already collected from earlier ranges
+            # (graceful degradation — matches the single-range behaviour).
+            try:
+                url: str | None = _build_search_url(target, created_from, limit, bpm_range=bpm_range)
+                page = 0
+                while url and page < _MAX_PAGES:
+                    logger.info(f"[soundcloud] {tag}: page {page + 1} — {url}")
+                    data = _get_json(url, session)
+                    page += 1
+                    for track in (data.get("collection") or []):
+                        track_id = track.get("id")
+                        if track_id is not None and track_id in seen_ids:
+                            continue
+                        gate = include_gated and _is_free_gate(track)
+                        if downloadable_only and track.get("downloadable") is not True and not gate:
+                            continue
+                        # Search results mix single tracks with full DJ sets/mixes —
+                        # anything over the duration cap is a set, not a release.
+                        duration = track.get("duration")
+                        if max_duration_ms and duration and duration > max_duration_ms:
+                            continue
+                        item = _parse_track(track, tag, free_gate=gate)
+                        if item is None:
+                            continue
+                        # The API ignores created_at[from] (verified live 2026-07-17),
+                        # so the lookback window is enforced here. Undated items pass,
+                        # matching the pipeline's release-date-window semantics.
+                        if item.release_date is not None and item.release_date < created_from:
+                            continue
+                        if track_id is not None:
+                            seen_ids.add(track_id)
+                        tag_items.append(item)
+                    url = data.get("next_href")
+                target_ok = True
+            except Exception as e:
+                logger.warning(f"[soundcloud] {tag}: range {range_no + 1} fetch failed: {e}")
+                continue
+        if not target_ok:
+            # Every range failed — the target must NOT count as completed, or
+            # the "all N targets failed" RuntimeError fail-safe below never
+            # fires (a total outage would read as "0 tracks, no error").
             continue
         completed += 1
 
