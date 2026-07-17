@@ -51,6 +51,13 @@ def _track(track_id=123456789, title="Test Track (Bootleg)", username="Test DJ",
         "tag_list": "dnb \"free download\"",
         "duration": 240000,
         "label_name": label_name,
+        "metadata_artist": None,
+        "bpm": None,
+        "key_signature": None,
+        "reposts_count": 7,
+        "release_year": None,
+        "release_month": None,
+        "release_day": None,
     }
 
 
@@ -378,3 +385,45 @@ def test_token_missing_credentials_raises(tmp_path):
     settings = _make_settings(tmp_path, client_id="", client_secret="")
     with pytest.raises(soundcloud.SoundCloudAuthError):
         soundcloud._get_access_token(settings, MagicMock())
+
+
+# ---------------------------------------------------------------------------
+# Parse extras (artist, bpm, key, reposts, release stash)
+# ---------------------------------------------------------------------------
+
+def test_parse_extracts_bpm_key_reposts_and_release_fields(tmp_path):
+    settings = _make_settings(tmp_path)
+    track = _track()
+    track.update({"bpm": 174.0, "key_signature": "Am", "reposts_count": 33,
+                  "release_year": 2005, "release_month": 6, "release_day": 1})
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([track])
+        items = soundcloud.fetch(settings)
+
+    md = items[0].raw_metadata
+    assert md["bpm"] == 174.0
+    assert md["key"] == "Am"
+    assert md["reposts_count"] == 33
+    assert (md["release_year"], md["release_month"], md["release_day"]) == (2005, 6, 1)
+    # release_* are display-only stash — the pipeline release date stays upload-derived
+    assert items[0].release_date == "2026-07-10"
+
+
+def test_parse_prefers_metadata_artist_over_username(tmp_path):
+    settings = _make_settings(tmp_path)
+    track = _track()
+    track["metadata_artist"] = "Real Artist"
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([track])
+        items = soundcloud.fetch(settings)
+    assert items[0].artist == "Real Artist"
+
+
+def test_parse_blank_metadata_artist_falls_back_to_username(tmp_path):
+    settings = _make_settings(tmp_path)
+    track = _track()
+    track["metadata_artist"] = "   "
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([track])
+        items = soundcloud.fetch(settings)
+    assert items[0].artist == "Test DJ"

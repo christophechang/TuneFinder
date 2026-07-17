@@ -149,7 +149,8 @@ def _parse_release_date(created_at) -> str | None:
 
 def _parse_track(track: dict, tag: str) -> SourceItem | None:
     title = (track.get("title") or "").strip()
-    artist = ((track.get("user") or {}).get("username") or "").strip()
+    artist = (track.get("metadata_artist") or "").strip() \
+        or ((track.get("user") or {}).get("username") or "").strip()
     # The API appends utm_* tracking params to permalink_url — keep links clean.
     link = (track.get("permalink_url") or "").split("?", 1)[0]
     if not title or not artist or not link:
@@ -176,6 +177,14 @@ def _parse_track(track: dict, tag: str) -> SourceItem | None:
             "sc_genre": track.get("genre"),
             "tag_list": track.get("tag_list"),
             "duration_ms": track.get("duration"),
+            "bpm": track.get("bpm"),
+            "key": track.get("key_signature"),
+            "reposts_count": track.get("reposts_count"),
+            # Display-only stash — deliberately NOT the pipeline release_date:
+            # a 2005 bootleg uploaded yesterday must survive the 28-day window.
+            "release_year": track.get("release_year"),
+            "release_month": track.get("release_month"),
+            "release_day": track.get("release_day"),
         },
     )
 
