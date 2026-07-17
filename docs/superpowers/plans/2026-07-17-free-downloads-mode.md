@@ -258,6 +258,10 @@ def test_downloadable_only_false_non_free_not_stamped(tmp_path):
     "data:text/html,<script>alert(1)</script>",
     "hypeddit.com/dl/xyz",       # scheme-less — urlparse yields no netloc
     "   ",
+    "https://hypeddit.com/)x [WIN](https://evil.example",
+    "https://hypeddit.com/<b>",
+    "https://hypeddit.com/dl/`x`",
+    "https://hypeddit.com/a b",
 ])
 def test_unsafe_or_invalid_purchase_url_never_gates(tmp_path, bad_url):
     settings = _make_settings(tmp_path)
@@ -302,6 +306,13 @@ def _is_free_gate(track: dict) -> bool:
     # hrefs downstream (audition page, SPA cards); a javascript:/data: URL must
     # never qualify as a "gate". html.escape does not neutralise URL schemes.
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    # The URL lands verbatim inside Discord masked-link markdown downstream
+    # (`[Get](<{acq}>)`) — ')' closes the link early, '<'/'>' break the angle
+    # wrapper, backticks break code formatting, and whitespace splits the
+    # token. Real gate URLs never contain these, so reject rather than
+    # sanitize at render time.
+    if any(ch in url for ch in ")<>`") or any(ch.isspace() for ch in url):
         return False
     if "free" in (track.get("purchase_title") or "").lower():
         return True

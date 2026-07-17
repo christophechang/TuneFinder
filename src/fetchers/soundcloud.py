@@ -167,6 +167,13 @@ def _is_free_gate(track: dict) -> bool:
     # never qualify as a "gate". html.escape does not neutralise URL schemes.
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return False
+    # The URL lands verbatim inside Discord masked-link markdown downstream
+    # (`[Get](<{acq}>)`) — ')' closes the link early, '<'/'>' break the angle
+    # wrapper, backticks break code formatting, and whitespace splits the
+    # token. Real gate URLs never contain these, so reject rather than
+    # sanitize at render time.
+    if any(ch in url for ch in ")<>`") or any(ch.isspace() for ch in url):
+        return False
     if "free" in (track.get("purchase_title") or "").lower():
         return True
     host = parsed.netloc.lower()

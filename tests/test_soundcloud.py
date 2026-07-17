@@ -509,6 +509,10 @@ def test_downloadable_only_false_non_free_not_stamped(tmp_path):
     "data:text/html,<script>alert(1)</script>",
     "hypeddit.com/dl/xyz",       # scheme-less — urlparse yields no netloc
     "   ",
+    "https://hypeddit.com/)x [WIN](https://evil.example",
+    "https://hypeddit.com/<b>",
+    "https://hypeddit.com/dl/`x`",
+    "https://hypeddit.com/a b",
 ])
 def test_unsafe_or_invalid_purchase_url_never_gates(tmp_path, bad_url):
     settings = _make_settings(tmp_path)
