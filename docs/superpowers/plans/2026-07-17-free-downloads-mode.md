@@ -344,8 +344,18 @@ and pass it through: `item = _parse_track(track, tag, free_gate=gate)`.
 
 - [ ] **Step 4: Run to verify pass**
 
+Also update ONE pre-existing test whose fixture collides with the new (intended) gate semantics: `test_downloadable_only_filters_non_downloadable` builds `_track(downloadable=False)`, whose default `purchase_title="Free Download"` + hypeddit `purchase_url` now correctly qualify as a kept gate. Preserve the test's intent (non-free, non-downloadable tracks are dropped) by making its fixture unambiguously non-free:
+
+```python
+        nd = _track(track_id=2, downloadable=False)
+        nd["purchase_title"] = None
+        nd["purchase_url"] = None
+```
+
+(keep its assertions unchanged — this is a deliberate, intent-preserving fixture update, sanctioned by the Global Constraints' "deliberate changes only for tracks carrying the new metadata" carve-out; `test_paid_purchase_link_still_dropped` covers the paid-link variant.)
+
 Run: `./venv/bin/pytest tests/test_soundcloud.py -v`
-Expected: all PASS (existing tests keep passing — the default `_track()` is downloadable, so `gate` stays False for them).
+Expected: all PASS (other existing tests keep passing — the default `_track()` is downloadable, so `gate` stays False for them).
 
 - [ ] **Step 5: Commit**
 
