@@ -4,6 +4,26 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.16.0 — 2026-07-17
+
+### Run modes
+
+- **New `free-downloads` run mode** (PR #23; design + plan in `docs/superpowers/`). `tunefinder free-downloads <genre> [--bpm MIN-MAX] [--key KEY] [--no-bpm-flex] [--dry-run]` reports the best free SoundCloud downloads for a genre, reusing the mix-prep engine: report id `…-free-dl-<genre>`, 🆓 header, a single Free Downloads section, slots via `pipeline.free_downloads_mode_count` (default 30). Fetching is restricted to `pipeline.free_download_sources`, candidates (fresh + pool) are filtered to track-level free eligibility, and feedback resolves into the shared mix-prep history — cross-mode dedup preserved. Weekly and mix-prep behaviour is unchanged when the new keys are absent.
+
+### Sources
+
+- **Gated free downloads.** SoundCloud tracks whose uploader disabled native downloads but attached a Hypeddit/ToneDen/gate.fm-style "Free DL" purchase link are now kept and stamped (`free_gate`, `free_download`, `acquisition_url`); toggle with `sources.soundcloud.include_gated_free` (default true). Gate URLs are strictly validated — http(s)-with-host only, markdown-breaking characters rejected — because they are uploader-controlled and land verbatim in report links.
+- **Richer SoundCloud parsing.** Artist now prefers `metadata_artist` over the uploader username; `bpm`, `key`, `reposts_count`, and display-only `release_year/month/day` are stashed in raw metadata — bpm/key light up the harmonic filters for SoundCloud tracks.
+- **Server-side BPM search.** Free-only runs with `--bpm` send flex-aware `bpm[from]`/`bpm[to]` ranges (exact + half-time + double-time) as separate searches, deduped by track id, with per-range failure isolation. Weekly/mix-prep runs never send BPM params.
+
+### Scoring
+
+- **Repost-aware popularity.** `source_popularity` now also fires on ≥25 reposts (`scoring.soundcloud_popularity_reposts`) with a deterministic "DJs are reposting this" reason line; a qualifying download count takes precedence in the explanation.
+
+### Report & web
+
+- Gated tracks render `· 🔗 [Get](url)` and native free downloads `· ⬇️` in Discord track lines; the audition page gains a `Get ↗` anchor; the report artifact carries `free_gate`/`acquisition_url` per track. The web API accepts and emits the `free-downloads` mode/kind end-to-end (`RunRequest.mode`, report kinds + list filter, `ReportTrack.free_gate`/`acquisition_url`) for tunefinder-web.
+
 ## v0.15.0 — 2026-07-17
 
 ### Report
