@@ -580,3 +580,14 @@ def test_weekly_report_track_line_never_shows_harmonic_suffix():
     )
     assert "174 BPM" not in result
     assert " 8A" not in result
+
+
+def test_free_downloads_mode_header_and_single_section():
+    sections = {"top_picks": [], "deep_cuts": [],
+                "free_downloads": [_c(title="Boot", source="soundcloud")]}
+    text = generate_mix_prep_report(sections, "2026-W29-free-dl-dnb", {}, "dnb", object(),
+                                    today=TODAY, free_only=True)
+    assert text.startswith("🆓 Dnb Free Downloads Report")
+    assert "Mix Prep Report" not in text
+    assert "## 🔺 Top Picks" not in text and "## 🎧 Deep Cuts" not in text
+    assert "## 🆓 Free Downloads" in text

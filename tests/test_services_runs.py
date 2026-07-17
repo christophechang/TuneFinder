@@ -191,3 +191,91 @@ def test_cli_run_reports_lock_contention_cleanly(tmp_path, capsys):
 def test_mix_prep_genres_match_cli_choices():
     assert "house" in MIX_PREP_GENRES and "dnb" in MIX_PREP_GENRES
     assert len(MIX_PREP_GENRES) == 10
+
+
+def _free_item(title="Boot VIP", free=True):
+    md = {"soundcloud_id": 1, "download_count": 60}
+    if free:
+        md.update({"free_download": True, "free_gate": False,
+                   "acquisition_url": "https://soundcloud.com/x/y"})
+    return SourceItem(
+        source="soundcloud", artist="Someone", title=title, link="https://soundcloud.com/x/y",
+        label=None, release_date=None, genre_tags=["dnb"], raw_metadata=md,
+    )
+
+
+def _seed_pool(data_dir):
+    """A free SoundCloud pool record and a paid Beatport one — the free_only
+    eligibility filter must let only the first into the report."""
+    from datetime import datetime, timezone
+    from src.models import PoolRecord
+    from src.pipeline.pool import save_pool
+    # added_at is "just now" rather than a fixed past date — the ranker's
+    # pool-age penalty (src/pipeline/ranker.py, ~0.25/week) is real-clock-driven,
+    # so a fixed date drifts further into penalty range every day this test
+    # suite runs. This test is about the free_only eligibility filter, not
+    # pool-age scoring, so keep the pool entries fresh.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    save_pool([
+        PoolRecord(artist="PoolFree", title="Pool Boot", link="https://soundcloud.com/p/f",
+                   source="soundcloud", label=None, release_date=None, release_name=None,
+                   genre_tags=["dnb"],
+                   raw_metadata={"free_download": True, "free_gate": False,
+                                 "acquisition_url": "https://soundcloud.com/p/f"},
+                   added_at=now_iso, last_score=1.0),
+        PoolRecord(artist="PoolPaid", title="Pool Paid", link="https://example.com/p",
+                   source="beatport", label=None, release_date=None, release_name=None,
+                   genre_tags=["dnb"], raw_metadata={"beatport_id": 7},
+                   added_at=now_iso, last_score=1.0),
+    ], data_dir)
+
+
+def test_run_free_only_restricts_fetch_and_filters_eligibility(tmp_path):
+    settings = _settings(str(tmp_path))
+    settings.pipeline_free_download_sources = ["soundcloud"]
+    settings.pipeline_free_downloads_mode_count = 30
+    _seed_pool(str(tmp_path))
+    options = MixPrepOptions(genre="dnb", dry_run=True, free_only=True)
+    with patch("src.fetchers.catalog.fetch_all_tracks", return_value=[_known_track()]), \
+         patch("src.fetchers.catalog.fetch_all_mixes", return_value=[]), \
+         patch("src.fetchers.fetch_all_sources",
+               return_value=([_free_item(), _free_item(title="Paid Leak", free=False)],
+                             {"soundcloud": {"count": 2, "error": None}})) as mock_fetch, \
+         patch("src.output.discord.make_discord_client", return_value=MagicMock()):
+        outcome = run_mix_prep(settings, options)
+
+    assert mock_fetch.call_args.kwargs["only_sources"] == ["soundcloud"]
+    assert outcome.kind == "free-downloads"
+    assert "-free-dl-dnb" in outcome.report_id
+    assert outcome.artifact["kind"] == "free-downloads"
+    titles = [t["title"] for s in outcome.artifact["sections"] for t in s["tracks"]]
+    # fresh: free kept, paid dropped; pool: free injected, paid filtered
+    assert "Boot VIP" in titles and "Paid Leak" not in titles
+    assert "Pool Boot" in titles and "Pool Paid" not in titles
+
+
+def test_run_free_only_forwards_expanded_bpm_ranges(tmp_path):
+    settings = _settings(str(tmp_path))
+    settings.pipeline_free_download_sources = ["soundcloud"]
+    settings.pipeline_free_downloads_mode_count = 30
+    options = MixPrepOptions(genre="dnb", bpm_range=(170.0, 180.0), dry_run=True, free_only=True)
+    with patch("src.fetchers.catalog.fetch_all_tracks", return_value=[_known_track()]), \
+         patch("src.fetchers.catalog.fetch_all_mixes", return_value=[]), \
+         patch("src.fetchers.fetch_all_sources",
+               return_value=([_free_item()], {"soundcloud": {"count": 1, "error": None}})) as mock_fetch, \
+         patch("src.output.discord.make_discord_client", return_value=MagicMock()):
+        run_mix_prep(settings, options)
+    assert mock_fetch.call_args.kwargs["bpm_ranges"] == [(170.0, 180.0), (85.0, 90.0), (340.0, 360.0)]
+
+
+def test_run_mix_prep_regular_sends_no_only_sources_or_bpm_ranges(tmp_path):
+    settings = _settings(str(tmp_path))
+    options = MixPrepOptions(genre="breaks", bpm_range=(130.0, 140.0), dry_run=True)
+    with patch("src.fetchers.catalog.fetch_all_tracks", return_value=[_known_track()]), \
+         patch("src.fetchers.catalog.fetch_all_mixes", return_value=[]), \
+         patch("src.fetchers.fetch_all_sources",
+               return_value=([_source_item()], {"beatport": {"count": 1, "error": None}})) as mock_fetch, \
+         patch("src.output.discord.make_discord_client", return_value=MagicMock()):
+        run_mix_prep(settings, options)
+    assert mock_fetch.call_args.kwargs.get("only_sources") is None
+    assert mock_fetch.call_args.kwargs.get("bpm_ranges") is None

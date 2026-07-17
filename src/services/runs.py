@@ -47,6 +47,7 @@ class MixPrepOptions:
     key_camelot: Optional[str] = None
     bpm_flex: bool = True
     dry_run: bool = False
+    free_only: bool = False
 
 
 @dataclass
@@ -440,13 +441,14 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
     bpm_range = options.bpm_range
     key_camelot = options.key_camelot
     bpm_flex = options.bpm_flex
+    free_only = options.free_only
     emit = progress or _noop_progress
 
     logger = get_logger(__name__)
     start = time.time()
     remix_aware = settings.pipeline_remix_aware_identity  # issue #9 — default off
-    report_id = f"{make_report_id()}-mix-prep-{genre}"
-    logger.info(f"[mix-prep] Starting mix-prep run — genre: {genre} — {report_id}" + (" (DRY RUN)" if dry_run else ""))
+    report_id = f"{make_report_id()}-free-dl-{genre}" if free_only else f"{make_report_id()}-mix-prep-{genre}"
+    logger.info(f"[mix-prep] Starting {'free-downloads' if free_only else 'mix-prep'} run — genre: {genre} — {report_id}" + (" (DRY RUN)" if dry_run else ""))
 
     with run_lock(settings.data_dir):
         # Create discord client early for alerts (same as anomaly-alert gating pattern)
@@ -475,7 +477,14 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
 
         # 3. Fetch external sources
         emit("sources", f"Fetching sources for {genre}")
-        source_items, fetcher_health = fetch_all_sources(settings, target_genre=genre)
+        only_sources = settings.pipeline_free_download_sources if free_only else None
+        fetch_bpm_ranges = None
+        if free_only and bpm_range is not None:
+            from src.pipeline.harmonic import expand_bpm_ranges
+            fetch_bpm_ranges = expand_bpm_ranges(bpm_range, bpm_flex)
+        source_items, fetcher_health = fetch_all_sources(
+            settings, target_genre=genre, only_sources=only_sources, bpm_ranges=fetch_bpm_ranges,
+        )
         sources_fetched = len(source_items)
         emit("sources", f"Fetched {sources_fetched} items")
 
@@ -486,6 +495,11 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
         candidates = items_to_candidates(source_items)
         label_seed = list(candidates)
         candidates = filter_known(candidates, known_keys, remix_aware)
+        if free_only:
+            # Track-level free eligibility (spec §3.1) — the report's title
+            # promises "free"; a downloadable_only:false config or a mixed
+            # future lane source must not leak paid tracks here.
+            candidates = [c for c in candidates if c.raw_metadata.get("free_download") is True]
         candidates = [c for c in candidates if c.key not in mix_prep_history_keys]
         candidates = filter_genre(candidates, genre)
         candidates = filter_genre_exclusions(candidates, genre, settings.pipeline_genre_exclusions)
@@ -507,6 +521,8 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
             c for c in _pool
             if c.key not in known_keys and c.key not in mix_prep_history_keys
         ]
+        if free_only:
+            pool_injected = [c for c in pool_injected if c.raw_metadata.get("free_download") is True]
         candidates = candidates + pool_injected
 
         # BPM/key filter (issue #8) — applied after all existing filters + pool
@@ -545,7 +561,7 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
             else:
                 logger.warning(f"[mix-prep] ALERT (dry-run, not posted): Mix-prep {report_id}: no candidates found for genre '{genre}'. Check sources.")
             return RunOutcome(
-                kind="mix-prep", report_id=report_id, dry_run=dry_run,
+                kind="free-downloads" if free_only else "mix-prep", report_id=report_id, dry_run=dry_run,
                 duration_seconds=int(time.time() - start), stats=stats, no_candidates=True,
             )
 
@@ -559,6 +575,7 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
         sections, label_artists = rank_candidates_mix_prep(
             candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
             label_memory=label_memory, demoted_keys=demoted_keys, skip_penalty_artists=skip_set,
+            free_downloads_count=settings.pipeline_free_downloads_mode_count if free_only else None,
         )
         aliases = settings.artist_aliases()
 
@@ -593,10 +610,10 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
             }
         report_text = generate_mix_prep_report(
             sections, report_id, stats, genre, settings, profiles=profiles, label_artists=label_artists,
-            aliases=aliases, filters_desc=filters_desc,
+            aliases=aliases, filters_desc=filters_desc, free_only=free_only,
         )
         artifact = build_report_artifact(
-            sections, report_id, "mix-prep", stats,
+            sections, report_id, "free-downloads" if free_only else "mix-prep", stats,
             profiles=profiles, label_artists=label_artists, aliases=aliases,
             genre=genre, filters=filters_payload, dry_run=dry_run,
         )
@@ -650,7 +667,7 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
         duration = int(time.time() - start)
         emit("done", f"{len(new_records)} tracks recommended")
         return RunOutcome(
-            kind="mix-prep", report_id=report_id, dry_run=dry_run,
+            kind="free-downloads" if free_only else "mix-prep", report_id=report_id, dry_run=dry_run,
             recommended_count=len(new_records), duration_seconds=duration,
             report_text=report_text, stats=stats,
             artifact=artifact, artifact_path=artifact_path, audition_path=audition_path,

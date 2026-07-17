@@ -209,10 +209,12 @@ def _build_footer(report_id: str, stats: dict, recommended_count: int | None = N
     return "\n".join(lines)
 
 
-def _build_mix_prep_header(report_id: str, today: str, genre: str, filters_desc: str | None = None) -> str:
+def _build_mix_prep_header(report_id: str, today: str, genre: str, filters_desc: str | None = None, free_only: bool = False) -> str:
     display_genre = genre.upper() if genre == "ukg" else genre.replace("-", " ").title()
+    title = (f"🆓 {display_genre} Free Downloads Report" if free_only
+             else f"🎛️ {display_genre} Mix Prep Report")
     lines = [
-        f"🎛️ {display_genre} Mix Prep Report",
+        title,
         f"Report ID: {report_id}",
         f"Date: {today}",
     ]
@@ -369,6 +371,7 @@ def generate_mix_prep_report(
     today: Optional[date] = None,
     aliases: dict[str, str] | None = None,
     filters_desc: str | None = None,
+    free_only: bool = False,
 ) -> str:
     """Generate a Discord-formatted mix-prep report focused on a single genre.
 
@@ -385,7 +388,7 @@ def generate_mix_prep_report(
     profiles_lower = {k.lower(): v for k, v in (profiles or {}).items()}
     today_str = today.strftime("%-d %B %Y")
     stats_line = _format_mix_prep_stats(sections)
-    header = _build_mix_prep_header(report_id, today_str, genre, filters_desc=filters_desc)
+    header = _build_mix_prep_header(report_id, today_str, genre, filters_desc=filters_desc, free_only=free_only)
     show_harmonic = filters_desc is not None
 
     lines = [header, ""]
