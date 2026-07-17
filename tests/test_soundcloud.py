@@ -207,8 +207,11 @@ def test_lookback_window_enforced_client_side(tmp_path):
 
 def test_downloadable_only_filters_non_downloadable(tmp_path):
     settings = _make_settings(tmp_path, downloadable_only=True)
+    nd = _track(track_id=2, downloadable=False)
+    nd["purchase_title"] = None
+    nd["purchase_url"] = None
     with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
-        mock_get.return_value = _page([_track(track_id=1), _track(track_id=2, downloadable=False)])
+        mock_get.return_value = _page([_track(track_id=1), nd])
         items = soundcloud.fetch(settings)
 
     assert len(items) == 1
@@ -427,3 +430,101 @@ def test_parse_blank_metadata_artist_falls_back_to_username(tmp_path):
         mock_get.return_value = _page([track])
         items = soundcloud.fetch(settings)
     assert items[0].artist == "Test DJ"
+
+
+# ---------------------------------------------------------------------------
+# Gate detection, free_download stamp, acquisition_url
+# ---------------------------------------------------------------------------
+
+def test_gated_free_dl_kept_and_flagged(tmp_path):
+    settings = _make_settings(tmp_path)  # downloadable_only=True
+    gated = _track(downloadable=False)   # purchase_title "Free Download", hypeddit URL
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([gated])
+        items = soundcloud.fetch(settings)
+
+    assert len(items) == 1
+    md = items[0].raw_metadata
+    assert md["free_gate"] is True
+    assert md["free_download"] is True
+    assert md["acquisition_url"] == "https://hypeddit.com/dl/xyz"
+
+
+def test_gate_domain_without_free_title_kept(tmp_path):
+    settings = _make_settings(tmp_path)
+    gated = _track(downloadable=False)
+    gated["purchase_title"] = "Download"          # no "free", but hypeddit host
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([gated])
+        items = soundcloud.fetch(settings)
+    assert len(items) == 1 and items[0].raw_metadata["free_gate"] is True
+
+
+def test_paid_purchase_link_still_dropped(tmp_path):
+    settings = _make_settings(tmp_path)
+    paid = _track(downloadable=False)
+    paid["purchase_title"] = "Buy on Bandcamp"
+    paid["purchase_url"] = "https://artist.bandcamp.com/track/x"
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([paid])
+        items = soundcloud.fetch(settings)
+    assert items == []
+
+
+def test_include_gated_free_false_restores_native_only(tmp_path):
+    settings = _make_settings(tmp_path)
+    settings.get_source_config.return_value["include_gated_free"] = False
+    gated = _track(downloadable=False)
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([gated])
+        items = soundcloud.fetch(settings)
+    assert items == []
+
+
+def test_native_download_stamped_with_permalink_acquisition(tmp_path):
+    settings = _make_settings(tmp_path)
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([_track(downloadable=True)])
+        items = soundcloud.fetch(settings)
+    md = items[0].raw_metadata
+    assert md["free_gate"] is False
+    assert md["free_download"] is True
+    assert md["acquisition_url"] == items[0].link
+
+
+def test_downloadable_only_false_non_free_not_stamped(tmp_path):
+    settings = _make_settings(tmp_path, downloadable_only=False)
+    plain = _track(downloadable=False)
+    plain["purchase_title"] = None
+    plain["purchase_url"] = None
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([plain])
+        items = soundcloud.fetch(settings)
+    assert len(items) == 1
+    assert items[0].raw_metadata["free_download"] is False
+
+
+@pytest.mark.parametrize("bad_url", [
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "hypeddit.com/dl/xyz",       # scheme-less — urlparse yields no netloc
+    "   ",
+])
+def test_unsafe_or_invalid_purchase_url_never_gates(tmp_path, bad_url):
+    settings = _make_settings(tmp_path)
+    track = _track(downloadable=False)   # purchase_title "Free Download"
+    track["purchase_url"] = bad_url
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([track])
+        items = soundcloud.fetch(settings)
+    assert items == []                    # not a gate → dropped by downloadable_only
+
+
+def test_gate_url_query_string_preserved(tmp_path):
+    settings = _make_settings(tmp_path)
+    gated = _track(downloadable=False)
+    gated["purchase_url"] = "https://hypeddit.com/dl/xyz?sig=abc123&fan=1"
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([gated])
+        items = soundcloud.fetch(settings)
+    assert items[0].raw_metadata["acquisition_url"] == "https://hypeddit.com/dl/xyz?sig=abc123&fan=1"

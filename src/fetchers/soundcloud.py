@@ -147,7 +147,30 @@ def _parse_release_date(created_at) -> str | None:
     return "-".join(m.groups())
 
 
-def _parse_track(track: dict, tag: str) -> SourceItem | None:
+# Hypeddit/ToneDen-style "Free DL" gates: downloadable=false but the purchase
+# link is a free-download exchange, not a store. Title match is primary; the
+# domain allowlist catches gates whose title omits "free".
+_GATE_DOMAINS = {"hypeddit.com", "toneden.io", "gate.fm"}
+
+
+def _is_free_gate(track: dict) -> bool:
+    if track.get("downloadable") is True:
+        return False
+    url = (track.get("purchase_url") or "").strip()
+    parsed = urllib.parse.urlparse(url)
+    # http(s)-with-host only — purchase_url is uploader-controlled and lands in
+    # hrefs downstream (audition page, SPA cards); a javascript:/data: URL must
+    # never qualify as a "gate". html.escape does not neutralise URL schemes.
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    if "free" in (track.get("purchase_title") or "").lower():
+        return True
+    host = parsed.netloc.lower()
+    host = host[4:] if host.startswith("www.") else host
+    return host in _GATE_DOMAINS
+
+
+def _parse_track(track: dict, tag: str, free_gate: bool = False) -> SourceItem | None:
     title = (track.get("title") or "").strip()
     artist = (track.get("metadata_artist") or "").strip() \
         or ((track.get("user") or {}).get("username") or "").strip()
@@ -185,6 +208,16 @@ def _parse_track(track: dict, tag: str) -> SourceItem | None:
             "release_year": track.get("release_year"),
             "release_month": track.get("release_month"),
             "release_day": track.get("release_day"),
+            "free_gate": free_gate,
+            "free_download": bool(track.get("downloadable") is True or free_gate),
+            # Gate URLs are preserved verbatim (already scheme/host-validated by
+            # _is_free_gate) — gates use required/signed query params, so no
+            # query stripping here, unlike the permalink's utm cleanup.
+            "acquisition_url": (
+                (track.get("purchase_url") or "").strip() if free_gate
+                else link if track.get("downloadable") is True
+                else None
+            ),
         },
     )
 
@@ -205,6 +238,7 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
         return []
 
     downloadable_only = cfg.get("downloadable_only", True)
+    include_gated = cfg.get("include_gated_free", True)
     lookback_days = cfg.get("lookback_days", 28)
     limit = cfg.get("limit_per_target", 50)
     max_duration_ms = cfg.get("max_duration_minutes", 15) * 60 * 1000
@@ -236,14 +270,15 @@ def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
                 data = _get_json(url, session)
                 page += 1
                 for track in (data.get("collection") or []):
-                    if downloadable_only and track.get("downloadable") is not True:
+                    gate = include_gated and _is_free_gate(track)
+                    if downloadable_only and track.get("downloadable") is not True and not gate:
                         continue
                     # Search results mix single tracks with full DJ sets/mixes —
                     # anything over the duration cap is a set, not a release.
                     duration = track.get("duration")
                     if max_duration_ms and duration and duration > max_duration_ms:
                         continue
-                    item = _parse_track(track, tag)
+                    item = _parse_track(track, tag, free_gate=gate)
                     if item is None:
                         continue
                     # The API ignores created_at[from] (verified live 2026-07-17),
