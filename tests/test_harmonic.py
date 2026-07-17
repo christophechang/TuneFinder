@@ -327,3 +327,20 @@ def test_partition_preserves_relative_order_within_each_list():
     matches, unknowns = partition_by_harmonic([a, c, b, d], (170, 180), None)
     assert matches == [a, b]
     assert unknowns == [c, d]
+
+
+from src.pipeline.harmonic import expand_bpm_ranges
+
+
+def test_expand_bpm_ranges_no_flex_single_range():
+    assert expand_bpm_ranges((170.0, 180.0), flex=False) == [(170.0, 180.0)]
+
+
+def test_expand_bpm_ranges_flex_adds_half_and_double():
+    assert expand_bpm_ranges((170.0, 180.0), flex=True) == [
+        (170.0, 180.0), (85.0, 90.0), (340.0, 360.0),
+    ]
+
+
+def test_expand_bpm_ranges_flex_default_on():
+    assert len(expand_bpm_ranges((120.0, 130.0))) == 3

@@ -134,6 +134,17 @@ def bpm_matches(bpm: float | int, lo: float, hi: float, flex: bool = True) -> bo
     return False
 
 
+def expand_bpm_ranges(bpm_range: tuple[float, float], flex: bool = True) -> list[tuple[float, float]]:
+    """Server-side search ranges matching bpm_matches() semantics: with flex on,
+    a 170-180 request must also return 85-90 (half-time) and 340-360 (double)
+    tagged tracks — a single exact range would strip tracks the client-side
+    filter is contractually meant to accept."""
+    lo, hi = bpm_range
+    if not flex:
+        return [(lo, hi)]
+    return [(lo, hi), (lo / 2, hi / 2), (lo * 2, hi * 2)]
+
+
 def candidate_bpm(c: Candidate) -> float | None:
     """Read BPM from raw_metadata["bpm"], tolerant of str/int/float and junk."""
     raw = c.raw_metadata.get("bpm")
