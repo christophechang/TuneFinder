@@ -64,6 +64,7 @@ _SECTION_LABELS = {
     "artist_watch": "Artist Watch",
     "wildcards": "Wildcards",
     "deep_cuts": "Deep Cuts",
+    "free_downloads": "Free Downloads",
 }
 
 

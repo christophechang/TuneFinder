@@ -101,6 +101,45 @@ def test_build_artifact_no_embed_when_no_ids():
     assert t["embed"] is None
 
 
+def test_artifact_includes_free_downloads_section():
+    sections = {
+        "top_picks": [_candidate(title="Store Hit")],
+        "free_downloads": [_candidate(title="Boot VIP", source="soundcloud")],
+    }
+    artifact = _build(sections)
+    keys = [s["key"] for s in artifact["sections"]]
+    assert keys == ["top_picks", "free_downloads"]
+    fd = artifact["sections"][1]
+    assert fd["label"] == "Free Downloads"
+    assert fd["tracks"][0]["track_no"] == 2  # numbering shared with report_order
+
+
+def test_all_section_order_keys_render_in_every_path():
+    """A section key in _SECTION_ORDER must reach the weekly Discord text, the
+    mix-prep Discord text (for its keys), the artifact, and the audition page —
+    guards against a renderer being missed when a section is added."""
+    from src.pipeline.audition import generate_audition_page
+    from src.pipeline.report import (
+        _SECTION_ORDER, generate_report, generate_mix_prep_report,
+    )
+    weekly_keys = [k for k in _SECTION_ORDER if k != "deep_cuts"]
+    sections = {k: [_candidate(title=f"T-{k}", artist=f"A-{k}")] for k in weekly_keys}
+    text = generate_report(sections, "2026-W29", {}, object(), today=_TODAY)
+    artifact = _build(sections)
+    page = generate_audition_page(sections, "2026-W29", None, profiles={}, label_artists={},
+                                  today=_TODAY)
+    for k in weekly_keys:
+        assert f"T-{k}" in text, f"{k} missing from weekly Discord report"
+        assert f"T-{k}" in page, f"{k} missing from audition page"
+    assert [s["key"] for s in artifact["sections"]] == weekly_keys
+
+    mix_keys = ("top_picks", "deep_cuts", "free_downloads")
+    mix_sections = {k: [_candidate(title=f"M-{k}", artist=f"A-{k}")] for k in mix_keys}
+    mix_text = generate_mix_prep_report(mix_sections, "TEST-ukg", {}, "ukg", object(), today=_TODAY)
+    for k in mix_keys:
+        assert f"M-{k}" in mix_text, f"{k} missing from mix-prep Discord report"
+
+
 def test_build_artifact_soundcloud_embed_uses_link():
     sections = {"top_picks": [_candidate(source="soundcloud", title="Bootleg")]}
     t = _build(sections)["sections"][0]["tracks"][0]
