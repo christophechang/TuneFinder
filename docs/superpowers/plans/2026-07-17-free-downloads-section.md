@@ -4,7 +4,7 @@
 
 **Goal:** Free-download/bootleg tracks (SoundCloud today) get their own exclusive report section in weekly and mix-prep reports instead of competing — and losing — against store releases.
 
-**Architecture:** Config-driven lane routing (`pipeline.free_download_sources`) partitions lane candidates out of section assignment before the store sections run; a dedicated section with its own floor/counts is ranked by combined score plus a new source-gated SoundCloud popularity signal. Rendering is added to all four output paths (weekly Discord, mix-prep Discord, report artifact, audition page) with the artifact unified onto the shared `_SECTION_ORDER`.
+**Architecture:** Config-driven lane routing (`pipeline.free_download_sources`) partitions lane candidates out of section assignment before the store sections run; a dedicated section with its own floor/counts is ranked by combined score plus a new source-gated SoundCloud popularity signal. Rendering is added to all four output paths (weekly Discord, mix-prep Discord, report artifact, audition page), with the artifact unified onto the shared `_SECTION_ORDER`. **Task order is deliberate: renderers (Task 5) and artifact (Task 6) land before the section producers (Tasks 7-8)** — `report_order` raises on unknown *present* keys but tolerates *absent* ones, so rendering support must exist before the ranker starts emitting the key, keeping every commit green.
 
 **Tech Stack:** Python 3.11+, pytest, dataclasses. No new dependencies.
 
@@ -15,7 +15,8 @@
 - Work on branch `feat/free-downloads-section` off `develop`. Conventional commits, **no `Co-Authored-By` trailers**.
 - TDD for every behavior: failing test → verify fail → minimal code → verify pass → commit.
 - Run tests with `./venv/bin/pytest`; never a bare `pytest`.
-- Do NOT touch: dedup identity, pool mechanics, history schema, fetchers, `.env`, `data/`, `fixtures/`.
+- Do NOT touch: dedup identity, pool mechanics, history schema, fetchers, `.env`, `fixtures/`. `data/` is written only by the documented dry-run side effects in Task 11.
+- Every commit must leave the full suite green (`./venv/bin/pytest tests/ -q` before each commit if in doubt).
 - Snapshot tests (`tests/test_report.py`) are updated deliberately in the same commit as the renderer change, never casually.
 - Signal code for both popularity signals is the existing `source_popularity` (explanation text carries the store name); the spec's name "soundcloud_popularity" refers to the config weights, not a new code.
 - Never post live to Discord. Dry-run only for pipeline validation.
@@ -303,18 +304,221 @@ git commit -m "feat: SoundCloud download-count popularity signal"
 
 ---
 
-### Task 5: Ranker — weekly lane partition + Free Downloads section
+### Task 5: Report renderers — section in both Discord reports
+
+**Sequencing note:** this task lands BEFORE the section producers (Tasks 7-8). `report_order`
+raises `ValueError` on unknown *present* keys (`report.py:49`) but tolerates absent keys — so the
+renderers must accept `"free_downloads"` before the ranker starts emitting it, or Tasks 7-8 would
+break the suite mid-plan.
+
+**Files:**
+- Modify: `src/pipeline/report.py` (`_SECTION_ORDER` line 24; weekly renderer after the
+  Wildcards block ~line 340; mix-prep renderer after the Deep Cuts block)
+- Test: `tests/test_report.py`
+
+**Interfaces:**
+- Consumes: sections dicts built by the tests themselves (producers arrive in Tasks 7-8).
+- Produces: `_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards",
+  "deep_cuts", "free_downloads")`; `## 🆓 Free Downloads` blocks in both renderers; continuous
+  numbering through the section.
+
+- [ ] **Step 1: Write the failing tests** (adapt `_candidate` and the exact
+  `generate_report`/`generate_mix_prep_report` call signatures to the fixtures
+  `tests/test_report.py` already uses for the two renderers)
+
+```python
+def test_weekly_report_renders_free_downloads_section():
+    sections = {
+        "top_picks": [_candidate(title="Store Hit")],
+        "free_downloads": [_candidate(title="Boot VIP", source="soundcloud")],
+    }
+    text = generate_report(sections, "2026-W29", {}, None)
+    assert "## 🆓 Free Downloads" in text
+    assert text.index("## 🆓 Free Downloads") > text.index("Store Hit")
+    # numbering continues across sections: store track is 1., lane track is 2.
+    assert "2." in text.split("## 🆓 Free Downloads")[1]
+
+
+def test_mix_prep_report_renders_free_downloads_section():
+    sections = {
+        "deep_cuts": [_candidate(title="Cut")],
+        "free_downloads": [_candidate(title="Boot", source="soundcloud")],
+    }
+    text = generate_mix_prep_report(sections, "mixprep-ukg-2026-07-17", {}, "ukg", None)
+    assert "## 🆓 Free Downloads" in text
+    assert text.index("## 🆓 Free Downloads") > text.index("## 🎧 Deep Cuts")
+
+
+def test_empty_free_downloads_section_omitted():
+    sections = {"top_picks": [_candidate(title="Only")], "free_downloads": []}
+    text = generate_report(sections, "2026-W29", {}, None)
+    assert "Free Downloads" not in text
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `./venv/bin/pytest tests/test_report.py -k free_downloads -v`
+Expected: FAIL — `report_order` raises `ValueError: unknown section keys {'free_downloads'}` (report.py:49).
+
+- [ ] **Step 3: Implement**
+
+(a) Line 24:
+
+```python
+_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards", "deep_cuts", "free_downloads")
+```
+
+(b) Weekly renderer — after the Wildcards block (line ~340), before `recommended_count`:
+
+```python
+    # Free Downloads — exclusive lane (pipeline.free_download_sources)
+    free_downloads = sections.get("free_downloads", [])
+    if free_downloads:
+        lines.append("## 🆓 Free Downloads")
+        for c in free_downloads:
+            lines.extend(_render_track(c))
+        lines.append("")
+```
+
+(c) Mix-prep renderer — after the Deep Cuts block, before the footer:
+
+```python
+    free_downloads = sections.get("free_downloads", [])
+    if free_downloads:
+        lines.append("## 🆓 Free Downloads")
+        for c in free_downloads:
+            lines.extend(_render_track(c))
+        lines.append("")
+```
+
+- [ ] **Step 4: Run the report suite; snapshots must not change**
+
+Run: `./venv/bin/pytest tests/test_report.py -v`
+Expected: new tests PASS; frozen snapshots byte-identical (their fixture sections have no
+`free_downloads` key, and empty/absent keys render nothing). Any snapshot diff here is a
+regression — stop and fix.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/pipeline/report.py tests/test_report.py
+git commit -m "feat: render Free Downloads section in weekly and mix-prep reports"
+```
+
+---
+
+### Task 6: Artifact unification + audition label + four-path consistency test
+
+**Files:**
+- Modify: `src/pipeline/report_artifact.py` (`_SECTION_LABELS` lines 29-35; literal tuple line 114)
+- Modify: `src/pipeline/audition.py` (`_SECTION_LABELS` lines 59-65)
+- Test: `tests/test_report_artifact.py`
+
+**Interfaces:**
+- Consumes: `_SECTION_ORDER` from `src/pipeline/report.py` (Task 5's six-key tuple).
+- Produces: artifact iterates the shared order; both label maps carry
+  `"free_downloads": "Free Downloads"`; a consistency test locks all four output paths together.
+
+- [ ] **Step 1: Write the failing tests** (append to `tests/test_report_artifact.py`; adapt
+  renderer/audition call signatures to the fixtures used in `tests/test_report.py` /
+  `tests/test_audition.py`)
+
+```python
+def test_artifact_includes_free_downloads_section():
+    sections = {
+        "top_picks": [_candidate(title="Store Hit")],
+        "free_downloads": [_candidate(title="Boot VIP", source="soundcloud")],
+    }
+    artifact = _build(sections)
+    keys = [s["key"] for s in artifact["sections"]]
+    assert keys == ["top_picks", "free_downloads"]
+    fd = artifact["sections"][1]
+    assert fd["label"] == "Free Downloads"
+    assert fd["tracks"][0]["track_no"] == 2  # numbering shared with report_order
+
+
+def test_all_section_order_keys_render_in_every_path():
+    """A section key in _SECTION_ORDER must reach the weekly Discord text, the
+    mix-prep Discord text (for its keys), the artifact, and the audition page —
+    guards against a renderer being missed when a section is added."""
+    from src.pipeline.audition import generate_audition_page
+    from src.pipeline.report import (
+        _SECTION_ORDER, generate_report, generate_mix_prep_report,
+    )
+    weekly_keys = [k for k in _SECTION_ORDER if k != "deep_cuts"]
+    sections = {k: [_candidate(title=f"T-{k}", artist=f"A-{k}")] for k in weekly_keys}
+    text = generate_report(sections, "2026-W29", {}, None)
+    artifact = _build(sections)
+    page = generate_audition_page(sections, "2026-W29", None, profiles={}, label_artists={})
+    for k in weekly_keys:
+        assert f"T-{k}" in text, f"{k} missing from weekly Discord report"
+        assert f"T-{k}" in page, f"{k} missing from audition page"
+    assert [s["key"] for s in artifact["sections"]] == weekly_keys
+
+    mix_keys = ("top_picks", "deep_cuts", "free_downloads")
+    mix_sections = {k: [_candidate(title=f"M-{k}", artist=f"A-{k}")] for k in mix_keys}
+    mix_text = generate_mix_prep_report(mix_sections, "mixprep-ukg-2026-07-17", {}, "ukg", None)
+    for k in mix_keys:
+        assert f"M-{k}" in mix_text, f"{k} missing from mix-prep Discord report"
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `./venv/bin/pytest tests/test_report_artifact.py -k "free_downloads or every_path" -v`
+Expected: FAIL — the artifact's literal tuple omits `free_downloads`, so `keys == ["top_picks"]`.
+
+- [ ] **Step 3: Implement**
+
+(a) `report_artifact.py` — add to imports (the file already imports from `src.pipeline.report`):
+
+```python
+from src.pipeline.report import _SECTION_ORDER
+```
+
+Replace the literal tuple at line 114:
+
+```python
+    for section_key in _SECTION_ORDER:
+```
+
+Add to `_SECTION_LABELS` (lines 29-35):
+
+```python
+    "free_downloads": "Free Downloads",
+```
+
+(b) `audition.py` — add the same entry to its `_SECTION_LABELS` (lines 59-65):
+
+```python
+    "free_downloads": "Free Downloads",
+```
+
+- [ ] **Step 4: Run artifact + audition + web suites**
+
+Run: `./venv/bin/pytest tests/test_report_artifact.py tests/test_audition.py tests/test_web_api.py -v`
+Expected: all PASS (web schema's `ReportSection.key` is a free string — no schema work).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/pipeline/report_artifact.py src/pipeline/audition.py tests/test_report_artifact.py
+git commit -m "feat: free downloads section in artifact and audition page, unify section order"
+```
+
+---
+
+### Task 7: Ranker — weekly lane partition + Free Downloads section
 
 **Files:**
 - Modify: `src/pipeline/ranker.py` `_assign_sections` (~lines 539-685)
 - Test: `tests/test_ranker.py`
 
 **Interfaces:**
-- Consumes: Task 1 settings properties.
+- Consumes: Task 1 settings properties; Task 5's rendering support (already merged).
 - Produces: `_assign_sections` return dict gains key `"free_downloads": list[Candidate]`;
   lane candidates (source ∈ `pipeline_free_download_sources`) appear ONLY there; `trace` gains
   `("sections", "routed to free_downloads lane")` and `("free_downloads", "below lane floor …")`
-  entries.
+  entries. Defines test helper `_LaneSettings` (used again in Task 8).
 
 - [ ] **Step 1: First extend the existing `_MockSettings` class** (tests/test_ranker.py, ~line 194)
   with lane defaults so every existing section test keeps passing unchanged:
@@ -363,6 +567,15 @@ def test_free_download_lane_own_floor():
     assert sections["free_downloads"] == []
 
 
+def test_free_download_lane_count_zero_disables():
+    class _ZeroLane(_LaneSettings):
+        pipeline_free_downloads_count = 0
+
+    c = _scored_candidate(5.0, source="soundcloud")
+    sections = _assign_sections([c], _ZeroLane(), _build_genre_set({}))
+    assert sections["free_downloads"] == []
+
+
 def test_lane_disabled_when_no_sources_configured():
     sc = _scored_candidate(5.0, source="soundcloud")
     sections = _assign_sections([sc], _MockSettings(), _build_genre_set({}))
@@ -373,7 +586,7 @@ def test_lane_disabled_when_no_sources_configured():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `./venv/bin/pytest tests/test_ranker.py -k free_download -v`
+Run: `./venv/bin/pytest tests/test_ranker.py -k "free_download or lane_disabled" -v`
 Expected: FAIL with `KeyError: 'free_downloads'`
 
 - [ ] **Step 3: Implement the partition + lane pick** (in `_assign_sections`)
@@ -399,6 +612,8 @@ After the wildcards assignment (line ~672), add:
 
 ```python
     def _pick_free_downloads() -> list[Candidate]:
+        if lane_n <= 0:
+            return []
         artist_counts: dict[str, int] = {}
         result: list[Candidate] = []
         for c in free_dl_pool:  # already score-descending
@@ -438,12 +653,12 @@ Extend the summary log line and the return dict:
     }
 ```
 
-- [ ] **Step 4: Run the ranker suite**
+- [ ] **Step 4: Run the FULL suite (not just ranker)**
 
-Run: `./venv/bin/pytest tests/test_ranker.py -v`
-Expected: all PASS (existing section tests unaffected — with `free_download_sources` unset the
-partition is a no-op and the new key is an empty list; if any existing test asserts the exact
-return-dict keys, extend its expectation with `"free_downloads": []`).
+Run: `./venv/bin/pytest tests/ -q`
+Expected: all PASS — rendering support already landed in Tasks 5-6, so the new key flows cleanly
+through report, artifact, audition, and services tests. If any existing test asserts the exact
+return-dict keys, extend its expectation with `"free_downloads": []`.
 
 - [ ] **Step 5: Commit**
 
@@ -454,16 +669,18 @@ git commit -m "feat: exclusive free-downloads lane in weekly section assignment"
 
 ---
 
-### Task 6: Ranker — mix-prep Free Downloads block
+### Task 8: Ranker — mix-prep Free Downloads block
 
 **Files:**
 - Modify: `src/pipeline/ranker.py` `_assign_sections_mix_prep` (lines 750-805)
 - Test: `tests/test_ranker.py`
 
 **Interfaces:**
-- Consumes: Task 1 settings properties; existing `demoted_keys` semantics (line 753).
+- Consumes: Task 1 settings properties; `_LaneSettings` from Task 7; existing `demoted_keys`
+  semantics (line 753).
 - Produces: return dict gains `"free_downloads": list[Candidate]`; lane block preserves
-  matches-before-demoted ordering internally; demotion never excludes a lane item.
+  matches-before-demoted ordering internally; demotion never excludes a lane item; count 0
+  disables the block.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -486,16 +703,24 @@ def test_mix_prep_lane_preserves_harmonic_demotion_order():
     sections = _assign_sections_mix_prep([demoted, match], _LaneSettings(),
                                          demoted_keys={demoted.key})
     assert sections["free_downloads"] == [match, demoted]
+
+
+def test_mix_prep_lane_count_zero_disables():
+    class _ZeroMixLane(_LaneSettings):
+        pipeline_mix_prep_free_downloads_count = 0
+
+    c = _scored_candidate(5.0, source="soundcloud")
+    sections = _assign_sections_mix_prep([c], _ZeroMixLane())
+    assert sections["free_downloads"] == []
 ```
 
-(Uses `_LaneSettings` from Task 5 — lane floor 0.0, mix-prep lane count 10. The second test passes
-candidates score-descending — `[demoted, match]` — because the assignment contract receives
-pre-ranked input.)
+(The demotion test passes candidates score-descending — `[demoted, match]` — because the
+assignment contract receives pre-ranked input.)
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `./venv/bin/pytest tests/test_ranker.py -k mix_prep_free_download -v; ./venv/bin/pytest tests/test_ranker.py -k mix_prep_lane -v`
-Expected: FAIL with `KeyError: 'free_downloads'`
+Run: `./venv/bin/pytest tests/test_ranker.py -k mix_prep -v`
+Expected: new tests FAIL with `KeyError: 'free_downloads'`; existing mix-prep tests still pass.
 
 - [ ] **Step 3: Implement** (in `_assign_sections_mix_prep`)
 
@@ -522,10 +747,13 @@ Replace the config-read head (lines 762-764) and partition after the demotion so
         order = [c for c in order if c.source not in lane_sources]
 ```
 
-Parameterise `pick` with pool and floor, and assign the third section:
+Parameterise `pick` with pool and floor (the `n <= 0` guard also hardens the existing sections),
+and assign the third section:
 
 ```python
     def pick(n: int, pool: list[Candidate], floor: float) -> list[Candidate]:
+        if n <= 0:
+            return []
         artist_counts: dict[str, int] = {}
         release_counts: dict[str, int] = {}
         result = []
@@ -559,10 +787,10 @@ Parameterise `pick` with pool and floor, and assign the third section:
     return {"top_picks": top_picks, "deep_cuts": deep_cuts, "free_downloads": free_downloads}
 ```
 
-- [ ] **Step 4: Run the ranker suite**
+- [ ] **Step 4: Run the FULL suite**
 
-Run: `./venv/bin/pytest tests/test_ranker.py -v`
-Expected: all PASS (same extend-expectation note as Task 5 Step 4 for any exact-keys assertions).
+Run: `./venv/bin/pytest tests/ -q`
+Expected: all PASS (same extend-expectation note as Task 7 Step 4 for any exact-keys assertions).
 
 - [ ] **Step 5: Commit**
 
@@ -573,7 +801,7 @@ git commit -m "feat: free-downloads block in mix-prep section assignment"
 
 ---
 
-### Task 7: Reasons — popularity reason line + SoundCloud display casing
+### Task 9: Reasons — popularity reason line + SoundCloud display casing
 
 **Files:**
 - Modify: `src/pipeline/reasons.py` (fact extraction ~line 75, `source_disp` line 96,
@@ -583,6 +811,8 @@ git commit -m "feat: free-downloads block in mix-prep section assignment"
 
 **Interfaces:**
 - Consumes: `source_popularity` signal (Tasks 3-4) and `raw_metadata["download_count"]`.
+  Note: `_pick(variants)` SELECTS a template (returns "" if none eligible); `_fill(template)`
+  SUBSTITUTES placeholders — a branch must call both.
 - Produces: deterministic reason line for popularity-signal tracks; `{source_disp}` renders
   "SoundCloud" (brand casing) everywhere.
 
@@ -596,6 +826,7 @@ def test_source_popularity_reason_soundcloud():
                    raw_metadata={"download_count": 214})
     reason = compose_reason(c, {})
     assert "214" in reason
+    assert "{dl}" not in reason and "{source_disp}" not in reason  # placeholders substituted
     assert "SoundCloud" in reason           # brand casing, not "Soundcloud"
     assert "Soundcloud" not in reason
 
@@ -611,9 +842,9 @@ def test_source_popularity_reason_deterministic():
 
 Run: `./venv/bin/pytest tests/test_reasons.py -k source_popularity -v`
 Expected: FAIL — no popularity branch exists, so the reason falls through to a genre/fresh
-fallback with no "214"; casing assertion also fails if the fallback happens to include the source.
+fallback with no "214".
 
-- [ ] **Step 3: Implement the four edits**
+- [ ] **Step 3: Implement the five edits**
 
 (a) Fact extraction, after the `chart` block (~line 75):
 
@@ -642,15 +873,19 @@ fallback with no "214"; casing assertion also fails if the fallback happens to i
         result = result.replace("{dl}", str(dl_count) if dl_count is not None else "")
 ```
 
-(e) Template branch — insert directly AFTER the `bandcamp_discovery` branch (~line 235):
+(e) Template branch — insert directly AFTER the `bandcamp_discovery` branch (~line 235).
+**`_pick` only selects; `_fill` substitutes — call both, and fall through if no variant is
+eligible** (matches the established row pattern):
 
 ```python
     if "source_popularity" in signal_codes and dl_count is not None:
-        return _pick([
+        picked = _pick([
             "Free DL — grabbed {dl} times on {source_disp}.",
             "{dl} downloads on {source_disp} already.",
             "DJs are on this — {dl} downloads on {source_disp}.",
         ])
+        if picked:
+            return _fill(picked)
 ```
 
 - [ ] **Step 4: Run reasons + report suites**
@@ -665,197 +900,6 @@ changes that are the new reason line, and update the frozen string deliberately 
 ```bash
 git add src/pipeline/reasons.py tests/test_reasons.py tests/test_report.py
 git commit -m "feat: popularity reason line with SoundCloud brand casing"
-```
-
----
-
-### Task 8: Report renderers — section in both Discord reports
-
-**Files:**
-- Modify: `src/pipeline/report.py` (`_SECTION_ORDER` line 24; weekly renderer after the
-  Wildcards block ~line 340; mix-prep renderer after the Deep Cuts block)
-- Test: `tests/test_report.py`
-
-**Interfaces:**
-- Consumes: sections dicts with `"free_downloads"` key (Tasks 5-6).
-- Produces: `_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards",
-  "deep_cuts", "free_downloads")`; `## 🆓 Free Downloads` blocks in both renderers; continuous
-  numbering through the section.
-
-- [ ] **Step 1: Write the failing tests**
-
-```python
-def test_weekly_report_renders_free_downloads_section():
-    sections = {
-        "top_picks": [_candidate(title="Store Hit")],
-        "free_downloads": [_candidate(title="Boot VIP", source="soundcloud")],
-    }
-    text = generate_report(sections, "2026-W29", {}, None)
-    assert "## 🆓 Free Downloads" in text
-    assert text.index("## 🆓 Free Downloads") > text.index("Store Hit")
-    # numbering continues across sections: store track is 1., lane track is 2.
-    assert "2." in text.split("## 🆓 Free Downloads")[1]
-
-
-def test_mix_prep_report_renders_free_downloads_section():
-    sections = {
-        "deep_cuts": [_candidate(title="Cut")],
-        "free_downloads": [_candidate(title="Boot", source="soundcloud")],
-    }
-    text = generate_mix_prep_report(sections, "mixprep-ukg-2026-07-17", {}, "ukg", None)
-    assert "## 🆓 Free Downloads" in text
-    assert text.index("## 🆓 Free Downloads") > text.index("## 🎧 Deep Cuts")
-
-
-def test_empty_free_downloads_section_omitted():
-    sections = {"top_picks": [_candidate(title="Only")], "free_downloads": []}
-    text = generate_report(sections, "2026-W29", {}, None)
-    assert "Free Downloads" not in text
-```
-
-(Adapt `_candidate` and the exact `generate_report`/`generate_mix_prep_report` signatures to what
-`tests/test_report.py` already uses — the file has established fixtures for both renderers.)
-
-- [ ] **Step 2: Run to verify they fail**
-
-Run: `./venv/bin/pytest tests/test_report.py -k free_downloads -v`
-Expected: FAIL — `report_order` raises `ValueError: unknown section keys {'free_downloads'}` (report.py:49).
-
-- [ ] **Step 3: Implement**
-
-(a) Line 24:
-
-```python
-_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards", "deep_cuts", "free_downloads")
-```
-
-(b) Weekly renderer — after the Wildcards block (line ~340), before `recommended_count`:
-
-```python
-    # Free Downloads — exclusive lane (pipeline.free_download_sources)
-    free_downloads = sections.get("free_downloads", [])
-    if free_downloads:
-        lines.append("## 🆓 Free Downloads")
-        for c in free_downloads:
-            lines.extend(_render_track(c))
-        lines.append("")
-```
-
-(c) Mix-prep renderer — after the Deep Cuts block, before the footer:
-
-```python
-    free_downloads = sections.get("free_downloads", [])
-    if free_downloads:
-        lines.append("## 🆓 Free Downloads")
-        for c in free_downloads:
-            lines.extend(_render_track(c))
-        lines.append("")
-```
-
-- [ ] **Step 4: Run the report suite; update snapshots deliberately**
-
-Run: `./venv/bin/pytest tests/test_report.py -v`
-Expected: new tests PASS; frozen snapshots must be byte-identical (their fixture sections have no
-`free_downloads` key, and empty/absent keys render nothing). If a snapshot does change, the diff
-must consist ONLY of the new section content — anything else is a regression; stop and fix.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/pipeline/report.py tests/test_report.py
-git commit -m "feat: render Free Downloads section in weekly and mix-prep reports"
-```
-
----
-
-### Task 9: Artifact unification + audition label + cross-renderer consistency test
-
-**Files:**
-- Modify: `src/pipeline/report_artifact.py` (`_SECTION_LABELS` lines 29-35; literal tuple line 114)
-- Modify: `src/pipeline/audition.py` (`_SECTION_LABELS` lines 59-65)
-- Test: `tests/test_report_artifact.py`
-
-**Interfaces:**
-- Consumes: `_SECTION_ORDER` from `src/pipeline/report.py` (Task 8's six-key tuple).
-- Produces: artifact iterates the shared order; both label maps carry
-  `"free_downloads": "Free Downloads"`; a consistency test locks all four paths together.
-
-- [ ] **Step 1: Write the failing tests** (append to `tests/test_report_artifact.py`)
-
-```python
-def test_artifact_includes_free_downloads_section():
-    sections = {
-        "top_picks": [_candidate(title="Store Hit")],
-        "free_downloads": [_candidate(title="Boot VIP", source="soundcloud")],
-    }
-    artifact = _build(sections)
-    keys = [s["key"] for s in artifact["sections"]]
-    assert keys == ["top_picks", "free_downloads"]
-    fd = artifact["sections"][1]
-    assert fd["label"] == "Free Downloads"
-    assert fd["tracks"][0]["track_no"] == 2  # numbering shared with report_order
-
-
-def test_all_section_order_keys_render_in_every_path():
-    """A section key present in _SECTION_ORDER must reach the Discord text, the
-    artifact, and the audition page — guards against a renderer being missed."""
-    from src.pipeline.audition import generate_audition_page
-    from src.pipeline.report import _SECTION_ORDER, generate_report, generate_mix_prep_report
-    weekly_keys = [k for k in _SECTION_ORDER if k != "deep_cuts"]
-    sections = {k: [_candidate(title=f"T-{k}", artist=f"A-{k}")] for k in weekly_keys}
-    text = generate_report(sections, "2026-W29", {}, None)
-    artifact = _build(sections)
-    page = generate_audition_page(sections, "2026-W29", None, profiles={}, label_artists={})
-    for k in weekly_keys:
-        assert f"T-{k}" in text, f"{k} missing from Discord report"
-        assert f"T-{k}" in page, f"{k} missing from audition page"
-    assert [s["key"] for s in artifact["sections"]] == weekly_keys
-```
-
-(Adapt `generate_report`/`generate_audition_page` call signatures to the fixtures already used in
-`tests/test_report.py` / `tests/test_audition.py`.)
-
-- [ ] **Step 2: Run to verify they fail**
-
-Run: `./venv/bin/pytest tests/test_report_artifact.py -k "free_downloads or every_path" -v`
-Expected: FAIL — the artifact's literal tuple omits `free_downloads`, so `keys == ["top_picks"]`.
-
-- [ ] **Step 3: Implement**
-
-(a) `report_artifact.py` — add to imports (the file already imports from `src.pipeline.report`):
-
-```python
-from src.pipeline.report import _SECTION_ORDER
-```
-
-Replace the literal tuple at line 114:
-
-```python
-    for section_key in _SECTION_ORDER:
-```
-
-Add to `_SECTION_LABELS` (lines 29-35):
-
-```python
-    "free_downloads": "Free Downloads",
-```
-
-(b) `audition.py` — add the same entry to its `_SECTION_LABELS` (lines 59-65):
-
-```python
-    "free_downloads": "Free Downloads",
-```
-
-- [ ] **Step 4: Run artifact + audition + web suites**
-
-Run: `./venv/bin/pytest tests/test_report_artifact.py tests/test_audition.py tests/test_web_api.py -v`
-Expected: all PASS (web schema's `ReportSection.key` is a free string — no schema work).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/pipeline/report_artifact.py src/pipeline/audition.py tests/test_report_artifact.py
-git commit -m "feat: free downloads section in artifact and audition page, unify section order"
 ```
 
 ---
@@ -923,7 +967,14 @@ git commit -m "feat: enable free-downloads lane in settings; document config and
 Run: `./venv/bin/pytest tests/ -v`
 Expected: all PASS.
 
-- [ ] **Step 2: Weekly dry run**
+- [ ] **Step 2: Weekly dry run — with documented, authorized side effects**
+
+A weekly run — dry or not — always writes fetch results to the local `data/` dir
+(`src/services/runs.py:210-211`): it overwrites `data/source_items.json`, writes one archive
+snapshot `data/archive/source_items_<report_id>.json.gz`, and prunes archive snapshots beyond the
+26-newest (`src/fetchers/__init__.py:119-125`). These writes are normal, expected, and authorized
+for this validation; dry-run mode still skips history, report artifacts, pool persistence, and
+Discord. Anything beyond the three listed writes is a bug — stop and investigate.
 
 Run: `./venv/bin/python -m tunefinder run --dry-run`
 Expected: log shows `free_downloads: N (lane floor=0.0)` with N > 0; report text contains
@@ -935,7 +986,8 @@ section and the funnel stats for review.
 Run: `./venv/bin/python -m tunefinder mix-prep ukg --dry-run`
 Expected: `## 🆓 Free Downloads` block after Deep Cuts with UKG lane items. Paste for review.
 
-- [ ] **Step 4: Verify no live side effects**
+- [ ] **Step 4: Verify no unintended changes**
 
-`git status` — only intended files changed; `data/` untouched apart from normal dry-run reads.
-Do NOT push, PR, or deploy in this task — report results and stop for review.
+`git status` — only intended source/test/config/docs files changed; `data/` shows only the three
+documented dry-run writes. Do NOT push, PR, or deploy in this task — report results and stop for
+review.
