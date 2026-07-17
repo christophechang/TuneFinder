@@ -561,3 +561,23 @@ def test_label_match_precedes_scene_adjacent_when_both_present():
     la = {"signature": ["Calibre"]}
     reason = compose_reason(c, {}, label_artists=la, today=TODAY)
     assert "Label-mate of" not in reason
+
+
+# ---------------------------------------------------------------------------
+# Source popularity (free-DL lane)
+# ---------------------------------------------------------------------------
+
+def test_source_popularity_reason_soundcloud():
+    c = _c(source="soundcloud", signals=["source_popularity"],
+           raw_metadata={"download_count": 214})
+    reason = compose_reason(c, {}, today=TODAY)
+    assert "214" in reason
+    assert "{dl}" not in reason and "{source_disp}" not in reason  # placeholders substituted
+    assert "SoundCloud" in reason           # brand casing, not "Soundcloud"
+    assert "Soundcloud" not in reason
+
+
+def test_source_popularity_reason_deterministic():
+    c = _c(source="soundcloud", signals=["source_popularity"],
+           raw_metadata={"download_count": 80})
+    assert compose_reason(c, {}, today=TODAY) == compose_reason(c, {}, today=TODAY)
