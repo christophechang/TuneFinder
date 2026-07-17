@@ -53,9 +53,13 @@ tunefinder free-downloads <genre> [--bpm MIN-MAX] [--key KEY] [--no-bpm-flex] [-
    `only_sources: list[str] | None` parameter (a filter on the `_FETCHERS`
    loop, same "fetchers may ignore" precedent as `target_genre`). When
    `free_only`, pass `settings.pipeline_free_download_sources`.
-2. **Pool injection restriction** — the candidate pool holds Beatport/Bandcamp
-   leftovers; when `free_only`, injected pool candidates are filtered to lane
-   sources too. Without this, paid store tracks leak into a free report.
+2. **Free-eligibility filter** — when `free_only`, every candidate (fresh
+   *and* pool-injected) must carry `raw_metadata["free_download"] = True`
+   (stamped by fetchers, see §3.1); the rest are dropped. This is track-level
+   on purpose: the candidate pool holds Beatport/Bandcamp leftovers, and the
+   fresh fetch's eligibility must not hinge on the `downloadable_only` source
+   toggle. Without it, paid tracks leak into a report titled "Free
+   Downloads".
 3. **Lane slot count** — `pipeline.free_downloads_mode_count` (default 30)
    instead of `mix_prep_free_downloads_count`. Passed to
    `rank_candidates_mix_prep` as an optional lane-count override parameter.
@@ -91,6 +95,25 @@ Hypeddit/ToneDen-style "Free DL" gates, where `downloadable` is `false` but
 - Kept tracks get `raw_metadata["free_gate"] = True`; native downloads keep
   `downloadable: true`. Report rendering distinguishes them (native ⬇️ vs
   gate 🔗) in Discord text, the audition page, and the web track cards.
+- **Acquisition URL contract** — a badge alone would still send the user to
+  the listening page. Every free track carries an `acquisition_url`: the
+  `purchase_url` (gate page) for gated tracks; the SoundCloud permalink for
+  native tracks (the page hosts the Download button — the API's
+  `download_url` needs OAuth headers, so it is useless as a browser href).
+  Rendered everywhere a user acts on a track: Discord track lines gain a
+  `[Get](<url>)` link next to `[Listen]` when it differs from the permalink,
+  the audition page gains a "Get ↗" anchor, and SPA track cards link the
+  gate badge. The artifact track payload and the `ReportTrack` schema gain
+  `free_gate: bool` and `acquisition_url` — FastAPI's response model would
+  otherwise silently drop artifact-only fields.
+- **Free-eligibility is track-level, not source-level.** Fetchers stamp
+  `raw_metadata["free_download"] = True` on genuinely free items (SoundCloud:
+  native `downloadable` or `free_gate`). The `free_only` run filters
+  candidates on this flag — independent of fetcher config, so an operator
+  flipping `downloadable_only: false` (or a future mixed-catalogue lane
+  source like Bandcamp name-your-price) cannot leak paid tracks into a
+  report titled "Free Downloads". Weekly/mix-prep lane *routing* stays
+  source-based as shipped.
 - Scope note: the weekly and mix-prep Free Downloads sections gain gated
   tracks too — same fetcher, same lane meaning. Intentional.
 
@@ -100,11 +123,16 @@ Hypeddit/ToneDen-style "Free DL" gates, where `downloadable` is `false` but
   `raw_metadata["key"]` on every fetch. The existing `--bpm`/`--key` harmonic
   machinery (`partition_by_harmonic`, `to_camelot`) consumes these
   immediately — demote-don't-drop, so untagged tracks are never lost.
-- **Free-downloads runs only:** when a BPM range is provided, also pass
-  `bpm[from]`/`bpm[to]` server-side on `GET /tracks` — strict semantics
-  (only BPM-tagged tracks return), as agreed. Weekly and mix-prep runs never
-  send the server param, so their lane behaviour is unchanged: extraction +
-  demote-don't-drop only.
+- **Free-downloads runs only:** when a BPM range is provided, also filter
+  server-side on `GET /tracks` — strict semantics (only BPM-tagged tracks
+  return), as agreed. **Flex-aware:** the CLI promises half/double-time
+  matches by default, so with flex on, the fetcher issues one search per
+  range — `[lo, hi]`, `[lo/2, hi/2]`, `[2·lo, 2·hi]` — and dedupes by
+  SoundCloud track id before parsing; `--no-bpm-flex` sends the single exact
+  range. A lone `bpm[from]=170&bpm[to]=180` query would strip the 85–90
+  half-time tracks `partition_by_harmonic` is contractually meant to accept.
+  Weekly and mix-prep runs never send the server param, so their lane
+  behaviour is unchanged: extraction + demote-don't-drop only.
 - **Must be live-verified during implementation** — this API documents
   `created_at[from]` filtering yet silently ignores it (verified 2026-07-17).
   If the server ignores `bpm[]` too, free-downloads `--bpm` degrades to the
@@ -170,6 +198,10 @@ for the new command.
   `^(weekly|mix-prep|free-downloads)$`.
 - `src/web/reportdata.py` `report_kind()`: new branch — `-free-dl-` in the
   report id → `("free-downloads", genre)`.
+- Feedback target resolution in `reportdata.py` needs no code change: with
+  `report_kind` extended, its existing `weekly if kind == "weekly" else
+  mix_prep` branch resolves free-downloads marks into the mix-prep history —
+  correct, but incidental; pin it with a test.
 - Run-job dispatch: `mode == "free-downloads"` →
   `run_mix_prep(settings, MixPrepOptions(..., free_only=True))`.
 - The artifact track payload carries `free_gate` so clients can badge gated vs
@@ -188,10 +220,13 @@ for the new command.
   `MIXPREP_RE` expects `mix-prep-YYYY-MM-DD-genre` but the backend emits
   `YYYY-Www-mix-prep-genre`, so mix-prep reports render as raw ids today —
   verify against live data and correct the pattern.
-- **Feedback mapping (critical):** the report/bag feedback path sends
-  `history: detail.kind`. Kind `"free-downloads"` must map to history
-  `"mix-prep"`, or one-tap marks from a free-downloads report fail backend
-  validation.
+- **Record Bag history grouping:** one-tap feedback itself needs no SPA
+  change — `FeedbackButtons` sends only `report_id` + `track_no`, and the
+  backend derives the history from the report id. The mapping belongs in
+  `collectBag` (`src/bag/collect.ts`), which groups entries by
+  `history: detail.kind` — kind `"free-downloads"` must group under
+  `"mix-prep"` so a mark recorded from either report kind lands on the same
+  bag entry.
 - **Track cards**: gate badge (🔗 gate link vs ⬇️ free download) from
   `free_gate`.
 - `src/reports/artifact.ts` local kind union widened;
@@ -201,14 +236,21 @@ for the new command.
 
 **TuneFinder:** gate-heuristic unit tests (purchase_title variants, gate
 domains, negatives like "Buy"/empty); bpm/key/`metadata_artist` extraction;
-search-URL `bpm[]` construction; `free_only` restricting fetch **and** pool
-injection; shared-history append + report-id suffix; lane-count override;
-deliberate new report snapshot for the mode; `report_kind` derivation; schema
+search-URL `bpm[]` construction — flex multi-range expansion, single range
+under `--no-bpm-flex`, and track-id dedupe across ranges; free-eligibility
+predicate (a `downloadable_only: false` config must not leak paid tracks
+into a `free_only` run); `free_only` restricting fetch **and** filtering pool
+injection; `free_gate`/`acquisition_url` present in the artifact payload and
+`ReportTrack`; feedback resolution mapping `-free-dl-` report ids to the
+mix-prep history; shared-history append + report-id suffix; lane-count
+override; deliberate new report snapshot for the mode (including the
+`[Get]` link on gated tracks); `report_kind` derivation; schema
 literal/pattern tests. Validation: `check-config`, full pytest, live
 `--dry-run` (verifies server-side `bpm[]` behaviour).
 
 **tunefinder-web:** vitest for `reportName` (new + fixed patterns), kind tab
-filtering, kind→history feedback mapping, mode-toggle submit payload.
+filtering, `collectBag` kind→history grouping (free-downloads groups under
+mix-prep), gate-badge link on track cards, mode-toggle submit payload.
 
 **Rollout order:** TuneFinder PR first — the API change is additive, and a
 stale frontend renders new-kind rows harmlessly (worst case: mix-prep dot
