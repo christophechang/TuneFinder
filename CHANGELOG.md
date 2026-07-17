@@ -4,6 +4,17 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.14.0 — 2026-07-17
+
+### Sources
+
+- **SoundCloud source — the free-download/bootleg lane** (PR #21; source research recorded in #18–#20). New `src/fetchers/soundcloud.py` on the **official** SoundCloud public API with an app-level `client_credentials` token — no user login, no callback URL (cannot interfere with other apps' OAuth callback setups). Requires `SOUNDCLOUD_CLIENT_ID`/`SOUNDCLOUD_CLIENT_SECRET` in `.env` (app registration needs Artist Pro); token cached in `data/soundcloud_token.json` (mode `0600`, the token endpoint is itself rate-limited). Ten per-genre search targets in `settings.yaml` (`genres`/`tags`/`q` — uploader folksonomy, tunable without code) covering dnb, breaks, uk-bass, ukg, house, techno, electronica, downtempo, hip-hop, funk-soul-jazz.
+- **Free-DL semantics.** `downloadable_only: true` (default) keeps only tracks whose uploader enabled downloads — this source is deliberately a bootleg/free-download feed, not a store mirror. `max_duration_minutes: 15` (default) drops full DJ sets that share the search results. The API accepts but ignores `created_at[from]` (verified live), so the `lookback_days` window is enforced client-side; `utm_*` tracking params are stripped from permalinks. Missing credentials raise a typed `SoundCloudAuthError` → source-health `FAILED` alert (Beatport pattern); `check-config` warns when enabled without creds. Live validation: 118 in-window free-DL items across 9 lanes (uk-bass 35, funk-soul-jazz 27, ukg 23), 14 sets filtered.
+
+### Web
+
+- **SoundCloud inline players.** The report-artifact `Embed` type gains `"soundcloud"` + a `url` field — SoundCloud's widget embeds straight from the track permalink, no ids or API calls. Emitted by the structured artifact and the legacy audition page (precedence unchanged: Bandcamp → Beatport → SoundCloud → link-only). Rendered by tunefinder-web v0.6.0, which also relabels the `bought` button "**Downloaded**" on SoundCloud tracks — display only, the stored outcome and all hit-rate stats are unchanged.
+
 ## v0.13.0 — 2026-07-12
 
 ### Feedback
