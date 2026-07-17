@@ -4,6 +4,22 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.15.0 — 2026-07-17
+
+### Report
+
+- **Free Downloads section** (PR #22; design + plan in `docs/superpowers/`). Free-download sources — `pipeline.free_download_sources`, default `[soundcloud]` — now route to an exclusive **🆓 Free Downloads** section in both weekly and mix-prep reports. Bootlegs no longer compete with store releases for slots (they structurally lack chart/label/cross-source signals and died at the score floor), and store tracks can't take lane slots. The lane has its own floor (`free_downloads_min_score`, default 0) and counts (`free_downloads_count: 5` weekly, `mix_prep_free_downloads_count: 10`); setting a count to 0 disables the section. With `--bpm`/`--key` mix-prep filters, harmonic matches still sort above BPM-less unknowns inside the lane. Continuous track numbering flows through the section, so web feedback and weekly `mark <n>` work unchanged; the section appears in the artifact, audition page, and (automatically) tunefinder-web.
+
+### Scoring
+
+- **New SoundCloud popularity signal.** `source_popularity` fires for SoundCloud tracks with ≥50 downloads (`w_soundcloud_popularity: 0.25`, discovery axis) with deterministic reason lines ("Free DL — grabbed 404 times on SoundCloud."). Ranks the lane by DJ traction.
+- **Bug fix — Mixupload popularity signal source-gated.** The signal was source-blind; since v0.14.0 SoundCloud tracks with ≥100 downloads were silently earning +0.25 and a false "downloads on Mixupload" reason (masked in reports by the floor, but polluting pool scores). Now fires only for Mixupload tracks, with regression tests.
+
+### Internals
+
+- Report-artifact section iteration unified onto the shared `_SECTION_ORDER` (was a divergent literal tuple); a four-path consistency test (weekly Discord, mix-prep Discord, artifact, audition) guards future section additions.
+- SoundCloud brand casing fixed in report track lines and reason text ("SoundCloud", not "Soundcloud").
+
 ## v0.14.0 — 2026-07-17
 
 ### Sources
