@@ -424,11 +424,15 @@ def _build_search_url(target: dict, created_from: str, limit: int,
 ```python
         tag_items: list[SourceItem] = []
         seen_ids: set = set()
+        target_ok = False
         search_ranges: list[tuple[float, float] | None] = list(bpm_ranges) if bpm_ranges else [None]
-        try:
-            for range_no, bpm_range in enumerate(search_ranges):
-                if range_no:
-                    polite_sleep(1.0)
+        for range_no, bpm_range in enumerate(search_ranges):
+            if range_no:
+                polite_sleep(1.0)
+            # try/except sits INSIDE the range loop: one flaky range must not
+            # discard tag_items already collected from earlier ranges
+            # (graceful degradation — matches the single-range behaviour).
+            try:
                 url: str | None = _build_search_url(target, created_from, limit, bpm_range=bpm_range)
                 page = 0
                 while url and page < _MAX_PAGES:
@@ -454,12 +458,18 @@ def _build_search_url(target: dict, created_from: str, limit: int,
                             seen_ids.add(track_id)
                         tag_items.append(item)
                     url = data.get("next_href")
-        except Exception as e:
-            logger.warning(f"[soundcloud] {tag}: fetch failed: {e}")
+                target_ok = True
+            except Exception as e:
+                logger.warning(f"[soundcloud] {tag}: range {range_no + 1} fetch failed: {e}")
+                continue
+        if not target_ok:
+            # Every range failed — the target must NOT count as completed, or
+            # the "all N targets failed" RuntimeError fail-safe below never
+            # fires (a total outage would read as "0 tracks, no error").
             continue
 ```
 
-(The two in-code comments that existed on the keep-conditions — duration cap and client-side lookback — stay where those lines moved.)
+(`completed += 1` sits directly after this block, outside the snippet — the `if not target_ok: continue` guard must land immediately before it. A target with at least one successful range still counts as completed and keeps that range's `tag_items`; `test_all_targets_failed_raises` and `test_one_failed_target_continues` in tests/test_soundcloud.py both stay green. The two in-code comments that existed on the keep-conditions — duration cap and client-side lookback — stay where those lines moved.)
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -575,19 +585,24 @@ def test_soundcloud_downloads_take_precedence_in_explanation():
 
 
 def test_mix_prep_free_downloads_count_override():
-    ranked = [_candidate(source="soundcloud", title=f"T{i}") for i in range(40)]
-    sections = _assign_sections_mix_prep(ranked, _settings_with_lane(), free_downloads_count=30)
+    # Unique artists are load-bearing: _assign_sections_mix_prep caps
+    # MAX_PER_ARTIST = 2 per lane, so 40 same-artist candidates would only
+    # ever yield 2. Candidates must also be scored.
+    ranked = [_scored_candidate(0.5, artist=f"DJ {i}", title=f"B{i}", source="soundcloud")
+              for i in range(40)]
+    sections = _assign_sections_mix_prep(ranked, _lane_settings(), free_downloads_count=30)
     assert len(sections["free_downloads"]) == 30
 ```
 
-(`_settings_with_lane()` = the module's settings mock with `pipeline_free_download_sources = ["soundcloud"]`, `pipeline_mix_prep_free_downloads_count = 10`. If helper names differ, follow the file's actual helpers — the assertions above are the contract.)
+(`_lane_settings()` = the settings object the module's existing free-downloads-lane tests use (its `_LaneSettings`-style helper) with `pipeline_free_download_sources = ["soundcloud"]` and `pipeline_mix_prep_free_downloads_count = 10`. Mirror the module's real lane tests — reuse its actual `_scored_candidate`/settings helpers; the assertions above are the contract.)
 
 `tests/test_reasons.py`:
 
 ```python
 def test_reason_reposts_only_popularity_line():
-    c = _c(source="soundcloud", raw_metadata={"reposts_count": 30},
-           signals=[RecommendationSignal(code="source_popularity", explanation="30 reposts on SoundCloud.")])
+    c = _c(source="soundcloud", raw_metadata={"reposts_count": 30})
+    c.signals = [RecommendationSignal(code="source_popularity",
+                                      explanation="30 reposts on SoundCloud.")]
     reason = compose_reason(c, {}, today=TODAY)
     assert "30 reposts on SoundCloud" in reason
 
@@ -596,14 +611,15 @@ def test_reason_reposts_trigger_beats_low_download_count():
     # download_count=3 is positive (so dl_count gets set at reasons.py:77-80),
     # but the signal fired on reposts — the reason must say reposts, not
     # "grabbed 3 times".
-    c = _c(source="soundcloud", raw_metadata={"reposts_count": 30, "download_count": 3},
-           signals=[RecommendationSignal(code="source_popularity", explanation="30 reposts on SoundCloud.")])
+    c = _c(source="soundcloud", raw_metadata={"reposts_count": 30, "download_count": 3})
+    c.signals = [RecommendationSignal(code="source_popularity",
+                                      explanation="30 reposts on SoundCloud.")]
     reason = compose_reason(c, {}, today=TODAY)
     assert "30 reposts on SoundCloud" in reason
     assert "downloads" not in reason and "grabbed" not in reason
 ```
 
-(Reuse `test_reasons.py`'s existing candidate builder and TODAY constant.)
+(Reuse `test_reasons.py`'s existing candidate builder and TODAY constant. NOTE: the module's `_c` helper rebuilds its `signals` argument from code *strings* with empty explanations — and the new reasons branch keys off the explanation text — so set `c.signals` directly after construction as shown, rather than passing signal objects through `_c`.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -1325,7 +1341,7 @@ Subparser (after the mix-prep block in `main()`), reusing the exact `--bpm`/`--k
 
 Run: `./venv/bin/pytest tests/ -q && ./venv/bin/python -m tunefinder check-config`
 Expected: full suite PASS; config validates.
-Then (operator has SoundCloud creds in `.env`): `./venv/bin/python -m tunefinder free-downloads dnb --dry-run` — inspect the logged report preview; separately re-run with `--bpm 170-180 --dry-run` and check the logs for whether the `bpm[]`-filtered searches return plausibly-filtered results (the spec's live-verification gate: if the API ignores `bpm[]`, note it in the README section — the client-side path still applies).
+OPTIONAL live smoke check — only if SoundCloud creds are present in `.env`; skip entirely (and say so in the PR) if they are absent or the run is unattended-restricted. `--dry-run` is mandatory both times (no Discord post, no history writes): `./venv/bin/python -m tunefinder free-downloads dnb --dry-run` — inspect the logged report preview; separately re-run with `--bpm 170-180 --dry-run` and check the logs for whether the `bpm[]`-filtered searches return plausibly-filtered results (the spec's live-verification gate: if the API ignores `bpm[]`, note it in the README section — the client-side path still applies). This check is advisory and must never block the PR.
 
 - [ ] **Step 5: Commit**
 
