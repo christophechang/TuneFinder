@@ -581,3 +581,23 @@ def test_source_popularity_reason_deterministic():
     c = _c(source="soundcloud", signals=["source_popularity"],
            raw_metadata={"download_count": 80})
     assert compose_reason(c, {}, today=TODAY) == compose_reason(c, {}, today=TODAY)
+
+
+def test_reason_reposts_only_popularity_line():
+    c = _c(source="soundcloud", raw_metadata={"reposts_count": 30})
+    c.signals = [RecommendationSignal(code="source_popularity",
+                                      explanation="30 reposts on SoundCloud.")]
+    reason = compose_reason(c, {}, today=TODAY)
+    assert "30 reposts on SoundCloud" in reason
+
+
+def test_reason_reposts_trigger_beats_low_download_count():
+    # download_count=3 is positive (so dl_count gets set at reasons.py:77-80),
+    # but the signal fired on reposts — the reason must say reposts, not
+    # "grabbed 3 times".
+    c = _c(source="soundcloud", raw_metadata={"reposts_count": 30, "download_count": 3})
+    c.signals = [RecommendationSignal(code="source_popularity",
+                                      explanation="30 reposts on SoundCloud.")]
+    reason = compose_reason(c, {}, today=TODAY)
+    assert "30 reposts on SoundCloud" in reason
+    assert "downloads" not in reason and "grabbed" not in reason

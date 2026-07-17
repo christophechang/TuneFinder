@@ -79,6 +79,11 @@ def compose_reason(
     if isinstance(raw_dl, int) and raw_dl > 0:
         dl_count = raw_dl
 
+    reposts_count: Optional[int] = None
+    raw_reposts = c.raw_metadata.get("reposts_count")
+    if isinstance(raw_reposts, int):
+        reposts_count = raw_reposts
+
     sources = c.raw_metadata.get("seen_on_sources", [c.source])
     k = len(sources)
     srcs = ", ".join(s.title() for s in sources)
@@ -240,6 +245,12 @@ def compose_reason(
         if genre_disp:
             return _fill("Independent Bandcamp find — {g}, outside the chart feeds.")
         return "Independent Bandcamp find — outside the chart feeds."
+
+    if "source_popularity" in signal_codes and reposts_count is not None:
+        sp_expl = next((s.explanation for s in c.signals if s.code == "source_popularity"), "")
+        if "reposts" in sp_expl:
+            # {r} replaced before _fill so _fill only sees placeholders it knows.
+            return _fill(f"DJs are reposting this — {reposts_count} reposts on {{source_disp}}.")
 
     if "source_popularity" in signal_codes and dl_count is not None:
         row = _pick([

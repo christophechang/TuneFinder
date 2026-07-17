@@ -514,14 +514,17 @@ def _score(
         ))
 
     # --- SoundCloud popularity signal (discovery axis; free-DL lane) ---
-    if (c.source == "soundcloud" and download_count is not None and isinstance(download_count, int) and
-        download_count >= weights.soundcloud_popularity_downloads):
+    reposts_count = c.raw_metadata.get("reposts_count")
+    downloads_fire = (download_count is not None and isinstance(download_count, int)
+                      and download_count >= weights.soundcloud_popularity_downloads)
+    reposts_fire = (isinstance(reposts_count, int)
+                    and reposts_count >= weights.soundcloud_popularity_reposts)
+    if c.source == "soundcloud" and (downloads_fire or reposts_fire):
         score += weights.w_soundcloud_popularity
         discovery += weights.w_soundcloud_popularity
-        c.signals.append(RecommendationSignal(
-            code="source_popularity",
-            explanation=f"{download_count} downloads on SoundCloud.",
-        ))
+        explanation = (f"{download_count} downloads on SoundCloud." if downloads_fire
+                       else f"{reposts_count} reposts on SoundCloud.")
+        c.signals.append(RecommendationSignal(code="source_popularity", explanation=explanation))
 
     # --- Pool age penalty ---
     # Applied to the TOTAL score only, not either axis. Decision: pool age is an
@@ -806,6 +809,7 @@ def _assign_sections_mix_prep(
     ranked: list[Candidate],
     settings,
     demoted_keys: set[str] | None = None,
+    free_downloads_count: int | None = None,
 ) -> dict[str, list[Candidate]]:
     """
     demoted_keys: candidate `.key` values (issue #8 — BPM/key filters active)
@@ -818,7 +822,8 @@ def _assign_sections_mix_prep(
     deep_n = settings.pipeline_mix_prep_deep_cuts_count
     min_score = settings.pipeline_section_min_score
     lane_sources = set(settings.pipeline_free_download_sources)
-    lane_n = settings.pipeline_mix_prep_free_downloads_count
+    lane_n = (free_downloads_count if free_downloads_count is not None
+              else settings.pipeline_mix_prep_free_downloads_count)
     lane_floor = settings.pipeline_free_downloads_min_score
 
     used: set[int] = set()
@@ -883,6 +888,7 @@ def rank_candidates_mix_prep(
     label_memory: tuple[dict[str, int], dict[str, list[str]]] | None = None,
     demoted_keys: set[str] | None = None,
     skip_penalty_artists: set[str] | None = None,
+    free_downloads_count: int | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score and section candidates for a mix-prep run.
@@ -923,6 +929,7 @@ def rank_candidates_mix_prep(
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
 
-    return _assign_sections_mix_prep(ranked, settings, demoted_keys=demoted_keys), label_artist_names
+    return _assign_sections_mix_prep(ranked, settings, demoted_keys=demoted_keys,
+                                     free_downloads_count=free_downloads_count), label_artist_names
 
 

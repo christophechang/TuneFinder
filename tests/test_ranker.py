@@ -223,6 +223,19 @@ def test_soundcloud_popularity_not_for_other_sources():
     assert not any("SoundCloud" in s.explanation for s in c.signals)
 
 
+def test_soundcloud_reposts_fire_popularity_signal():
+    c = _candidate(source="soundcloud", raw_metadata={"reposts_count": 30, "download_count": 3})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert any(s.code == "source_popularity" and "30 reposts on SoundCloud." == s.explanation
+               for s in c.signals)
+
+
+def test_soundcloud_downloads_take_precedence_in_explanation():
+    c = _candidate(source="soundcloud", raw_metadata={"reposts_count": 99, "download_count": 60})
+    _score(c, {}, set(), {}, _build_genre_set({}))
+    assert any(s.explanation == "60 downloads on SoundCloud." for s in c.signals)
+
+
 # --- Commit 4: per-section score floor ---
 
 from src.pipeline.ranker import _assign_sections, _assign_sections_mix_prep
@@ -333,6 +346,16 @@ def test_mix_prep_lane_count_zero_disables():
     c = _scored_candidate(5.0, source="soundcloud")
     sections = _assign_sections_mix_prep([c], _ZeroMixLane())
     assert sections["free_downloads"] == []
+
+
+def test_mix_prep_free_downloads_count_override():
+    # Unique artists are load-bearing: _assign_sections_mix_prep caps
+    # MAX_PER_ARTIST = 2 per lane, so 40 same-artist candidates would only
+    # ever yield 2. Candidates must also be scored.
+    ranked = [_scored_candidate(0.5, artist=f"DJ {i}", title=f"B{i}", source="soundcloud")
+              for i in range(40)]
+    sections = _assign_sections_mix_prep(ranked, _LaneSettings(), free_downloads_count=30)
+    assert len(sections["free_downloads"]) == 30
 
 
 def test_section_floor_skips_below_threshold():
