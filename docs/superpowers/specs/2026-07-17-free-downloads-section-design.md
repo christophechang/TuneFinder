@@ -48,9 +48,16 @@ a thin fetch ships a thin section, matching house philosophy.
 
 ## Ranker (`src/pipeline/ranker.py`)
 
+- **Bug fix — source-gate the existing Mixupload popularity signal.** The current condition
+  (`ranker.py:498-507`) fires on `download_count` alone, with no source check, and hardcodes
+  "downloads on Mixupload" in the explanation. Since v0.14.0, SoundCloud items with ≥100 downloads
+  already receive a spurious +0.25 and a false Mixupload reason (masked in reports by the floor,
+  but polluting pool scores). Gate it on `c.source == "mixupload"`, with a regression test proving
+  it never fires for SoundCloud.
 - **New signal** `soundcloud_popularity`: `+w_soundcloud_popularity` (score + discovery axis) when
   `source == "soundcloud"` and `raw_metadata["download_count"] >= soundcloud_popularity_downloads`.
-  Exact structural mirror of the Mixupload popularity signal.
+  Exact structural mirror of the (now source-gated) Mixupload popularity signal; a track can never
+  earn both.
 - **`assign_sections` (weekly):** partition lane candidates first; assign Free Downloads by
   combined score (desc, existing stable tiebreak), apply `free_downloads_min_score`, cap at
   `free_downloads_count`. Store candidates proceed through the existing assignment untouched. Lane
@@ -58,19 +65,44 @@ a thin fetch ships a thin section, matching house philosophy.
 - **Mix-prep assignment:** same partition; Free Downloads block capped at
   `mix_prep_free_downloads_count`, same lane floor. Lane items no longer compete for Top Picks /
   Deep Cuts there.
+- **Harmonic-filter interplay (mix-prep):** when `--bpm`/`--key` filters are active, the existing
+  rule places harmonic matches ahead of demoted unknowns regardless of score (`ranker.py:770`).
+  The Free Downloads block preserves that ordering internally (today all SoundCloud items are
+  BPM-less unknowns; future lane sources may carry BPM), and demotion must never *exclude* a lane
+  item from the block. The intersection is tested explicitly.
 - Rejection tracing (`explain`) gets lane-aware entries ("routed to free_downloads",
   "below lane floor") so `tunefinder explain` stays truthful.
 
-## Report rendering (`src/pipeline/report.py`)
+## Report rendering — all four paths, enumerated
 
-- `_SECTION_ORDER` becomes `("top_picks", "label_watch", "artist_watch", "wildcards",
-  "deep_cuts", "free_downloads")` — one tuple serves both kinds: absent keys skip, so weekly shows
-  it after Wildcards and mix-prep after Deep Cuts. (Verified: unknown keys raise `ValueError` at
-  `report.py:49`; empty sections are skipped.)
-- Header: `## 🆓 Free Downloads`, existing two-line track format, no layout changes otherwise.
-- Continuous track numbering flows through the section — `tunefinder mark <n>` and web feedback
-  address these tracks like any other.
-- Snapshot tests updated deliberately in the same commit as the renderer change.
+Section rendering is **not** driven solely by `_SECTION_ORDER`: the Discord renderers contain
+manual per-section blocks and the artifact builder iterates its own literal tuple. Adding the
+section therefore touches every path explicitly:
+
+1. `report.py` `_SECTION_ORDER` becomes `("top_picks", "label_watch", "artist_watch",
+   "wildcards", "deep_cuts", "free_downloads")` — absent keys skip, so weekly shows it after
+   Wildcards and mix-prep after Deep Cuts. (Unknown keys raise `ValueError` at `report.py:49`;
+   empty sections are skipped.)
+2. `report.py` **weekly renderer**: new manual block after Wildcards (`## 🆓 Free Downloads`,
+   existing two-line track format), mirroring `report.py:302-340`.
+3. `report.py` **mix-prep renderer**: new manual block after Deep Cuts, same format.
+4. `report_artifact.py`: its literal section tuple (`report_artifact.py:114`) is replaced by
+   importing the shared `_SECTION_ORDER` from `report.py` (targeted unification — audition.py
+   already imports it), plus `free_downloads: "Free Downloads"` in `_SECTION_LABELS`.
+   `audition.py` `_SECTION_LABELS` gains the same entry (its `.title()` fallback would cover it,
+   but explicit beats implicit).
+
+A cross-renderer consistency test asserts a candidate placed in `free_downloads` appears in the
+Discord text, the artifact, and the audition page for the same sections dict — so a future section
+can't silently miss a path.
+
+**Numbering and marking (scoped precisely):** continuous track numbering flows through the section
+in both report kinds. Numeric CLI selectors (`tunefinder mark <n>`) resolve against **weekly**
+history only — existing behaviour (`feedback.py:101`), unchanged by this feature; mix-prep tracks
+are marked by artist-title selector (CLI) or via web feedback (`report_id` + `track_no`), both of
+which work for the new section. No feedback-scope expansion.
+
+Snapshot tests updated deliberately in the same commit as the renderer change.
 
 ## Reasons (`src/pipeline/reasons.py`)
 
@@ -82,8 +114,7 @@ a thin fetch ships a thin section, matching house philosophy.
 
 ## Artifact, audition page, web
 
-- `report_artifact.py` `_SECTION_LABELS` and `audition.py` `_SECTION_LABELS` gain
-  `free_downloads: "Free Downloads"`.
+- Section-label map changes are covered in "Report rendering" above (all four paths).
 - `ReportSection.key` is a free `str` in the OpenAPI schema (verified `schemas.py:68`) — **no
   schema change, no tunefinder-web type regen, no web release**. The SPA renders sections
   generically; SoundCloud rows already carry the widget player and the "Downloaded" button
@@ -101,14 +132,24 @@ removes the need that bonus was compensating for.
 
 - **Ranker:** lane partition/exclusivity (high-scoring lane item never enters main sections or
   Wildcards; store item never enters Free Downloads), known-artist lane item ranks first in-lane,
-  lane floor + count caps, popularity signal fires only at/above threshold and only for soundcloud,
-  mix-prep block equivalents, empty-lane behavior.
+  lane floor + count caps, popularity signals — SoundCloud signal fires only at/above threshold and
+  only for soundcloud, **and the Mixupload signal regression-proven never to fire for SoundCloud**
+  — mix-prep block equivalents (including the harmonic matches-before-demoted ordering inside the
+  block, and demoted lane items still placing), empty-lane behavior.
 - **Reasons:** matrix rows for the new signal's variants.
 - **Report:** weekly + mix-prep snapshots updated deliberately; numbering continuity across the
   new section.
 - **Artifact/web API:** section present with label; `test_web_api` report-detail passes unchanged
   (free-string key).
 - **Config:** new keys' defaults and plumbing.
+
+## README (same pass, per repo rules)
+
+- Configuration docs: the four new `pipeline` keys and two `scoring` keys, with defaults.
+- Scoring signals table: new SoundCloud popularity row; Mixupload row's wording corrected to
+  reflect the source gate.
+- Report structure description ("How it works" step 5 / sections list): Free Downloads section in
+  both report kinds, exclusive-lane semantics in one sentence.
 
 ## Rollout
 
