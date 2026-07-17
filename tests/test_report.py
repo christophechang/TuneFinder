@@ -328,6 +328,34 @@ def test_weekly_snapshot():
     assert result == _WEEKLY_SNAPSHOT
 
 
+def test_weekly_report_renders_free_downloads_section():
+    sections = {
+        "top_picks": [_c(title="Store Hit")],
+        "free_downloads": [_c(title="Boot VIP", source="soundcloud")],
+    }
+    text = generate_report(sections, "TEST", {}, object(), today=TODAY)
+    assert "## 🆓 Free Downloads" in text
+    assert text.index("## 🆓 Free Downloads") > text.index("Store Hit")
+    # numbering continues across sections: store track is 1., lane track is 2.
+    assert "2." in text.split("## 🆓 Free Downloads")[1]
+
+
+def test_mix_prep_report_renders_free_downloads_section():
+    sections = {
+        "deep_cuts": [_c(title="Cut")],
+        "free_downloads": [_c(title="Boot", source="soundcloud")],
+    }
+    text = generate_mix_prep_report(sections, "TEST-ukg", {}, "ukg", object(), today=TODAY)
+    assert "## 🆓 Free Downloads" in text
+    assert text.index("## 🆓 Free Downloads") > text.index("## 🎧 Deep Cuts")
+
+
+def test_empty_free_downloads_section_omitted():
+    sections = {"top_picks": [_c(title="Only")], "free_downloads": []}
+    text = generate_report(sections, "TEST", {}, object(), today=TODAY)
+    assert "Free Downloads" not in text
+
+
 def test_mix_prep_snapshot():
     profiles, sections = _make_mix_prep_fixture()
     result = generate_mix_prep_report(

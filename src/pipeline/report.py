@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 # Canonical ordering
 # ---------------------------------------------------------------------------
 
-_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards", "deep_cuts")
+_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards", "deep_cuts", "free_downloads")
 
 
 def _group_label_watch(label_watch: list[Candidate]) -> tuple[dict[str, list[Candidate]], list[Candidate]]:
@@ -339,6 +339,14 @@ def generate_report(
             lines.extend(_render_track(c))
         lines.append("")
 
+    # Free Downloads — exclusive lane (pipeline.free_download_sources)
+    free_downloads = sections.get("free_downloads", [])
+    if free_downloads:
+        lines.append("## 🆓 Free Downloads")
+        for c in free_downloads:
+            lines.extend(_render_track(c))
+        lines.append("")
+
     recommended_count = sum(len(v) for v in sections.values())
     audition_url, audition_label = _report_link(settings, report_id)
     lines.append(_build_footer(report_id, stats, recommended_count, audition_url=audition_url, audition_label=audition_label))
@@ -399,6 +407,13 @@ def generate_mix_prep_report(
     if deep_cuts:
         lines.append("## 🎧 Deep Cuts")
         for c in deep_cuts:
+            lines.extend(_render_track(c))
+        lines.append("")
+
+    free_downloads = sections.get("free_downloads", [])
+    if free_downloads:
+        lines.append("## 🆓 Free Downloads")
+        for c in free_downloads:
             lines.extend(_render_track(c))
         lines.append("")
 
