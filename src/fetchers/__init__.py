@@ -9,7 +9,7 @@ import gzip
 import json
 import os
 
-from src.fetchers import bandcamp, beatport, bleep, boomkat, mixupload, ra, traxsource, volumo
+from src.fetchers import bandcamp, beatport, bleep, boomkat, mixupload, ra, soundcloud, traxsource, volumo
 from src.logger import get_logger
 from src.models import SourceItem
 from src.pipeline.storage import atomic_write_json
@@ -27,6 +27,7 @@ _FETCHERS = [
     ("resident_advisor", ra.fetch),
     ("mixupload", mixupload.fetch),
     ("volumo", volumo.fetch),
+    ("soundcloud", soundcloud.fetch),
 ]
 
 

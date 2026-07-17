@@ -75,6 +75,16 @@ class Settings:
     def beatport_password(self) -> str:
         return os.getenv("BEATPORT_PASSWORD", "")
 
+    # --- SoundCloud ---
+
+    @property
+    def soundcloud_client_id(self) -> str:
+        return os.getenv("SOUNDCLOUD_CLIENT_ID", "")
+
+    @property
+    def soundcloud_client_secret(self) -> str:
+        return os.getenv("SOUNDCLOUD_CLIENT_SECRET", "")
+
     # --- Sources ---
 
     def source_enabled(self, source_name: str) -> bool:
@@ -269,6 +279,13 @@ class Settings:
         if beatport.get("enabled") and not (self.beatport_username and self.beatport_password):
             logger.warning(
                 "[config] Beatport is enabled but BEATPORT_USERNAME/BEATPORT_PASSWORD "
+                "are not both set — the source will report a failure until they are set."
+            )
+
+        soundcloud = self._data.get("sources", {}).get("soundcloud", {})
+        if soundcloud.get("enabled") and not (self.soundcloud_client_id and self.soundcloud_client_secret):
+            logger.warning(
+                "[config] SoundCloud is enabled but SOUNDCLOUD_CLIENT_ID/SOUNDCLOUD_CLIENT_SECRET "
                 "are not both set — the source will report a failure until they are set."
             )
 

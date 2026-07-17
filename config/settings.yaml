@@ -207,6 +207,41 @@ sources:
         id: 18                  # Organic House / Downtempo
       # uk-bass, funk-soul-jazz, hip-hop intentionally not mapped — Volumo has no true-fit genre for them (see docs/improvement-plan.md §3).
 
+  soundcloud:
+    enabled: true
+    # Official API (client_credentials app token) — requires SOUNDCLOUD_CLIENT_ID
+    # and SOUNDCLOUD_CLIENT_SECRET in .env (app registration needs Artist Pro).
+    # No user login or callback URL involved. Token cached in data/soundcloud_token.json.
+    downloadable_only: true     # this lane = free-DL/bootleg discovery; stores cover the rest
+    lookback_days: 28
+    limit_per_target: 50
+    max_duration_minutes: 15    # drop full DJ sets/mixes from results; 0 disables
+    # Per-target search: q / genres / tags are each optional. Within one param,
+    # comma-separated values are OR; separate params are ANDed by the API — so
+    # prefer ONE of genres/tags per target to avoid over-restricting.
+    # genre/tag values are uploader folksonomy — tune freely.
+    targets:
+      - tf_tag: dnb
+        genres: "drum & bass,drum and bass,dnb"
+      - tf_tag: breaks
+        genres: "breakbeat,breaks"
+      - tf_tag: uk-bass
+        tags: "uk bass,ukbass"
+      - tf_tag: ukg
+        genres: "uk garage,garage,ukg"
+      - tf_tag: house
+        genres: "house,deep house,tech house"
+      - tf_tag: techno
+        genres: "techno"
+      - tf_tag: electronica
+        genres: "electronica"
+      - tf_tag: downtempo
+        genres: "downtempo"
+      - tf_tag: hip-hop
+        genres: "hip-hop & rap,hip hop,hip-hop"
+      - tf_tag: funk-soul-jazz
+        genres: "funk,soul,disco"
+
 pipeline:
   # Release date window applied to all sources with known dates. Undated items always pass (e.g. some Bandcamp releases).
   release_date_window_days: 28

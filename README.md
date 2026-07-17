@@ -16,7 +16,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 ## How it works
 
 1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
-2. **Fetch** — fetches new releases from Beatport (via the v4 API), Bandcamp, Volumo, and Mixupload (Traxsource and Resident Advisor are available but disabled by default)
+2. **Fetch** — fetches new releases from Beatport (via the v4 API), Bandcamp, Volumo, Mixupload, and SoundCloud (official API, free-download/bootleg lane); Traxsource and Resident Advisor are available but disabled by default
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches; embed metadata (`beatport_id`, `bandcamp_album_id`, `bpm`, `keysign`, etc.) is backfilled from merged-away duplicates so cross-source tracks retain all embed ids. By default all version suffixes collapse (`Title (Original Mix)` ≡ `Title`), so owning/recommending one version suppresses the rest. Enabling `pipeline.remix_aware_identity` (see Configuration) keeps generic versions (Original/Extended/Radio) merging but gives a *named* remix its own identity, so a "(Calibre Remix)" is no longer suppressed just because you own the original
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus)
 5. **Report** — deterministic renderer: reasons composed from catalog facts (play count, prior titles, chart position, label/artist data) in `src/pipeline/reasons.py`; Discord-formatted report built in `src/pipeline/report.py`
@@ -45,6 +45,7 @@ TuneFinder ships a web application — [tunefinder-web](https://github.com/chris
 | Bandcamp | `discover_web` JSON API | ✅ |
 | Volumo | REST API (`/api/v1/albums`) | ✅ (no preview URLs in API — rows are link-only in audition page) |
 | Mixupload | HTML scrape (chart + genre pages) | ✅ |
+| SoundCloud | Official API track search (client_credentials) | ✅ (free-DL/bootleg lane — `downloadable_only` on) |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | disabled by default |
 | Boomkat | — | blocked (Cloudflare) |
@@ -247,20 +248,22 @@ Pool candidates injected into mix-prep are exempt from the release-date window (
 
 Each internal genre maps to one or more genre feeds on each source. Sources not listed for a genre don't contribute to that genre's results.
 
-| Genre | Beatport | Traxsource | Bandcamp | Mixupload | Volumo |
-|---|---|---|---|---|---|
-| `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house | style/house · style-part/deep-house · style-part/tech-house · style-part/progressive-house | house · deep-house · tech-house · soulful-house · funky-house · melodic-house-techno · progressive-house · afro-house |
-| `dnb` | drum-bass | drum-and-bass | drum-and-bass | style/dnb | drum-and-bass |
-| `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat | style/breaks | breaks-breakbeat |
-| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass page | — |
-| `ukg` | uk-garage-bassline | garage | uk-garage | style-part/uk-garage | uk-garage-2-step |
-| `electronica` | electronica | electronica · leftfield | electronic · electronica | style-part/electronica | electronica |
-| `downtempo` | downtempo | lounge-chill-out | downtempo · lounge | style-part/downtempo | organic-house-downtempo |
-| `techno` | techno-raw-deep-hypnotic | techno | techno | style/techno | techno-raw-deep-dub · techno-peak-time |
-| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul | — | — |
-| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap | style/hip-hop | — |
+| Genre | Beatport | Traxsource | Bandcamp | Mixupload | Volumo | SoundCloud ² |
+|---|---|---|---|---|---|---|
+| `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house | style/house · style-part/deep-house · style-part/tech-house · style-part/progressive-house | house · deep-house · tech-house · soulful-house · funky-house · melodic-house-techno · progressive-house · afro-house | house · deep house · tech house |
+| `dnb` | drum-bass | drum-and-bass | drum-and-bass | style/dnb | drum-and-bass | drum & bass |
+| `breaks` | breaks-breakbeat-uk-bass ¹ | — | breakbeat | style/breaks | breaks-breakbeat | breakbeat · breaks |
+| `uk-bass` | breaks-breakbeat-uk-bass ¹ | — | uk-bass | genres/UKBass page | — | tag: uk bass |
+| `ukg` | uk-garage-bassline | garage | uk-garage | style-part/uk-garage | uk-garage-2-step | uk garage · garage |
+| `electronica` | electronica | electronica · leftfield | electronic · electronica | style-part/electronica | electronica | electronica |
+| `downtempo` | downtempo | lounge-chill-out | downtempo · lounge | style-part/downtempo | organic-house-downtempo | downtempo |
+| `techno` | techno-raw-deep-hypnotic | techno | techno | style/techno | techno-raw-deep-dub · techno-peak-time | techno |
+| `funk-soul-jazz` | rb | soul-funk-disco | funk · r-b-soul | — | — | funk · soul · disco |
+| `hip-hop` | hip-hop | r-and-b-hip-hop | hip-hop-rap | style/hip-hop | — | hip-hop & rap |
 
 ¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the API data are used to split them into the correct internal tags.
+
+² SoundCloud genre/tag values are uploader folksonomy, not a fixed taxonomy — the values shown are search filters (`sources.soundcloud.targets` in `config/settings.yaml`), tunable without code changes. With `downloadable_only: true` (the default) this source only surfaces tracks whose uploader enabled downloads — the free-DL/bootleg lane.
 
 ## Setup
 
@@ -286,6 +289,8 @@ DISCORD_GUILD_ID=         # Your Discord server ID
 VOLUMO_API_KEY=           # Volumo — unauthenticated browsing works without this
 BEATPORT_USERNAME=        # Beatport login — enables the Beatport source (unofficial API, personal use)
 BEATPORT_PASSWORD=
+SOUNDCLOUD_CLIENT_ID=     # SoundCloud official API app (client_credentials; app registration
+SOUNDCLOUD_CLIENT_SECRET= # requires Artist Pro). No callback URL involved.
 
 # Web service (optional — see docs/ops/web-service.md)
 TUNEFINDER_API_SECRET=            # Bearer secret for the web API (required by `serve`)
@@ -387,6 +392,8 @@ Edit `config/settings.yaml` to:
 
 Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
 
+SoundCloud note: uses the official public API with an app-level `client_credentials` token — no user login or callback URL. The token is cached in `data/soundcloud_token.json` (the token endpoint is itself rate-limited). Each configured target searches by `genres`/`tags`/`q` within a `lookback_days` window; with `downloadable_only: true` (the default) only tracks with downloads enabled survive, making this the free-download/bootleg lane rather than a store mirror.
+
 ## Scheduling (macOS launchd)
 
 Runs every Sunday at 09:00. Logs to `logs/launchd.log`.
@@ -421,6 +428,7 @@ src/
     bandcamp.py      # Bandcamp discover_web API
     volumo.py        # Volumo REST API (/api/v1/albums)
     mixupload.py     # Mixupload HTML scrape (chart + genre pages)
+    soundcloud.py    # SoundCloud official API search (free-DL/bootleg lane)
     traxsource.py    # Traxsource HTML scrape (currently disabled by default)
     ra.py            # Resident Advisor apolloState
     boomkat.py       # Boomkat (disabled — Cloudflare bot protection)
