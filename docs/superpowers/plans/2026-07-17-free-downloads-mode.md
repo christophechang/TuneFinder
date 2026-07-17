@@ -251,6 +251,32 @@ def test_downloadable_only_false_non_free_not_stamped(tmp_path):
         items = soundcloud.fetch(settings)
     assert len(items) == 1
     assert items[0].raw_metadata["free_download"] is False
+
+
+@pytest.mark.parametrize("bad_url", [
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "hypeddit.com/dl/xyz",       # scheme-less — urlparse yields no netloc
+    "   ",
+])
+def test_unsafe_or_invalid_purchase_url_never_gates(tmp_path, bad_url):
+    settings = _make_settings(tmp_path)
+    track = _track(downloadable=False)   # purchase_title "Free Download"
+    track["purchase_url"] = bad_url
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([track])
+        items = soundcloud.fetch(settings)
+    assert items == []                    # not a gate → dropped by downloadable_only
+
+
+def test_gate_url_query_string_preserved(tmp_path):
+    settings = _make_settings(tmp_path)
+    gated = _track(downloadable=False)
+    gated["purchase_url"] = "https://hypeddit.com/dl/xyz?sig=abc123&fan=1"
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
+        mock_get.return_value = _page([gated])
+        items = soundcloud.fetch(settings)
+    assert items[0].raw_metadata["acquisition_url"] == "https://hypeddit.com/dl/xyz?sig=abc123&fan=1"
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -271,11 +297,15 @@ def _is_free_gate(track: dict) -> bool:
     if track.get("downloadable") is True:
         return False
     url = (track.get("purchase_url") or "").strip()
-    if not url:
+    parsed = urllib.parse.urlparse(url)
+    # http(s)-with-host only — purchase_url is uploader-controlled and lands in
+    # hrefs downstream (audition page, SPA cards); a javascript:/data: URL must
+    # never qualify as a "gate". html.escape does not neutralise URL schemes.
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return False
     if "free" in (track.get("purchase_title") or "").lower():
         return True
-    host = urllib.parse.urlparse(url).netloc.lower()
+    host = parsed.netloc.lower()
     host = host[4:] if host.startswith("www.") else host
     return host in _GATE_DOMAINS
 ```
@@ -291,8 +321,11 @@ and inside `raw_metadata` (after the Task 2 additions):
 ```python
             "free_gate": free_gate,
             "free_download": bool(track.get("downloadable") is True or free_gate),
+            # Gate URLs are preserved verbatim (already scheme/host-validated by
+            # _is_free_gate) — gates use required/signed query params, so no
+            # query stripping here, unlike the permalink's utm cleanup.
             "acquisition_url": (
-                (track.get("purchase_url") or "").split("?", 1)[0] if free_gate
+                (track.get("purchase_url") or "").strip() if free_gate
                 else link if track.get("downloadable") is True
                 else None
             ),
@@ -557,13 +590,24 @@ def test_reason_reposts_only_popularity_line():
            signals=[RecommendationSignal(code="source_popularity", explanation="30 reposts on SoundCloud.")])
     reason = compose_reason(c, {}, today=TODAY)
     assert "30 reposts on SoundCloud" in reason
+
+
+def test_reason_reposts_trigger_beats_low_download_count():
+    # download_count=3 is positive (so dl_count gets set at reasons.py:77-80),
+    # but the signal fired on reposts — the reason must say reposts, not
+    # "grabbed 3 times".
+    c = _c(source="soundcloud", raw_metadata={"reposts_count": 30, "download_count": 3},
+           signals=[RecommendationSignal(code="source_popularity", explanation="30 reposts on SoundCloud.")])
+    reason = compose_reason(c, {}, today=TODAY)
+    assert "30 reposts on SoundCloud" in reason
+    assert "downloads" not in reason and "grabbed" not in reason
 ```
 
 (Reuse `test_reasons.py`'s existing candidate builder and TODAY constant.)
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `./venv/bin/pytest tests/test_ranker.py -k "reposts or count_override" tests/test_reasons.py -k reposts -v`
+Run: `./venv/bin/pytest tests/test_ranker.py tests/test_reasons.py -k "reposts or count_override" -v`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement.** Ranker signal block (replace lines 515–523):
@@ -615,14 +659,17 @@ def _assign_sections_mix_prep(
         reposts_count = raw_reposts
 ```
 
-and after the existing `source_popularity`/`dl_count` branch (line 244–251), add:
+and **before** the existing `source_popularity`/`dl_count` branch (line 244–251), add a trigger-derived branch — the trigger must come from the signal itself, because `dl_count` is set for ANY positive download count (reasons.py:77-80) and a low-but-nonzero count would otherwise win the template:
 
 ```python
-    if "source_popularity" in signal_codes and dl_count is None and reposts_count is not None:
-        return _fill("DJs are reposting this — {r} reposts on {source_disp}.").replace("{r}", str(reposts_count))
+    if "source_popularity" in signal_codes and reposts_count is not None:
+        sp_expl = next((s.explanation for s in c.signals if s.code == "source_popularity"), "")
+        if "reposts" in sp_expl:
+            # {r} replaced before _fill so _fill only sees placeholders it knows.
+            return _fill(f"DJs are reposting this — {reposts_count} reposts on {{source_disp}}.")
 ```
 
-(If `_fill` chokes on the unknown `{r}` placeholder, do the `{r}` replace before `_fill` — match the function's actual substitution mechanics when editing.)
+(The existing downloads branch below it is unchanged and now only renders when the signal actually fired on downloads.)
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -662,9 +709,11 @@ def _settings_all_enabled():
 
 
 def test_only_sources_restricts_fetchers():
+    # _FETCHERS binds function objects at import time, so patching
+    # src.fetchers.soundcloud.fetch would NOT intercept — patch the registry.
     s = _settings_all_enabled()
-    with patch("src.fetchers.soundcloud.fetch", return_value=[]) as sc, \
-         patch("src.fetchers.beatport.fetch", return_value=[]) as bp:
+    sc, bp = MagicMock(return_value=[]), MagicMock(return_value=[])
+    with patch("src.fetchers._FETCHERS", [("soundcloud", sc), ("beatport", bp)]):
         items, health = fetch_all_sources(s, only_sources=["soundcloud"])
     sc.assert_called_once()
     bp.assert_not_called()
@@ -673,7 +722,8 @@ def test_only_sources_restricts_fetchers():
 
 def test_bpm_ranges_forwarded_to_fetchers():
     s = _settings_all_enabled()
-    with patch("src.fetchers.soundcloud.fetch", return_value=[]) as sc:
+    sc = MagicMock(return_value=[])
+    with patch("src.fetchers._FETCHERS", [("soundcloud", sc)]):
         fetch_all_sources(s, only_sources=["soundcloud"], bpm_ranges=[(170.0, 180.0)])
     assert sc.call_args.kwargs["bpm_ranges"] == [(170.0, 180.0)]
 ```
@@ -755,10 +805,30 @@ def _free_item(title="Boot VIP", free=True):
     )
 
 
+def _seed_pool(data_dir):
+    """A free SoundCloud pool record and a paid Beatport one — the free_only
+    eligibility filter must let only the first into the report."""
+    from src.models import PoolRecord
+    from src.pipeline.pool import save_pool
+    save_pool([
+        PoolRecord(artist="PoolFree", title="Pool Boot", link="https://soundcloud.com/p/f",
+                   source="soundcloud", label=None, release_date=None, release_name=None,
+                   genre_tags=["dnb"],
+                   raw_metadata={"free_download": True, "free_gate": False,
+                                 "acquisition_url": "https://soundcloud.com/p/f"},
+                   added_at="2026-07-01T00:00:00+00:00", last_score=1.0),
+        PoolRecord(artist="PoolPaid", title="Pool Paid", link="https://example.com/p",
+                   source="beatport", label=None, release_date=None, release_name=None,
+                   genre_tags=["dnb"], raw_metadata={"beatport_id": 7},
+                   added_at="2026-07-01T00:00:00+00:00", last_score=1.0),
+    ], data_dir)
+
+
 def test_run_free_only_restricts_fetch_and_filters_eligibility(tmp_path):
     settings = _settings(str(tmp_path))
     settings.pipeline_free_download_sources = ["soundcloud"]
     settings.pipeline_free_downloads_mode_count = 30
+    _seed_pool(str(tmp_path))
     options = MixPrepOptions(genre="dnb", dry_run=True, free_only=True)
     with patch("src.fetchers.catalog.fetch_all_tracks", return_value=[_known_track()]), \
          patch("src.fetchers.catalog.fetch_all_mixes", return_value=[]), \
@@ -773,7 +843,9 @@ def test_run_free_only_restricts_fetch_and_filters_eligibility(tmp_path):
     assert "-free-dl-dnb" in outcome.report_id
     assert outcome.artifact["kind"] == "free-downloads"
     titles = [t["title"] for s in outcome.artifact["sections"] for t in s["tracks"]]
+    # fresh: free kept, paid dropped; pool: free injected, paid filtered
     assert "Boot VIP" in titles and "Paid Leak" not in titles
+    assert "Pool Boot" in titles and "Pool Paid" not in titles
 
 
 def test_run_free_only_forwards_expanded_bpm_ranges(tmp_path):
@@ -805,7 +877,7 @@ def test_run_mix_prep_regular_sends_no_only_sources_or_bpm_ranges(tmp_path):
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `./venv/bin/pytest tests/test_services_runs.py -k free_only tests/test_report.py -k free_downloads_mode -v`
+Run: `./venv/bin/pytest tests/test_services_runs.py tests/test_report.py -k "free_only or free_downloads_mode" -v`
 Expected: FAIL — `TypeError: MixPrepOptions.__init__() got an unexpected keyword argument 'free_only'`.
 
 - [ ] **Step 3: Implement.**
@@ -957,7 +1029,7 @@ def test_audition_gated_track_gets_get_anchor():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `./venv/bin/pytest tests/test_report.py -k "gated or native or without_free" tests/test_report_artifact.py -k free_gate tests/test_audition.py -k gated -v`
+Run: `./venv/bin/pytest tests/test_report.py tests/test_report_artifact.py tests/test_audition.py -k "gated or native or without_free or free_gate" -v`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement.**
@@ -1041,7 +1113,9 @@ def test_build_options_free_downloads_requires_valid_genre():
 
 
 def test_reports_list_accepts_free_downloads_kind(client):
-    resp = client.get("/api/reports?kind=free-downloads")
+    # the client fixture enables bearer auth — every request needs the
+    # module's AUTH headers or it 401s before reaching the handler
+    resp = client.get("/api/reports?kind=free-downloads", headers=AUTH)
     assert resp.status_code == 200
 
 
@@ -1050,9 +1124,10 @@ def test_feedback_on_free_dl_report_resolves_mix_prep_history(client, seeded_fre
     # report_id "2026-W29-free-dl-dnb", track_no 1 via
     # src.pipeline.history.append_mix_prep_records into the test data_dir
     # (mirror how existing feedback tests seed mix-prep history).
-    resp = client.post("/api/feedback", json={"outcome": "liked",
-                                              "report_id": "2026-W29-free-dl-dnb",
-                                              "track_no": 1})
+    resp = client.post("/api/feedback", headers=AUTH,
+                       json={"outcome": "liked",
+                             "report_id": "2026-W29-free-dl-dnb",
+                             "track_no": 1})
     assert resp.status_code == 200
     assert resp.json()["history"] == "mix-prep"
 ```

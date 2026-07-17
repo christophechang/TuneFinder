@@ -1,7 +1,7 @@
 # Free Downloads Mode — Design
 
 **Date:** 2026-07-17
-**Status:** Awaiting review
+**Status:** Approved 2026-07-17
 **Prerequisite:** Free-downloads section/lane (shipped v0.15.0 — see
 `2026-07-17-free-downloads-section-design.md`)
 **Repos affected:** TuneFinder (backend + CLI), tunefinder-web (SPA)
@@ -92,6 +92,12 @@ Hypeddit/ToneDen-style "Free DL" gates, where `downloadable` is `false` but
   `free` (case-insensitive — covers "FREE DOWNLOAD", "Free DL") **or** the
   `purchase_url` host is a known gate domain: `hypeddit.com`, `toneden.io`,
   `gate.fm`.
+- **URL safety precondition:** a track only qualifies as gated when its
+  `purchase_url` parses as `http`/`https` with a hostname —
+  `purchase_url` is uploader-controlled and becomes an href in the audition
+  page and SPA cards, and HTML-escaping does not neutralise `javascript:` /
+  `data:` schemes. Validated gate URLs are preserved **verbatim**
+  (query string included — gates use required/signed params).
 - Kept tracks get `raw_metadata["free_gate"] = True`; native downloads keep
   `downloadable: true`. Report rendering distinguishes them (native ⬇️ vs
   gate 🔗) in Discord text, the audition page, and the web track cards.
