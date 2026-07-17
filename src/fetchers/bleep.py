@@ -68,7 +68,8 @@ def _parse_release_card(card: Tag) -> SourceItem | None:
         return None
 
 
-def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None,
+          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("bleep")
     if not cfg.get("enabled", False):
         return []

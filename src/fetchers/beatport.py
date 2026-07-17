@@ -110,7 +110,8 @@ def _fetch_genre_top(session: requests.Session, genre_id) -> list[dict]:
     return tracks[:_CHART_SIZE]
 
 
-def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None,
+          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("beatport")
     if not cfg.get("enabled", False):
         return []

@@ -162,7 +162,8 @@ def _parse_track(track: dict, album: dict, tag: str, genre_ids: set[int]) -> Sou
 # Main fetcher
 # ---------------------------------------------------------------------------
 
-def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None,
+          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("volumo")
     if not cfg.get("enabled", False):
         return []

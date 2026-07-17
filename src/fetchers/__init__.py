@@ -31,12 +31,18 @@ _FETCHERS = [
 ]
 
 
-def fetch_all_sources(settings, target_genre: str | None = None) -> tuple[list[SourceItem], dict[str, dict]]:
+def fetch_all_sources(settings, target_genre: str | None = None,
+                      only_sources: list[str] | None = None,
+                      bpm_ranges: list[tuple[float, float]] | None = None) -> tuple[list[SourceItem], dict[str, dict]]:
     """
     Run all enabled fetchers and return (items, health).
 
     If target_genre is set, fetchers may use it to narrow their source-specific
     genre lists. Fetchers that do not support genre narrowing can ignore it.
+
+    only_sources restricts the run to the named fetchers (free-downloads mode);
+    bpm_ranges is forwarded to fetchers — those without server-side BPM search
+    ignore it.
 
     health is a dict keyed by source name:
       {"count": int, "error": str | None}
@@ -50,8 +56,10 @@ def fetch_all_sources(settings, target_genre: str | None = None) -> tuple[list[S
         if not settings.source_enabled(name):
             logger.info(f"[sources] Skipping disabled source: {name}")
             continue
+        if only_sources is not None and name not in only_sources:
+            continue
         try:
-            items = fetch_fn(settings, target_genre=target_genre)
+            items = fetch_fn(settings, target_genre=target_genre, bpm_ranges=bpm_ranges)
             health[name] = {"count": len(items), "error": None}
             all_items.extend(items)
         except Exception as e:

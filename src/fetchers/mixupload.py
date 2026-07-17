@@ -79,7 +79,8 @@ _SLUG_TO_TAG: dict[str, str] = {
 }
 
 
-def fetch(settings, target_genre: str | None = None) -> list[SourceItem]:
+def fetch(settings, target_genre: str | None = None,
+          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config(_SOURCE)
     if not cfg.get("enabled", False):
         return []
