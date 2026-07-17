@@ -248,6 +248,12 @@ pipeline:
   # Minimum score for a track to occupy a report slot — sections may run short.
   # 0 disables the floor (pre-v0.7.1 behaviour).
   section_min_score: 1.0
+  # Free-download lane — sources listed here route to the exclusive
+  # "Free Downloads" section and never compete with store sections.
+  free_download_sources: [soundcloud]
+  free_downloads_count: 5             # weekly slots
+  mix_prep_free_downloads_count: 10   # mix-prep slots
+  free_downloads_min_score: 0.0       # lane floor — 0 = best N of what the lane found
   # Remix-aware track identity (issue #9). When true, a *named* remix/VIP/rework is
   # a distinct track from the original (Original/Extended/Radio still merge), so a
   # named remix is no longer suppressed just because you own the original.
@@ -338,6 +344,10 @@ scoring:
   # Mixupload popularity
   w_mixupload_popularity: 0.25         # Bonus for Mixupload tracks with popular download count
   mixupload_popularity_downloads: 100  # Minimum download count to earn the signal
+
+  # SoundCloud popularity
+  w_soundcloud_popularity: 0.25        # Bonus for SoundCloud tracks other DJs are downloading
+  soundcloud_popularity_downloads: 50  # Minimum download count to earn the signal
 
   # Artist score cap and pool age
   max_artist_score: 10.0               # Cap total artist score so one mega-artist doesn't dominate
