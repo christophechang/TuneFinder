@@ -135,7 +135,7 @@ def test_report_detail_artifact_backed(client):
     track = body["sections"][0]["tracks"][0]
     assert track["artist"] == "Sully"
     assert track["reason"]
-    assert track["embed"] == {"type": "beatport", "track_id": 42, "album_id": None}
+    assert track["embed"] == {"type": "beatport", "track_id": 42, "album_id": None, "url": None}
     assert track["signal_codes"] == ["known_artist"]
     assert track["feedback"] is None
 

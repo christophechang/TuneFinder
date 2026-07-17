@@ -101,6 +101,18 @@ def test_build_artifact_no_embed_when_no_ids():
     assert t["embed"] is None
 
 
+def test_build_artifact_soundcloud_embed_uses_link():
+    sections = {"top_picks": [_candidate(source="soundcloud", title="Bootleg")]}
+    t = _build(sections)["sections"][0]["tracks"][0]
+    assert t["embed"] == {"type": "soundcloud", "url": "https://example.com/Bootleg"}
+
+
+def test_build_artifact_store_embed_wins_over_soundcloud():
+    sections = {"top_picks": [_candidate(source="soundcloud", raw_metadata={"bandcamp_album_id": 777})]}
+    t = _build(sections)["sections"][0]["tracks"][0]
+    assert t["embed"] == {"type": "bandcamp", "album_id": 777}
+
+
 def test_build_artifact_mix_prep_filters_payload():
     filters = {"bpm_min": 170.0, "bpm_max": 180.0, "bpm_flex": True,
                "key_camelot": "8A", "description": "Filters: BPM 170–180 (±half/double) · key 8A±compat"}

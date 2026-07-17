@@ -45,6 +45,9 @@ def _embed(c: Candidate) -> Optional[dict]:
     beatport_id = c.raw_metadata.get("beatport_id")
     if beatport_id and isinstance(beatport_id, int):
         return {"type": "beatport", "track_id": beatport_id}
+    if c.source == "soundcloud" and c.link:
+        # SoundCloud's widget embeds from the bare track permalink — no id needed.
+        return {"type": "soundcloud", "url": c.link}
     return None
 
 

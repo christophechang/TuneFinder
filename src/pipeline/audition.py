@@ -7,7 +7,8 @@ for the mark command. No network, no filesystem in the render function.
 Player precedence per track:
   1. Bandcamp EmbeddedPlayer iframe (bandcamp_album_id from raw_metadata)
   2. Beatport embed iframe (beatport_id from raw_metadata)
-  3. Link-only row
+  3. SoundCloud widget iframe (source == "soundcloud", embeds from the permalink)
+  4. Link-only row
 
 Step 0 findings:
   - Volumo: no preview URL field found → rows are link-only (no audio element).
@@ -18,6 +19,7 @@ Step 0 findings:
 import html
 import os
 import shlex
+import urllib.parse
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -88,6 +90,17 @@ def _player_html(c) -> str:
         return (
             f'<iframe loading="lazy" src="{html.escape(src)}" '
             f'height="54" scrolling="no"></iframe>'
+        )
+
+    if c.source == "soundcloud" and c.link:
+        src = (
+            "https://w.soundcloud.com/player/?url="
+            + urllib.parse.quote(c.link, safe="")
+            + "&auto_play=false&visual=false&show_user=true"
+        )
+        return (
+            f'<iframe loading="lazy" src="{html.escape(src)}" '
+            f'height="120" scrolling="no"></iframe>'
         )
 
     return ""

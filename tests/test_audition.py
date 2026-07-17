@@ -117,6 +117,19 @@ def test_beatport_embed_present():
     assert "embed.beatport.com/?id=12345&amp;type=track" in html
 
 
+def test_soundcloud_embed_present():
+    sc = _c(
+        "Bootleg DJ", "White Label VIP",
+        source="soundcloud",
+        link="https://soundcloud.com/bootleg-dj/white-label-vip",
+        signals=["genre_match"],
+        genre_tags=["ukg"],
+    )
+    html = generate_audition_page({"top_picks": [sc]}, "2026-W29", None,
+                                  profiles={}, label_artists={}, today=TODAY)
+    assert "w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fbootleg-dj%2Fwhite-label-vip" in html
+
+
 def test_link_only_row_has_no_embed():
     sections, report_id, settings, profiles, label_artists = build_fixture_sections()
     html = generate_audition_page(sections, report_id, settings, profiles=profiles,
