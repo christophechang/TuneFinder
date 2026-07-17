@@ -62,6 +62,8 @@ class ReportTrack(ApiModel):
     embed: Optional[Embed] = None
     pool_added_at: Optional[str] = None
     feedback: Optional[TrackFeedback] = None
+    free_gate: bool = False
+    acquisition_url: Optional[str] = None
 
 
 class ReportSection(ApiModel):
@@ -72,7 +74,7 @@ class ReportSection(ApiModel):
 
 class ReportSummary(ApiModel):
     report_id: str
-    kind: Literal["weekly", "mix-prep"]
+    kind: Literal["weekly", "mix-prep", "free-downloads"]
     genre: Optional[str] = None
     generated_at: Optional[str] = None
     track_count: int
@@ -86,7 +88,7 @@ class ReportListResponse(ApiModel):
 
 class ReportDetail(ApiModel):
     report_id: str
-    kind: Literal["weekly", "mix-prep"]
+    kind: Literal["weekly", "mix-prep", "free-downloads"]
     genre: Optional[str] = None
     generated_at: Optional[str] = None
     degraded: bool = False
@@ -194,7 +196,7 @@ class HealthResponse(ApiModel):
 # --- Jobs (on-demand runs) ---
 
 class RunRequest(BaseModel):
-    mode: Literal["weekly", "mix-prep"]
+    mode: Literal["weekly", "mix-prep", "free-downloads"]
     genre: Optional[str] = None
     bpm_min: Optional[float] = None
     bpm_max: Optional[float] = None
@@ -211,7 +213,7 @@ class JobStage(ApiModel):
 
 class JobSummary(ApiModel):
     id: str
-    mode: Literal["weekly", "mix-prep"]
+    mode: Literal["weekly", "mix-prep", "free-downloads"]
     status: Literal["queued", "running", "succeeded", "failed"]
     dry_run: bool = False
     params: dict = Field(default_factory=dict)

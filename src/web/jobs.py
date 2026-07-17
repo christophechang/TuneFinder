@@ -117,7 +117,7 @@ def build_options(request: dict):
     if mode == "weekly":
         return "weekly", WeeklyRunOptions(dry_run=dry_run)
 
-    if mode == "mix-prep":
+    if mode in ("mix-prep", "free-downloads"):
         genre = request.get("genre")
         if genre not in MIX_PREP_GENRES:
             raise JobValidationError(
@@ -142,12 +142,13 @@ def build_options(request: dict):
                     f"could not parse key {key_arg!r} — use Camelot notation (e.g. 8A) "
                     "or a musical key (e.g. Am, C major)"
                 )
-        return "mix-prep", MixPrepOptions(
+        return mode, MixPrepOptions(
             genre=genre, bpm_range=bpm_range, key_camelot=key_camelot,
             bpm_flex=bool(request.get("bpm_flex", True)), dry_run=dry_run,
+            free_only=(mode == "free-downloads"),
         )
 
-    raise JobValidationError(f"unknown mode {mode!r} — valid: weekly, mix-prep")
+    raise JobValidationError(f"unknown mode {mode!r} — valid: weekly, mix-prep, free-downloads")
 
 
 class JobManager:

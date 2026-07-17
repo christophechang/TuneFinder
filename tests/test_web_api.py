@@ -410,6 +410,62 @@ def test_interrupted_job_marked_failed_on_restart(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Free-downloads mode
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def seeded_free_dl_report(client):
+    from src.models import RecommendationRecord
+    from src.pipeline.history import append_mix_prep_records
+
+    record = RecommendationRecord(
+        artist="Rider Shafique", title="Free Cut", link="https://example.com/free",
+        source="soundcloud", recommended_at="2026-07-17T09:00:00+00:00",
+        report_id="2026-W29-free-dl-dnb", track_no=1,
+        signal_codes=["known_artist"], genre_tags=["dnb"], score=5.0, label=None,
+    )
+    append_mix_prep_records([record], str(client.tmp_path))
+
+
+def test_report_kind_free_dl_derivation():
+    from src.web.reportdata import report_kind
+    assert report_kind("2026-W29-free-dl-dnb") == ("free-downloads", "dnb")
+    assert report_kind("2026-W29-mix-prep-dnb") == ("mix-prep", "dnb")
+    assert report_kind("2026-W29") == ("weekly", None)
+
+
+def test_build_options_free_downloads_mode():
+    from src.web.jobs import build_options
+    mode, options = build_options({"mode": "free-downloads", "genre": "dnb",
+                                   "bpm_min": 170, "bpm_max": 180})
+    assert mode == "free-downloads"
+    assert options.free_only is True
+    assert options.genre == "dnb" and options.bpm_range == (170.0, 180.0)
+
+
+def test_build_options_free_downloads_requires_valid_genre():
+    from src.web.jobs import build_options, JobValidationError
+    with pytest.raises(JobValidationError):
+        build_options({"mode": "free-downloads", "genre": "polka"})
+
+
+def test_reports_list_accepts_free_downloads_kind(client):
+    # the client fixture enables bearer auth — every request needs the
+    # module's AUTH headers or it 401s before reaching the handler
+    resp = client.get("/api/reports?kind=free-downloads", headers=AUTH)
+    assert resp.status_code == 200
+
+
+def test_feedback_on_free_dl_report_resolves_mix_prep_history(client, seeded_free_dl_report):
+    resp = client.post("/api/feedback", headers=AUTH,
+                       json={"outcome": "liked",
+                             "report_id": "2026-W29-free-dl-dnb",
+                             "track_no": 1})
+    assert resp.status_code == 200
+    assert resp.json()["history"] == "mix-prep"
+
+
+# ---------------------------------------------------------------------------
 # Static SPA mount
 # ---------------------------------------------------------------------------
 

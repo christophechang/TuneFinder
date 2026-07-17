@@ -21,6 +21,8 @@ from src.pipeline.report_artifact import list_report_artifact_ids, load_report_a
 
 def report_kind(report_id: str) -> tuple[str, Optional[str]]:
     """(kind, genre) derived from the report id convention."""
+    if "-free-dl-" in report_id:
+        return "free-downloads", report_id.split("-free-dl-", 1)[1]
     if "-mix-prep-" in report_id:
         return "mix-prep", report_id.split("-mix-prep-", 1)[1]
     return "weekly", None

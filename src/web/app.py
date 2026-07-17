@@ -96,7 +96,7 @@ def create_app(settings=None, job_manager: JobManager | None = None) -> FastAPI:
 
     @app.get("/api/reports", response_model=schemas.ReportListResponse,
              dependencies=[Depends(require_auth)])
-    def reports_list(kind: str | None = Query(default=None, pattern="^(weekly|mix-prep)$"),
+    def reports_list(kind: str | None = Query(default=None, pattern="^(weekly|mix-prep|free-downloads)$"),
                      limit: int = Query(default=50, ge=1, le=500)):
         return {"reports": list_reports(settings, kind=kind, limit=limit)}
 
