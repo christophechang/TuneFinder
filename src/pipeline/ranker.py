@@ -62,6 +62,7 @@ class ScoringWeights:
     # --- SoundCloud popularity signal (free-DL lane) ---
     w_soundcloud_popularity: float = 0.25      # bonus for SoundCloud tracks other DJs are downloading
     soundcloud_popularity_downloads: int = 50  # minimum download_count to fire the signal
+    soundcloud_popularity_reposts: int = 25    # minimum reposts_count that also fires the signal
 
     # --- Per-source share cap (issue #12, weekly only) ---
     max_share_per_source: float = 0.6  # max fraction of total_configured_slots any single source can claim (1.0 disables)

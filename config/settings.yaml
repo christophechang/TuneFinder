@@ -213,6 +213,7 @@ sources:
     # and SOUNDCLOUD_CLIENT_SECRET in .env (app registration needs Artist Pro).
     # No user login or callback URL involved. Token cached in data/soundcloud_token.json.
     downloadable_only: true     # this lane = free-DL/bootleg discovery; stores cover the rest
+    include_gated_free: true    # keep Hypeddit/ToneDen-style "Free DL" gated tracks (downloadable=false)
     lookback_days: 28
     limit_per_target: 50
     max_duration_minutes: 15    # drop full DJ sets/mixes from results; 0 disables
@@ -254,6 +255,7 @@ pipeline:
   free_downloads_count: 5             # weekly slots
   mix_prep_free_downloads_count: 10   # mix-prep slots
   free_downloads_min_score: 0.0       # lane floor — 0 = best N of what the lane found
+  free_downloads_mode_count: 30       # slots for the dedicated free-downloads mode report
   # Remix-aware track identity (issue #9). When true, a *named* remix/VIP/rework is
   # a distinct track from the original (Original/Extended/Radio still merge), so a
   # named remix is no longer suppressed just because you own the original.
@@ -348,6 +350,7 @@ scoring:
   # SoundCloud popularity
   w_soundcloud_popularity: 0.25        # Bonus for SoundCloud tracks other DJs are downloading
   soundcloud_popularity_downloads: 50  # Minimum download count to earn the signal
+  soundcloud_popularity_reposts: 25    # Minimum reposts_count that also earns the popularity signal
 
   # Artist score cap and pool age
   max_artist_score: 10.0               # Cap total artist score so one mega-artist doesn't dominate

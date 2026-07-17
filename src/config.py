@@ -140,6 +140,10 @@ class Settings:
         return float(self._data.get("pipeline", {}).get("free_downloads_min_score", 0.0))
 
     @property
+    def pipeline_free_downloads_mode_count(self) -> int:
+        return self._data.get("pipeline", {}).get("free_downloads_mode_count", 30)
+
+    @property
     def pipeline_section_min_score(self) -> float:
         return float(self._data.get("pipeline", {}).get("section_min_score", 0.0))
 

@@ -304,3 +304,14 @@ def test_scoring_weights_soundcloud_popularity_fields():
     defaults = Settings({}).scoring_weights()
     assert defaults.w_soundcloud_popularity == 0.25
     assert defaults.soundcloud_popularity_downloads == 50
+
+
+def test_free_downloads_mode_count_default():
+    from src.config import Settings
+    s = Settings({})
+    assert s.pipeline_free_downloads_mode_count == 30
+
+
+def test_scoring_weights_reposts_default():
+    from src.pipeline.ranker import ScoringWeights
+    assert ScoringWeights().soundcloud_popularity_reposts == 25
