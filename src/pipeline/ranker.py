@@ -816,6 +816,9 @@ def _assign_sections_mix_prep(
     top_n = settings.pipeline_mix_prep_top_picks_count
     deep_n = settings.pipeline_mix_prep_deep_cuts_count
     min_score = settings.pipeline_section_min_score
+    lane_sources = set(settings.pipeline_free_download_sources)
+    lane_n = settings.pipeline_mix_prep_free_downloads_count
+    lane_floor = settings.pipeline_free_downloads_min_score
 
     used: set[int] = set()
     MAX_PER_ARTIST = 2
@@ -828,15 +831,22 @@ def _assign_sections_mix_prep(
         sorted(ranked, key=lambda c: c.key in demoted_keys)
         if demoted_keys else ranked
     )
+    # Free-download lane partition AFTER the demotion sort so the lane block
+    # inherits matches-before-demoted ordering (spec: harmonic-filter interplay).
+    free_dl_order = [c for c in order if c.source in lane_sources]
+    if lane_sources:
+        order = [c for c in order if c.source not in lane_sources]
 
-    def pick(n: int) -> list[Candidate]:
+    def pick(n: int, pool: list[Candidate], floor: float) -> list[Candidate]:
+        if n <= 0:
+            return []
         artist_counts: dict[str, int] = {}
         release_counts: dict[str, int] = {}
         result = []
-        for c in order:
+        for c in pool:
             if id(c) in used:
                 continue
-            if c.score < min_score:
+            if c.score < floor:
                 continue
             artist_key = normalise_artist(c.artist)
             release_key = (c.release_name or "").strip().lower()
@@ -853,10 +863,14 @@ def _assign_sections_mix_prep(
                 break
         return result
 
-    top_picks = pick(top_n)
-    deep_cuts = pick(deep_n)
-    logger.info(f"[ranker] Mix-prep sections — top_picks: {len(top_picks)}, deep_cuts: {len(deep_cuts)} (floor={min_score})")
-    return {"top_picks": top_picks, "deep_cuts": deep_cuts}
+    top_picks = pick(top_n, order, min_score)
+    deep_cuts = pick(deep_n, order, min_score)
+    free_downloads = pick(lane_n, free_dl_order, lane_floor)
+    logger.info(
+        f"[ranker] Mix-prep sections — top_picks: {len(top_picks)}, deep_cuts: {len(deep_cuts)} "
+        f"(floor={min_score}), free_downloads: {len(free_downloads)} (lane floor={lane_floor})"
+    )
+    return {"top_picks": top_picks, "deep_cuts": deep_cuts, "free_downloads": free_downloads}
 
 
 def rank_candidates_mix_prep(

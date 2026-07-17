@@ -306,6 +306,35 @@ def test_lane_disabled_when_no_sources_configured():
     assert sc in sections["top_picks"]
 
 
+def test_mix_prep_free_download_lane_exclusive_and_capped():
+    lane = [_scored_candidate(0.5, artist=f"DJ {i}", title=f"B{i}", source="soundcloud")
+            for i in range(12)]
+    store = _scored_candidate(5.0, source="beatport")
+    sections = _assign_sections_mix_prep([store] + lane, _LaneSettings())
+    assert len(sections["free_downloads"]) == 10
+    assert store not in sections["free_downloads"]
+    assert all(c not in sections["top_picks"] and c not in sections["deep_cuts"] for c in lane)
+
+
+def test_mix_prep_lane_preserves_harmonic_demotion_order():
+    """Within the lane block, harmonic matches sort above demoted unknowns
+    regardless of score — and demoted lane items still place."""
+    match = _scored_candidate(0.5, artist="Match", title="M", source="soundcloud")
+    demoted = _scored_candidate(3.0, artist="Unknown", title="U", source="soundcloud")
+    sections = _assign_sections_mix_prep([demoted, match], _LaneSettings(),
+                                         demoted_keys={demoted.key})
+    assert sections["free_downloads"] == [match, demoted]
+
+
+def test_mix_prep_lane_count_zero_disables():
+    class _ZeroMixLane(_LaneSettings):
+        pipeline_mix_prep_free_downloads_count = 0
+
+    c = _scored_candidate(5.0, source="soundcloud")
+    sections = _assign_sections_mix_prep([c], _ZeroMixLane())
+    assert sections["free_downloads"] == []
+
+
 def test_section_floor_skips_below_threshold():
     ranked = [_scored_candidate(0.5)]
     sections = _assign_sections(ranked, _MockSettings(), _build_genre_set({}))
