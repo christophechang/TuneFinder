@@ -74,6 +74,11 @@ def compose_reason(
     if isinstance(raw_chart, int) and 1 <= raw_chart <= 100:
         chart = raw_chart
 
+    dl_count: Optional[int] = None
+    raw_dl = c.raw_metadata.get("download_count")
+    if isinstance(raw_dl, int) and raw_dl > 0:
+        dl_count = raw_dl
+
     sources = c.raw_metadata.get("seen_on_sources", [c.source])
     k = len(sources)
     srcs = ", ".join(s.title() for s in sources)
@@ -93,7 +98,7 @@ def compose_reason(
         label_names = label_artists.get(c.label.lower().strip(), [])
 
     a = best_profile.name if best_profile else ""
-    source_disp = c.source.title()
+    source_disp = {"soundcloud": "SoundCloud"}.get(c.source, c.source.title())
 
     genre_disp = ""
     if c.genre_tags:
@@ -125,6 +130,7 @@ def compose_reason(
             "{d}": days_old is not None,
             "{label_part}": True,  # may be empty string — always eligible
             "{source_disp}": bool(source_disp),
+            "{dl}": dl_count is not None,
         }
         for placeholder, ok in checks.items():
             if placeholder in template and not ok:
@@ -158,6 +164,7 @@ def compose_reason(
         result = result.replace("{d}", d_phrase)
         result = result.replace("{label_part}", label_part)
         result = result.replace("{source_disp}", source_disp)
+        result = result.replace("{dl}", str(dl_count) if dl_count is not None else "")
         return result
 
     # --- Template table (first matching row, top-to-bottom) ---
@@ -233,6 +240,15 @@ def compose_reason(
         if genre_disp:
             return _fill("Independent Bandcamp find — {g}, outside the chart feeds.")
         return "Independent Bandcamp find — outside the chart feeds."
+
+    if "source_popularity" in signal_codes and dl_count is not None:
+        row = _pick([
+            "Free DL — grabbed {dl} times on {source_disp}.",
+            "{dl} downloads on {source_disp} already.",
+            "DJs are on this — {dl} downloads on {source_disp}.",
+        ])
+        if row:
+            return _fill(row)
 
     if "genre_match" in signal_codes and days_old is not None:
         return _fill("Fresh {g}{label_part}, out {d}.")

@@ -265,3 +265,42 @@ def test_validate_silent_when_soundcloud_disabled(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         s.validate()
     assert not any("SoundCloud is enabled" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Free-download lane pipeline keys
+# ---------------------------------------------------------------------------
+
+
+def test_free_download_lane_defaults():
+    from src.config import Settings
+    s = Settings({})
+    assert s.pipeline_free_download_sources == []
+    assert s.pipeline_free_downloads_count == 5
+    assert s.pipeline_mix_prep_free_downloads_count == 10
+    assert s.pipeline_free_downloads_min_score == 0.0
+
+
+def test_free_download_lane_from_config():
+    from src.config import Settings
+    s = Settings({"pipeline": {
+        "free_download_sources": ["soundcloud", "hypeddit"],
+        "free_downloads_count": 3,
+        "mix_prep_free_downloads_count": 7,
+        "free_downloads_min_score": 0.5,
+    }})
+    assert s.pipeline_free_download_sources == ["soundcloud", "hypeddit"]
+    assert s.pipeline_free_downloads_count == 3
+    assert s.pipeline_mix_prep_free_downloads_count == 7
+    assert s.pipeline_free_downloads_min_score == 0.5
+
+
+def test_scoring_weights_soundcloud_popularity_fields():
+    from src.config import Settings
+    s = Settings({"scoring": {"w_soundcloud_popularity": 0.5, "soundcloud_popularity_downloads": 10}})
+    w = s.scoring_weights()
+    assert w.w_soundcloud_popularity == 0.5
+    assert w.soundcloud_popularity_downloads == 10
+    defaults = Settings({}).scoring_weights()
+    assert defaults.w_soundcloud_popularity == 0.25
+    assert defaults.soundcloud_popularity_downloads == 50

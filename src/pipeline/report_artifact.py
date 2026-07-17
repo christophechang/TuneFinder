@@ -21,7 +21,7 @@ from src.models import ArtistProfile, Candidate
 from src.pipeline.dedup import make_dedup_key
 from src.pipeline.harmonic import candidate_bpm, candidate_camelot
 from src.pipeline.reasons import compose_reason
-from src.pipeline.report import report_order
+from src.pipeline.report import _SECTION_ORDER, report_order
 from src.pipeline.storage import atomic_write_text
 
 SCHEMA_VERSION = 1
@@ -32,6 +32,7 @@ _SECTION_LABELS = {
     "artist_watch": "Artist Watch",
     "wildcards": "Wildcards",
     "deep_cuts": "Deep Cuts",
+    "free_downloads": "Free Downloads",
 }
 
 _ARTIFACT_RE = re.compile(r"^report_(?P<report_id>.+)\.json$")
@@ -111,7 +112,7 @@ def build_report_artifact(
 
     numbers = {id(c): i for i, c in enumerate(report_order(sections), start=1)}
     section_payloads = []
-    for section_key in ("top_picks", "label_watch", "artist_watch", "wildcards", "deep_cuts"):
+    for section_key in _SECTION_ORDER:
         tracks = sections.get(section_key)
         if not tracks:
             continue

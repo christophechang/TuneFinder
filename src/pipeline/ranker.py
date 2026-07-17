@@ -59,6 +59,10 @@ class ScoringWeights:
     w_mixupload_popularity: float = 0.25     # bonus for Mixupload tracks with popular download count
     mixupload_popularity_downloads: int = 100  # minimum download count to fire the signal
 
+    # --- SoundCloud popularity signal (free-DL lane) ---
+    w_soundcloud_popularity: float = 0.25      # bonus for SoundCloud tracks other DJs are downloading
+    soundcloud_popularity_downloads: int = 50  # minimum download_count to fire the signal
+
     # --- Per-source share cap (issue #12, weekly only) ---
     max_share_per_source: float = 0.6  # max fraction of total_configured_slots any single source can claim (1.0 disables)
 
@@ -496,14 +500,26 @@ def _score(
         ))
 
     # --- Mixupload popularity signal (discovery axis; issue #12) ---
+    # Source-gated: SoundCloud also carries download_count (v0.14.0) and must
+    # never earn a "downloads on Mixupload" signal.
     download_count = c.raw_metadata.get("download_count")
-    if (download_count is not None and isinstance(download_count, int) and
+    if (c.source == "mixupload" and download_count is not None and isinstance(download_count, int) and
         download_count >= weights.mixupload_popularity_downloads):
         score += weights.w_mixupload_popularity
         discovery += weights.w_mixupload_popularity
         c.signals.append(RecommendationSignal(
             code="source_popularity",
             explanation=f"{download_count} downloads on Mixupload.",
+        ))
+
+    # --- SoundCloud popularity signal (discovery axis; free-DL lane) ---
+    if (c.source == "soundcloud" and download_count is not None and isinstance(download_count, int) and
+        download_count >= weights.soundcloud_popularity_downloads):
+        score += weights.w_soundcloud_popularity
+        discovery += weights.w_soundcloud_popularity
+        c.signals.append(RecommendationSignal(
+            code="source_popularity",
+            explanation=f"{download_count} downloads on SoundCloud.",
         ))
 
     # --- Pool age penalty ---
@@ -548,6 +564,19 @@ def _assign_sections(
     wildcard_n = settings.pipeline_wildcard_count
     min_score = settings.pipeline_section_min_score
     weights = settings.scoring_weights()
+
+    # Free-download lane (exclusive): lane candidates never compete for store
+    # sections, store candidates never take lane slots. See
+    # docs/superpowers/specs/2026-07-17-free-downloads-section-design.md.
+    lane_sources = set(settings.pipeline_free_download_sources)
+    lane_n = settings.pipeline_free_downloads_count
+    lane_floor = settings.pipeline_free_downloads_min_score
+    free_dl_pool = [c for c in ranked if c.source in lane_sources]
+    if lane_sources:
+        ranked = [c for c in ranked if c.source not in lane_sources]
+        if trace is not None:
+            for c in free_dl_pool:
+                trace.setdefault(id(c), []).append(("sections", "routed to free_downloads lane"))
 
     used: set[int] = set()
     MAX_PER_ARTIST = 2
@@ -671,17 +700,42 @@ def _assign_sections(
     else:
         wildcards = pick(wildcard_n, section_name="wildcards")
 
+    def _pick_free_downloads() -> list[Candidate]:
+        if lane_n <= 0:
+            return []
+        artist_counts: dict[str, int] = {}
+        result: list[Candidate] = []
+        for c in free_dl_pool:  # already score-descending
+            if c.score < lane_floor:
+                if trace is not None:
+                    trace.setdefault(id(c), []).append(("free_downloads", f"below lane floor {lane_floor}"))
+                continue
+            artist_key = normalise_artist(c.artist)
+            if artist_counts.get(artist_key, 0) >= MAX_PER_ARTIST:
+                if trace is not None:
+                    trace.setdefault(id(c), []).append(("free_downloads", "artist cap"))
+                continue
+            artist_counts[artist_key] = artist_counts.get(artist_key, 0) + 1
+            result.append(c)
+            if len(result) >= lane_n:
+                break
+        return result
+
+    free_downloads = _pick_free_downloads()
+
     genre_summary = ", ".join(f"{g}: {n}" for g, n in sorted(genre_counts.items()))
     logger.info(
         f"[ranker] Sections — top_picks: {len(top_picks)}, "
         f"label_watch: {len(label_watch)}, artist_watch: {len(artist_watch)}, "
-        f"wildcards: {len(wildcards)} (floor={min_score}) | genres: {genre_summary or 'none tagged'}"
+        f"wildcards: {len(wildcards)} (floor={min_score}), "
+        f"free_downloads: {len(free_downloads)} (lane floor={lane_floor}) | genres: {genre_summary or 'none tagged'}"
     )
     return {
         "top_picks": top_picks,
         "label_watch": label_watch,
         "artist_watch": artist_watch,
         "wildcards": wildcards,
+        "free_downloads": free_downloads,
     }
 
 
@@ -762,6 +816,9 @@ def _assign_sections_mix_prep(
     top_n = settings.pipeline_mix_prep_top_picks_count
     deep_n = settings.pipeline_mix_prep_deep_cuts_count
     min_score = settings.pipeline_section_min_score
+    lane_sources = set(settings.pipeline_free_download_sources)
+    lane_n = settings.pipeline_mix_prep_free_downloads_count
+    lane_floor = settings.pipeline_free_downloads_min_score
 
     used: set[int] = set()
     MAX_PER_ARTIST = 2
@@ -774,15 +831,22 @@ def _assign_sections_mix_prep(
         sorted(ranked, key=lambda c: c.key in demoted_keys)
         if demoted_keys else ranked
     )
+    # Free-download lane partition AFTER the demotion sort so the lane block
+    # inherits matches-before-demoted ordering (spec: harmonic-filter interplay).
+    free_dl_order = [c for c in order if c.source in lane_sources]
+    if lane_sources:
+        order = [c for c in order if c.source not in lane_sources]
 
-    def pick(n: int) -> list[Candidate]:
+    def pick(n: int, pool: list[Candidate], floor: float) -> list[Candidate]:
+        if n <= 0:
+            return []
         artist_counts: dict[str, int] = {}
         release_counts: dict[str, int] = {}
         result = []
-        for c in order:
+        for c in pool:
             if id(c) in used:
                 continue
-            if c.score < min_score:
+            if c.score < floor:
                 continue
             artist_key = normalise_artist(c.artist)
             release_key = (c.release_name or "").strip().lower()
@@ -799,10 +863,14 @@ def _assign_sections_mix_prep(
                 break
         return result
 
-    top_picks = pick(top_n)
-    deep_cuts = pick(deep_n)
-    logger.info(f"[ranker] Mix-prep sections — top_picks: {len(top_picks)}, deep_cuts: {len(deep_cuts)} (floor={min_score})")
-    return {"top_picks": top_picks, "deep_cuts": deep_cuts}
+    top_picks = pick(top_n, order, min_score)
+    deep_cuts = pick(deep_n, order, min_score)
+    free_downloads = pick(lane_n, free_dl_order, lane_floor)
+    logger.info(
+        f"[ranker] Mix-prep sections — top_picks: {len(top_picks)}, deep_cuts: {len(deep_cuts)} "
+        f"(floor={min_score}), free_downloads: {len(free_downloads)} (lane floor={lane_floor})"
+    )
+    return {"top_picks": top_picks, "deep_cuts": deep_cuts, "free_downloads": free_downloads}
 
 
 def rank_candidates_mix_prep(

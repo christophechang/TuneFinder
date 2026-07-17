@@ -280,6 +280,10 @@ class _RankSettings:
     pipeline_mix_prep_top_picks_count = 5
     pipeline_mix_prep_deep_cuts_count = 5
     pipeline_section_min_score = 0.0
+    pipeline_free_download_sources = []
+    pipeline_free_downloads_count = 5
+    pipeline_mix_prep_free_downloads_count = 10
+    pipeline_free_downloads_min_score = 0.0
 
     def __init__(self, data_dir):
         self.data_dir = data_dir
@@ -381,6 +385,10 @@ def _run_settings(data_dir):
     settings.pipeline_artist_watch_count = 5
     settings.pipeline_wildcard_count = 3
     settings.pipeline_section_min_score = 0.0
+    settings.pipeline_free_download_sources = []
+    settings.pipeline_free_downloads_count = 5
+    settings.pipeline_mix_prep_free_downloads_count = 10
+    settings.pipeline_free_downloads_min_score = 0.0
     settings.validate = MagicMock()
     return settings
 

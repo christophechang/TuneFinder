@@ -124,6 +124,22 @@ class Settings:
         return self._data.get("pipeline", {}).get("release_date_window_days")
 
     @property
+    def pipeline_free_download_sources(self) -> list[str]:
+        return self._data.get("pipeline", {}).get("free_download_sources", [])
+
+    @property
+    def pipeline_free_downloads_count(self) -> int:
+        return self._data.get("pipeline", {}).get("free_downloads_count", 5)
+
+    @property
+    def pipeline_mix_prep_free_downloads_count(self) -> int:
+        return self._data.get("pipeline", {}).get("mix_prep_free_downloads_count", 10)
+
+    @property
+    def pipeline_free_downloads_min_score(self) -> float:
+        return float(self._data.get("pipeline", {}).get("free_downloads_min_score", 0.0))
+
+    @property
     def pipeline_section_min_score(self) -> float:
         return float(self._data.get("pipeline", {}).get("section_min_score", 0.0))
 

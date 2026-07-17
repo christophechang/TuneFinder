@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 # Canonical ordering
 # ---------------------------------------------------------------------------
 
-_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards", "deep_cuts")
+_SECTION_ORDER = ("top_picks", "label_watch", "artist_watch", "wildcards", "deep_cuts", "free_downloads")
 
 
 def _group_label_watch(label_watch: list[Candidate]) -> tuple[dict[str, list[Candidate]], list[Candidate]]:
@@ -225,9 +225,13 @@ def _build_mix_prep_header(report_id: str, today: str, genre: str, filters_desc:
 # Track line formatter
 # ---------------------------------------------------------------------------
 
+# Brand names naive .title() gets wrong ("Soundcloud"). Other sources are unaffected.
+_SOURCE_DISPLAY = {"soundcloud": "SoundCloud"}
+
+
 def _track_line(n: int, c: Candidate, show_harmonic: bool = False) -> str:
     label_str = f" [{c.label}]" if c.label else ""
-    source_str = f" [{c.source.title()}]"
+    source_str = f" [{_SOURCE_DISPLAY.get(c.source, c.source.title())}]"
     link_str = f" → [Listen](<{c.link}>)" if c.link else ""
     harmonic_str = ""
     if show_harmonic:
@@ -339,6 +343,14 @@ def generate_report(
             lines.extend(_render_track(c))
         lines.append("")
 
+    # Free Downloads — exclusive lane (pipeline.free_download_sources)
+    free_downloads = sections.get("free_downloads", [])
+    if free_downloads:
+        lines.append("## 🆓 Free Downloads")
+        for c in free_downloads:
+            lines.extend(_render_track(c))
+        lines.append("")
+
     recommended_count = sum(len(v) for v in sections.values())
     audition_url, audition_label = _report_link(settings, report_id)
     lines.append(_build_footer(report_id, stats, recommended_count, audition_url=audition_url, audition_label=audition_label))
@@ -399,6 +411,13 @@ def generate_mix_prep_report(
     if deep_cuts:
         lines.append("## 🎧 Deep Cuts")
         for c in deep_cuts:
+            lines.extend(_render_track(c))
+        lines.append("")
+
+    free_downloads = sections.get("free_downloads", [])
+    if free_downloads:
+        lines.append("## 🆓 Free Downloads")
+        for c in free_downloads:
             lines.extend(_render_track(c))
         lines.append("")
 
