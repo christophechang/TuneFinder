@@ -250,7 +250,13 @@ def _track_line(n: int, c: Candidate, show_harmonic: bool = False) -> str:
             parts.append(camelot)
         if parts:
             harmonic_str = " · " + " · ".join(parts)
-    return f"{n}. **{c.artist} — {c.title}**{label_str}{source_str}{link_str}{harmonic_str}"
+    free_str = ""
+    if c.raw_metadata.get("free_gate"):
+        acq = c.raw_metadata.get("acquisition_url")
+        free_str = f" · 🔗 [Get](<{acq}>)" if acq else " · 🔗"
+    elif c.raw_metadata.get("free_download"):
+        free_str = " · ⬇️"
+    return f"{n}. **{c.artist} — {c.title}**{label_str}{source_str}{link_str}{harmonic_str}{free_str}"
 
 
 # ---------------------------------------------------------------------------

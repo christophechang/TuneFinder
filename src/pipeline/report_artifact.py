@@ -84,6 +84,8 @@ def _track_payload(
         "chart_position": c.raw_metadata.get("chart_position"),
         "embed": _embed(c),
         "pool_added_at": c.pool_added_at,
+        "free_gate": bool(c.raw_metadata.get("free_gate")),
+        "acquisition_url": c.raw_metadata.get("acquisition_url"),
     }
 
 

@@ -158,6 +158,10 @@ def _track_row(
     player = _player_html(c)
     link_safe = html.escape(c.link) if c.link else ""
     link_html = f'<a href="{link_safe}" target="_blank" style="color:#6af;font-size:12px;">Open in store ↗</a>' if link_safe else ""
+    acq = c.raw_metadata.get("acquisition_url")
+    if acq and acq != c.link:
+        acq_safe = html.escape(str(acq))
+        link_html += f' <a href="{acq_safe}" target="_blank" style="color:#6fa;font-size:12px;">Get ↗</a>'
     buttons = _build_mark_buttons(n, c.artist, c.title, mark_by_number)
 
     player_col = f'<div class="player">{player}</div>' if player else ""

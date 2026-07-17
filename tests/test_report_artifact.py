@@ -173,3 +173,22 @@ def test_write_load_roundtrip_and_listing(tmp_path):
 
 def test_list_report_artifact_ids_empty_dir(tmp_path):
     assert list_report_artifact_ids(str(tmp_path)) == []
+
+
+def _payload_for(c):
+    return _build({"top_picks": [c]})["sections"][0]["tracks"][0]
+
+
+def test_track_payload_carries_free_gate_and_acquisition_url():
+    c = _candidate(source="soundcloud",
+                   raw_metadata={"free_gate": True, "free_download": True,
+                                 "acquisition_url": "https://hypeddit.com/dl/xyz"})
+    payload = _payload_for(c)
+    assert payload["free_gate"] is True
+    assert payload["acquisition_url"] == "https://hypeddit.com/dl/xyz"
+
+
+def test_track_payload_defaults_without_free_metadata():
+    payload = _payload_for(_candidate())
+    assert payload["free_gate"] is False
+    assert payload["acquisition_url"] is None

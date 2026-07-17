@@ -258,3 +258,15 @@ def test_path_format_mix_prep():
     with tempfile.TemporaryDirectory() as tmpdir:
         path = write_audition_page("x", tmpdir, "2026-W24-mix-prep-house")
         assert os.path.basename(path) == "audition_2026-W24-mix-prep-house.html"
+
+
+def _render_single(c):
+    return generate_audition_page({"top_picks": [c]}, "2026-W01", None, today=TODAY)
+
+
+def test_audition_gated_track_gets_get_anchor():
+    c = _c("Artist", "Gated Track", source="soundcloud",
+           raw_metadata={"free_gate": True, "free_download": True,
+                         "acquisition_url": "https://hypeddit.com/dl/xyz"})
+    html_out = _render_single(c)
+    assert 'href="https://hypeddit.com/dl/xyz"' in html_out and "Get ↗" in html_out

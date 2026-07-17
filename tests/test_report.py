@@ -591,3 +591,25 @@ def test_free_downloads_mode_header_and_single_section():
     assert "Mix Prep Report" not in text
     assert "## 🔺 Top Picks" not in text and "## 🎧 Deep Cuts" not in text
     assert "## 🆓 Free Downloads" in text
+
+
+def test_track_line_gated_free_dl_gets_get_link():
+    c = _c(title="Gated Boot", source="soundcloud",
+           raw_metadata={"free_gate": True, "free_download": True,
+                         "acquisition_url": "https://hypeddit.com/dl/xyz"})
+    text = generate_report({"free_downloads": [c]}, "TEST", {}, object(), today=TODAY)
+    assert "· 🔗 [Get](<https://hypeddit.com/dl/xyz>)" in text
+
+
+def test_track_line_native_free_dl_marker():
+    c = _c(title="Native Boot", source="soundcloud",
+           raw_metadata={"free_gate": False, "free_download": True,
+                         "acquisition_url": "https://soundcloud.com/x/y"})
+    text = generate_report({"free_downloads": [c]}, "TEST", {}, object(), today=TODAY)
+    assert "· ⬇️" in text and "[Get]" not in text
+
+
+def test_track_line_without_free_metadata_unchanged():
+    c = _c(title="Store Track")
+    text = generate_report({"top_picks": [c]}, "TEST", {}, object(), today=TODAY)
+    assert "⬇️" not in text and "🔗" not in text
