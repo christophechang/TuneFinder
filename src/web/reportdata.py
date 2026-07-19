@@ -109,6 +109,18 @@ def get_report_detail(settings, report_id: str) -> Optional[dict]:
     if not batch:
         return None
 
+    # Same append-only re-run problem resolve_feedback_target handles: a re-run
+    # appends a second batch under the same report_id, reusing track numbers.
+    # Collapse to the newest record per track slot so the degraded view mirrors
+    # a single run (numbered slot where available, else track identity for
+    # pre-v0.8.0 records that carry no track_no).
+    newest: dict = {}
+    for r in batch:
+        slot = r.track_no if r.track_no is not None else make_dedup_key(r.artist, r.title)
+        if slot not in newest or r.recommended_at > newest[slot].recommended_at:
+            newest[slot] = r
+    batch = list(newest.values())
+
     batch.sort(key=lambda r: (r.track_no is None, r.track_no or 0))
     tracks = []
     for i, r in enumerate(batch, start=1):
@@ -161,10 +173,17 @@ def resolve_feedback_target(settings, report_id: Optional[str], track_no: Option
         kind, _ = report_kind(report_id)
         records = weekly if kind == "weekly" else mix_prep
         history_name = "weekly" if kind == "weekly" else "mix-prep"
-        for r in records:
-            if r.report_id == report_id and r.track_no == track_no:
-                return r, history_name
-        raise LookupError(f"No track #{track_no} recorded for report {report_id!r}.")
+        # History is append-only: a re-run of the same week appends a second
+        # batch under the same report_id, reusing track numbers 1..N. The report
+        # artifact the SPA renders is the newest run, so resolve to the newest
+        # matching record — same tie-break as feedback._resolve_by_number.
+        # Without it a mark lands on the superseded track and never joins back
+        # onto the report detail (feedback reads as null after reload).
+        matches = [r for r in records if r.report_id == report_id and r.track_no == track_no]
+        if not matches:
+            raise LookupError(f"No track #{track_no} recorded for report {report_id!r}.")
+        matches.sort(key=lambda r: r.recommended_at, reverse=True)
+        return matches[0], history_name
 
     if selector:
         return resolve_selector(selector, weekly, mix_prep)

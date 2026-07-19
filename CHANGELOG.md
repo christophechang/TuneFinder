@@ -4,6 +4,13 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.16.1 — 2026-07-19
+
+### Fixed
+
+- **Track feedback survives a reload after a re-run week.** History is append-only, so re-running a week appends a second batch under the same report id, reusing track numbers 1..N. `POST /api/feedback` resolved `(report_id, track_no)` to the *first* matching history record — the superseded batch — so marks made from the SPA landed on the wrong track and never joined back onto `GET /api/reports/{id}`, which reported `feedback: null` after every reload. The web resolver now takes the newest matching record by `recommended_at`, the same tie-break the CLI `mark` selector already used. Marks recorded against the stale batch before this fix are misattributed and should be deleted.
+- **Degraded (artifact-less) report detail no longer interleaves re-run batches.** Reports reconstructed from history alone now collapse to the newest record per track slot, so a re-run week renders as a single run instead of showing every track number twice.
+
 ## v0.16.0 — 2026-07-17
 
 ### Run modes

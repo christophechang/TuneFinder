@@ -149,6 +149,31 @@ def test_report_detail_degraded_from_history(client):
     assert body["sections"][0]["tracks"][0]["artist"] == "Old Artist"
 
 
+def test_report_detail_degraded_collapses_rerun_batches(client):
+    """No artifact + a re-run week: history holds two batches under one
+    report_id reusing track numbers. The degraded view must show the newest run
+    once, not both batches interleaved.
+    """
+    tmp_path = client.tmp_path
+    weekly = json.loads((tmp_path / "recommendation_history.json").read_text())
+    for artist, title, at in (
+        ("Stale One", "Stale A", "2026-07-14T09:00:00+00:00"),
+        ("Fresh One", "Fresh A", "2026-07-16T09:00:00+00:00"),
+    ):
+        weekly.append(
+            {"artist": artist, "title": title, "link": "https://example.com/x", "source": "beatport",
+             "recommended_at": at, "report_id": "2026-W30", "track_no": 1,
+             "signal_codes": [], "genre_tags": [], "score": 1.0, "label": None},
+        )
+    (tmp_path / "recommendation_history.json").write_text(json.dumps(weekly))
+
+    detail = client.get("/api/reports/2026-W30", headers=AUTH).json()
+    assert detail["degraded"] is True
+    tracks = detail["sections"][0]["tracks"]
+    assert [t["artist"] for t in tracks] == ["Fresh One"]
+    assert detail["track_count"] == 1
+
+
 def test_report_detail_unknown_404(client):
     assert client.get("/api/reports/2020-W01", headers=AUTH).status_code == 404
 
@@ -173,6 +198,51 @@ def test_feedback_by_report_and_track_no(client):
     r2 = client.post("/api/feedback", headers=AUTH,
                      json={"outcome": "skip", "report_id": "2026-W27", "track_no": 1})
     assert r2.json()["previous_outcome"] == "bought"
+
+
+def test_feedback_after_rerun_resolves_latest_batch(client):
+    """A re-run appends a second batch under the same report_id; the artifact
+    the SPA renders is the newer one. Marking track #1 must resolve against the
+    newer batch, else the mark lands on the superseded track and read-back on
+    the report detail shows nothing.
+    """
+    tmp_path = client.tmp_path
+    weekly = json.loads((tmp_path / "recommendation_history.json").read_text())
+    # Stale batch first in file order (as append-only history stores it), then
+    # the re-run that overwrote the artifact.
+    weekly.append(
+        {"artist": "Stale Artist", "title": "Stale Track", "link": "https://example.com/s",
+         "source": "beatport", "recommended_at": "2026-07-14T09:00:00+00:00",
+         "report_id": "2026-W29", "track_no": 1, "signal_codes": [], "genre_tags": [], "score": 1.0,
+         "label": None},
+    )
+    weekly.append(
+        {"artist": "Fresh Artist", "title": "Fresh Track", "link": "https://example.com/f",
+         "source": "beatport", "recommended_at": "2026-07-16T09:00:00+00:00",
+         "report_id": "2026-W29", "track_no": 1, "signal_codes": [], "genre_tags": [], "score": 8.0,
+         "label": None},
+    )
+    (tmp_path / "recommendation_history.json").write_text(json.dumps(weekly))
+
+    fresh = Candidate(artist="Fresh Artist", title="Fresh Track", link="https://example.com/f",
+                      source="beatport", label=None, genre_tags=[], raw_metadata={})
+    fresh.score = 8.0
+    write_report_artifact(
+        build_report_artifact({"top_picks": [fresh]}, "2026-W29", "weekly", {},
+                              generated_at="2026-07-16T09:00:00+00:00"),
+        str(tmp_path),
+    )
+
+    r = client.post("/api/feedback", headers=AUTH,
+                    json={"outcome": "heard", "report_id": "2026-W29", "track_no": 1})
+    assert r.status_code == 200
+    assert r.json()["artist"] == "Fresh Artist"
+
+    detail = client.get("/api/reports/2026-W29", headers=AUTH).json()
+    track = detail["sections"][0]["tracks"][0]
+    assert track["artist"] == "Fresh Artist"
+    assert track["feedback"] is not None, "mark did not survive read-back"
+    assert track["feedback"]["outcome"] == "heard"
 
 
 def test_feedback_mix_prep_report(client):
