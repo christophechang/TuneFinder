@@ -15,7 +15,9 @@ from typing import Optional
 
 from src.pipeline.dedup import make_dedup_key
 from src.pipeline.feedback import FeedbackEntry, latest_marks, load_feedback
-from src.pipeline.history import load_history, load_mix_prep_history
+from src.pipeline.history import (
+    latest_run_records, load_history, load_mix_prep_history, newest_by_report_track,
+)
 from src.pipeline.report_artifact import list_report_artifact_ids, load_report_artifact
 
 
@@ -44,24 +46,29 @@ def list_reports(settings, kind: Optional[str] = None, limit: int = 50) -> list[
     artifact_ids = set(list_report_artifact_ids(data_dir))
     marks = _marks_by_history_key(data_dir)
 
-    groups: dict[str, dict] = {}
+    # Batch per report first: counts describe the tracks in the report, so
+    # superseded re-run batches must be collapsed before anything is counted.
+    batches: dict[str, tuple[str, list]] = {}
     for history_name, records in (("weekly", load_history(data_dir)),
                                   ("mix-prep", load_mix_prep_history(data_dir))):
         for r in records:
-            g = groups.setdefault(r.report_id, {
-                "report_id": r.report_id,
-                "kind": report_kind(r.report_id)[0],
-                "genre": report_kind(r.report_id)[1],
-                "generated_at": r.recommended_at,
-                "track_count": 0,
-                "marked_count": 0,
-                "has_artifact": r.report_id in artifact_ids,
-            })
-            g["track_count"] += 1
-            if r.recommended_at > (g["generated_at"] or ""):
-                g["generated_at"] = r.recommended_at
-            if (history_name, make_dedup_key(r.artist, r.title)) in marks:
-                g["marked_count"] += 1
+            batches.setdefault(r.report_id, (history_name, []))[1].append(r)
+
+    groups: dict[str, dict] = {}
+    for report_id, (history_name, records) in batches.items():
+        current = latest_run_records(records)
+        groups[report_id] = {
+            "report_id": report_id,
+            "kind": report_kind(report_id)[0],
+            "genre": report_kind(report_id)[1],
+            "generated_at": max((r.recommended_at for r in current), default=None),
+            "track_count": len(current),
+            "marked_count": sum(
+                1 for r in current
+                if (history_name, make_dedup_key(r.artist, r.title)) in marks
+            ),
+            "has_artifact": report_id in artifact_ids,
+        }
 
     summaries = sorted(groups.values(), key=lambda g: g["generated_at"] or "", reverse=True)
     if kind:
@@ -109,18 +116,8 @@ def get_report_detail(settings, report_id: str) -> Optional[dict]:
     if not batch:
         return None
 
-    # Same append-only re-run problem resolve_feedback_target handles: a re-run
-    # appends a second batch under the same report_id, reusing track numbers.
-    # Collapse to the newest record per track slot so the degraded view mirrors
-    # a single run (numbered slot where available, else track identity for
-    # pre-v0.8.0 records that carry no track_no).
-    newest: dict = {}
-    for r in batch:
-        slot = r.track_no if r.track_no is not None else make_dedup_key(r.artist, r.title)
-        if slot not in newest or r.recommended_at > newest[slot].recommended_at:
-            newest[slot] = r
-    batch = list(newest.values())
-
+    # Collapse re-run batches so the degraded view mirrors a single run.
+    batch = latest_run_records(batch)
     batch.sort(key=lambda r: (r.track_no is None, r.track_no or 0))
     tracks = []
     for i, r in enumerate(batch, start=1):
@@ -173,17 +170,13 @@ def resolve_feedback_target(settings, report_id: Optional[str], track_no: Option
         kind, _ = report_kind(report_id)
         records = weekly if kind == "weekly" else mix_prep
         history_name = "weekly" if kind == "weekly" else "mix-prep"
-        # History is append-only: a re-run of the same week appends a second
-        # batch under the same report_id, reusing track numbers 1..N. The report
-        # artifact the SPA renders is the newest run, so resolve to the newest
-        # matching record — same tie-break as feedback._resolve_by_number.
-        # Without it a mark lands on the superseded track and never joins back
-        # onto the report detail (feedback reads as null after reload).
-        matches = [r for r in records if r.report_id == report_id and r.track_no == track_no]
-        if not matches:
+        # Newest batch wins — see history.newest_by_report_track. Without it a
+        # mark lands on a superseded re-run's track and never joins back onto
+        # the report detail (feedback reads as null after reload).
+        match = newest_by_report_track(records, report_id, track_no)
+        if match is None:
             raise LookupError(f"No track #{track_no} recorded for report {report_id!r}.")
-        matches.sort(key=lambda r: r.recommended_at, reverse=True)
-        return matches[0], history_name
+        return match, history_name
 
     if selector:
         return resolve_selector(selector, weekly, mix_prep)

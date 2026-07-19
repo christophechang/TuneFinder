@@ -27,6 +27,14 @@ def _settings(tmp_path) -> Settings:
 
 def _seed_history(tmp_path):
     weekly = [
+        # Superseded batch: 2026-W27 was run once, then re-run. History is
+        # append-only so both batches live under the one report_id, reusing
+        # track numbers — the shape every consumer of a track number has to
+        # cope with. Seeded by default so tests inherit the realistic store
+        # rather than a one-run-per-report fiction.
+        {"artist": "Superseded", "title": "Dropped", "link": "https://example.com/z", "source": "beatport",
+         "recommended_at": "2026-07-03T09:00:00+00:00", "report_id": "2026-W27", "track_no": 1,
+         "signal_codes": [], "genre_tags": ["breaks"], "score": 4.0, "label": None},
         {"artist": "Sully", "title": "Alpha", "link": "https://example.com/a", "source": "beatport",
          "recommended_at": "2026-07-05T09:00:00+00:00", "report_id": "2026-W27", "track_no": 1,
          "signal_codes": ["known_artist"], "genre_tags": ["breaks"], "score": 7.5, "label": "Astrophonica"},
@@ -120,6 +128,29 @@ def test_reports_list_orders_and_flags(client):
     assert weekly["kind"] == "weekly" and weekly["track_count"] == 2 and weekly["has_artifact"] is True
     mp = reports[0]
     assert mp["kind"] == "mix-prep" and mp["genre"] == "dnb" and mp["has_artifact"] is False
+
+
+def test_reports_list_counts_ignore_superseded_batches(client):
+    """A re-run appends a second batch under one report_id. The summary counts
+    tracks in the report, not history rows, so they must not double.
+    """
+    tmp_path = client.tmp_path
+    weekly = json.loads((tmp_path / "recommendation_history.json").read_text())
+    for at in ("2026-07-14T09:00:00+00:00", "2026-07-16T09:00:00+00:00"):
+        weekly.append(
+            {"artist": "Rerun Artist", "title": "Rerun Track", "link": "", "source": "beatport",
+             "recommended_at": at, "report_id": "2026-W31", "track_no": 1,
+             "signal_codes": [], "genre_tags": [], "score": 1.0, "label": None},
+        )
+    (tmp_path / "recommendation_history.json").write_text(json.dumps(weekly))
+
+    client.post("/api/feedback", headers=AUTH,
+                json={"outcome": "liked", "report_id": "2026-W31", "track_no": 1})
+
+    summary = next(x for x in client.get("/api/reports", headers=AUTH).json()["reports"]
+                   if x["report_id"] == "2026-W31")
+    assert summary["track_count"] == 1
+    assert summary["marked_count"] == 1
 
 
 def test_reports_list_kind_filter(client):

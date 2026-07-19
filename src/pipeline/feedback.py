@@ -11,6 +11,7 @@ from typing import Optional
 
 from src.models import RecommendationRecord
 from src.pipeline.dedup import make_dedup_key, normalise_artist
+from src.pipeline.history import newest_by_report_track
 from src.pipeline.profile import _split_artists
 from src.pipeline.storage import atomic_write_json
 
@@ -129,16 +130,13 @@ def _resolve_by_number(
             "Use the \"Artist - Title\" form instead."
         )
 
-    matches = [r for r in latest_batch if r.track_no == track_no]
-    if not matches:
+    match = newest_by_report_track(latest_batch, latest_id, track_no)
+    if match is None:
         raise LookupError(
             f"No track #{track_no} in the latest report ({latest_id}). "
             "Check the report and try again."
         )
-
-    # Tie-break: latest recommended_at (same-week re-run)
-    matches.sort(key=lambda r: r.recommended_at, reverse=True)
-    return matches[0], "weekly"
+    return match, "weekly"
 
 
 def _resolve_by_string(

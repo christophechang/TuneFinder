@@ -4,6 +4,14 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+### Fixed
+
+- **Report list counts no longer double on a re-run week.** `GET /api/reports` counted history rows rather than tracks, so a week that had been run twice reported `track_count: 41` for a 23-track report, with `marked_count` inflated the same way. Summaries now collapse superseded batches before counting.
+
+### Internal
+
+- The "collapse superseded re-run batches" rule now lives once, in `history.latest_run_records` / `history.newest_by_report_track`, with the reasoning documented there. Both feedback resolvers and all three web report paths delegate to it — previously the rule was implemented independently in the CLI selector and missing entirely from the web resolver, which is how v0.16.1's bug arose. The web test fixture now seeds a re-run week by default so this shape is exercised by every test rather than only by tests written to look for it.
+
 ## v0.16.1 — 2026-07-19
 
 ### Fixed

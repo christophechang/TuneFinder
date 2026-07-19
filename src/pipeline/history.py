@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime, timezone
+from typing import Optional
 
 from src.logger import get_logger
 from src.models import RecommendationRecord
@@ -83,6 +84,56 @@ def append_records(new_records: list[RecommendationRecord], data_dir: str) -> No
     combined = existing + new_records
     save_history(combined, data_dir)
     logger.info(f"[history] Appended {len(new_records)} new records (total: {len(combined)})")
+
+
+# ---------------------------------------------------------------------------
+# Re-run batches
+#
+# History is append-only, so re-running a report appends a fresh batch under the
+# SAME report_id, reusing track numbers 1..N. A track number is therefore a
+# position within one run, not an identity — only the newest batch corresponds
+# to the report artifact a reader is looking at. Every consumer that interprets
+# a track number, or counts the tracks in a report, must collapse to the newest
+# batch first; these two helpers are the single shared implementation of that
+# rule (used by feedback selector resolution and the web report endpoints).
+# ---------------------------------------------------------------------------
+
+def _slot(record: RecommendationRecord):
+    """The track position a record occupies within its run.
+
+    Falls back to (artist, title) for pre-v0.8.0 records, which carry no
+    track_no — there the identity is the only slot available.
+    """
+    if record.track_no is not None:
+        return record.track_no
+    return (record.artist, record.title)
+
+
+def latest_run_records(records: list[RecommendationRecord]) -> list[RecommendationRecord]:
+    """One record per track slot — the newest by recommended_at.
+
+    `records` must already be filtered to a single report_id.
+    """
+    newest: dict = {}
+    for r in records:
+        slot = _slot(r)
+        if slot not in newest or r.recommended_at > newest[slot].recommended_at:
+            newest[slot] = r
+    return list(newest.values())
+
+
+def newest_by_report_track(
+    records: list[RecommendationRecord], report_id: str, track_no: int,
+) -> Optional[RecommendationRecord]:
+    """The record currently occupying track #track_no of report_id, or None.
+
+    Newest wins, so a mark placed by track number lands on the track the
+    current report actually shows rather than a superseded re-run's.
+    """
+    matches = [r for r in records if r.report_id == report_id and r.track_no == track_no]
+    if not matches:
+        return None
+    return max(matches, key=lambda r: r.recommended_at)
 
 
 # ---------------------------------------------------------------------------
