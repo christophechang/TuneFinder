@@ -4,6 +4,8 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.16.2 — 2026-07-19
+
 ### Fixed
 
 - **Report list counts no longer double on a re-run week.** `GET /api/reports` counted history rows rather than tracks, so a week that had been run twice reported `track_count: 41` for a 23-track report, with `marked_count` inflated the same way. Summaries now collapse superseded batches before counting.
