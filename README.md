@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/christophechang/TuneFinder)](https://github.com/christophechang/TuneFinder/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Your crates, your taste.** Monitors new releases across Beatport, Bandcamp, Volumo, and Mixupload, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
+> **Your crates, your taste.** Monitors new releases across Beatport, Bandcamp, Volumo, and SoundCloud, scores them against your actual mix history, and posts a curated report to Discord — every week, fully automated.
 
 > **Companion tool** — TuneFinder pairs with the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to read your published mix tracklist history and build a personal taste profile. The profile drives all scoring — without it, artist and label signals won't fire.
 
@@ -16,7 +16,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 ## How it works
 
 1. **Profile** — pulls your published mix tracklist catalogue from the [SoundCloud AI Mix Recommender API](https://github.com/christophechang/soundcloud-ai-mix-recommender-api) to build an artist taste profile and a known-track exclusion set
-2. **Fetch** — fetches new releases from Beatport (via the v4 API), Bandcamp, Volumo, Mixupload, and SoundCloud (official API, free-download/bootleg lane); Traxsource and Resident Advisor are available but disabled by default
+2. **Fetch** — fetches new releases from Beatport (via the v4 API), Bandcamp, Volumo, and SoundCloud (official API, free-download/bootleg lane); Traxsource, Resident Advisor and Mixupload are available but disabled by default
 3. **Dedup** — normalises and deduplicates across sources, merging cross-source matches; embed metadata (`beatport_id`, `bandcamp_album_id`, `bpm`, `keysign`, etc.) is backfilled from merged-away duplicates so cross-source tracks retain all embed ids. By default all version suffixes collapse (`Title (Original Mix)` ≡ `Title`), so owning/recommending one version suppresses the rest. Enabling `pipeline.remix_aware_identity` (see Configuration) keeps generic versions (Original/Extended/Radio) merging but gives a *named* remix its own identity, so a "(Calibre Remix)" is no longer suppressed just because you own the original
 4. **Rank** — scores candidates against your profile using weighted signals (known artist, recurring artist, label match, cross-source credibility, genre match, freshness, chart position, source discovery bonus). Free-download sources (`pipeline.free_download_sources`, default SoundCloud) route to an exclusive **🆓 Free Downloads** section in both weekly and mix-prep reports — bootlegs never compete with store releases for slots, and vice versa
 5. **Report** — deterministic renderer: reasons composed from catalog facts (play count, prior titles, chart position, label/artist data) in `src/pipeline/reasons.py`; Discord-formatted report built in `src/pipeline/report.py`
@@ -44,7 +44,7 @@ TuneFinder ships a web application — [tunefinder-web](https://github.com/chris
 | Beatport | Genre top-100 chart (v4 API) | ✅ |
 | Bandcamp | `discover_web` JSON API | ✅ |
 | Volumo | REST API (`/api/v1/albums`) | ✅ (no preview URLs in API — rows are link-only in audition page) |
-| Mixupload | HTML scrape (chart + genre pages) | ✅ |
+| Mixupload | HTML scrape (chart + genre pages) | disabled (chart pages no longer server-render their track lists) |
 | SoundCloud | Official API track search (client_credentials) | ✅ (free-DL/bootleg lane — `downloadable_only` on) |
 | Traxsource | HTML scrape | disabled (human verification challenge) |
 | Resident Advisor | `apolloState` JSON | disabled by default |
@@ -266,7 +266,7 @@ Pool candidates injected into mix-prep are exempt from the release-date window (
 
 Each internal genre maps to one or more genre feeds on each source. Sources not listed for a genre don't contribute to that genre's results.
 
-| Genre | Beatport | Traxsource | Bandcamp | Mixupload | Volumo | SoundCloud ² |
+| Genre | Beatport | Traxsource | Bandcamp | Mixupload ³ | Volumo | SoundCloud ² |
 |---|---|---|---|---|---|---|
 | `house` | house · melodic-house-techno · minimal-deep-tech · deep-house · tech-house | house · deep-house · soulful-house · tech-house · classic-house · minimal-deep-tech · nu-disco/indie-dance | house | style/house · style-part/deep-house · style-part/tech-house · style-part/progressive-house | house · deep-house · tech-house · soulful-house · funky-house · melodic-house-techno · progressive-house · afro-house | house · deep house · tech house |
 | `dnb` | drum-bass | drum-and-bass | drum-and-bass | style/dnb | drum-and-bass | drum & bass |
@@ -282,6 +282,8 @@ Each internal genre maps to one or more genre feeds on each source. Sources not 
 ¹ Beatport's breaks and uk-bass share a single combined feed. Per-track genre slugs from the API data are used to split them into the correct internal tags.
 
 ² SoundCloud genre/tag values are uploader folksonomy, not a fixed taxonomy — the values shown are search filters (`sources.soundcloud.targets` in `config/settings.yaml`), tunable without code changes. With `downloadable_only: true` (the default) this source only surfaces tracks whose uploader enabled downloads — the free-DL/bootleg lane.
+
+³ Mixupload is disabled (see the source table above) — its chart targets are listed for reference only and contribute nothing until the source is re-enabled.
 
 ## Setup
 
@@ -452,7 +454,7 @@ src/
     beatport_auth.py # Beatport OAuth (login + PKCE + token cache)
     bandcamp.py      # Bandcamp discover_web API
     volumo.py        # Volumo REST API (/api/v1/albums)
-    mixupload.py     # Mixupload HTML scrape (chart + genre pages)
+    mixupload.py     # Mixupload HTML scrape (chart + genre pages) — disabled
     soundcloud.py    # SoundCloud official API search (free-DL/bootleg lane)
     traxsource.py    # Traxsource HTML scrape (currently disabled by default)
     ra.py            # Resident Advisor apolloState

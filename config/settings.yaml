@@ -137,7 +137,16 @@ sources:
     releases_url: "https://ra.co/music/releases"
 
   mixupload:
-    enabled: true
+    # Retired 2026-08-10. The chart pages below stopped server-rendering their track
+    # lists between the 2026-07-26 and 2026-08-02 runs — they now build the list
+    # client-side, so the scrape returns 0 items and every `chart:` target is dead.
+    # Genre pages (/genres/{slug}/tracks/page{n}) still render server-side and could
+    # replace them, but the source never earned its keep: across 500 pooled
+    # candidates and 364 history records it produced no recommendations, and genre
+    # pages carry no chart_position, so it would score lower still. Left in place
+    # rather than deleted — re-enable by restoring `enabled: true` and repointing
+    # targets at genre pages.
+    enabled: false
     targets:
       - tf_tag: house
         chart: style/house
