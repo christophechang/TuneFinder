@@ -4,6 +4,8 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.16.3 — 2026-08-10
+
 ### Changed
 
 - **Mixupload is retired as a source** (`sources.mixupload.enabled: false`). Its chart pages stopped server-rendering their track lists somewhere between the 2026-07-26 and 2026-08-02 runs — the markup now builds client-side, so every `chart:` target scraped 0 items and the source fell 107 → 5 → 0 across three runs. Anomaly detection caught both drops and posted to `#alerts` as designed. Genre pages (`/genres/{slug}/tracks/page{n}`) do still render server-side and could have replaced the charts, but the source had not earned the maintenance: across 500 pooled candidates and 364 history records it had produced no recommendations, and genre pages carry no `chart_position`, so it would have scored lower again. The fetcher, its tests, and the scoring weights are left in place — re-enabling is a config change.
