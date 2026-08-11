@@ -43,7 +43,7 @@ TuneFinder ships a web application — [tunefinder-web](https://github.com/chris
 |---|---|---|
 | Beatport | Genre top-100 chart (v4 API) | ✅ |
 | Bandcamp | `discover_web` JSON API | ✅ |
-| Volumo | REST API (`/api/v1/albums`) | ✅ (no preview URLs in API — rows are link-only in audition page) |
+| Volumo | REST API (`/api/v1/albums`) | ✅ (no widget embed — audition page rows are link-only; the SPA plays the prelisten stream inline) |
 | Mixupload | HTML scrape (chart + genre pages) | disabled (chart pages no longer server-render their track lists) |
 | SoundCloud | Official API track search (client_credentials) | ✅ (free-DL/bootleg lane — `downloadable_only` on) |
 | Traxsource | HTML scrape | disabled (human verification challenge) |

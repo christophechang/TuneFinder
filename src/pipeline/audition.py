@@ -11,7 +11,10 @@ Player precedence per track:
   4. Link-only row
 
 Step 0 findings:
-  - Volumo: no preview URL field found → rows are link-only (no audio element).
+  - Volumo: no widget/iframe embed exists, so rows here stay link-only. Volumo
+    does serve a prelisten stream keyed by track id; the SPA plays it inline
+    (report artifacts carry a {"type": "volumo", "track_id": …} embed), but this
+    page has no audio element and is deliberately left as-is.
   - Bandcamp: embed id is in `item_id` field (captured as bandcamp_album_id).
     Embed URL: https://bandcamp.com/EmbeddedPlayer/album={id}/size=small/...
   - Beatport: https://embed.beatport.com/?id={id}&type=track works.
