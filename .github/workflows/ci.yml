@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  # The suite enforces the SoundCloud lookback window against date.today(), so a
+  # fixture can age out of it and turn the suite red with no commit behind it —
+  # which is exactly how 20 tests broke in v0.16.3. Run nightly so date-dependent
+  # rot surfaces on the day it happens rather than whenever someone next pushes.
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          # Matches the production box (3.11.15). The code uses `str | None`
+          # unions, so anything below 3.10 fails at import.
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      # No secrets and no network: every outbound call in the suite is mocked,
+      # and nothing here loads .env. `check-config` is deliberately absent — it
+      # validates real Discord/API credentials and stays a local release step.
+      - run: pytest tests/ -q

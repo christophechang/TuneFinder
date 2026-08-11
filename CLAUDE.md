@@ -19,6 +19,8 @@ Key paths:
 
 Validation: `./venv/bin/python -m tunefinder check-config` first. Run tests with `./venv/bin/pytest tests/ -v`. Use `--dry-run` for pipeline changes. New behavior should ship with tests. Never post live Discord messages unless explicitly asked. If validation is blocked by missing credentials or side-effect risk, say so.
 
+CI (`.github/workflows/ci.yml`) runs `pytest` on pushes and PRs to `main`/`develop`, on Python 3.11 to match production, plus nightly at 06:00 UTC — the suite has date-dependent fixtures that can rot with no commit behind them. It does **not** run `check-config`: that needs real credentials and stays a local pre-release step. Releases merge `--ff-only` locally rather than through a PR, so CI reports on the resulting push rather than gating the merge — check it after a release, not before.
+
 If a change affects commands, config keys, or operator workflow, update `README.md` in the same pass.
 
 ## Releasing a version
