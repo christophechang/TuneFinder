@@ -13,6 +13,15 @@ from src.fetchers import soundcloud
 # Helpers
 # ---------------------------------------------------------------------------
 
+# fetch() enforces the lookback window client-side (the API ignores
+# created_at[from]), so a fixture dated outside it is dropped and every
+# assertion downstream sees an empty list. Absolute dates therefore rot the
+# suite the moment they age past lookback_days — keep fixture dates relative.
+_RECENT = date.today() - timedelta(days=3)
+_RECENT_ISO = _RECENT.isoformat()
+_RECENT_CREATED_AT = f"{_RECENT_ISO}T07:00:00Z"
+
+
 def _make_settings(tmp_path, enabled=True, targets=None, downloadable_only=True,
                    lookback_days=28, limit=50, client_id="cid", client_secret="csec"):
     s = MagicMock()
@@ -32,7 +41,7 @@ def _make_settings(tmp_path, enabled=True, targets=None, downloadable_only=True,
 
 
 def _track(track_id=123456789, title="Test Track (Bootleg)", username="Test DJ",
-           downloadable=True, created_at="2026-07-10T07:00:00Z", label_name="Test Label"):
+           downloadable=True, created_at=_RECENT_CREATED_AT, label_name="Test Label"):
     return {
         "id": track_id,
         "urn": f"soundcloud:tracks:{track_id}",
@@ -104,7 +113,7 @@ def test_fetch_returns_source_items(tmp_path):
     assert item.title == "Test Track (Bootleg)"
     assert item.link == "https://soundcloud.com/test-dj/track-123456789"
     assert item.label == "Test Label"
-    assert item.release_date == "2026-07-10"
+    assert item.release_date == _RECENT_ISO
     assert item.genre_tags == ["dnb"]
 
 
@@ -127,12 +136,12 @@ def test_fetch_raw_metadata_fields(tmp_path):
 
 def test_release_date_normalises_legacy_format(tmp_path):
     settings = _make_settings(tmp_path)
-    track = _track(created_at="2026/07/10 07:00:00 +0000")
+    track = _track(created_at=f"{_RECENT.strftime('%Y/%m/%d')} 07:00:00 +0000")
     with _patch_token(), patch("src.fetchers.soundcloud._get_json") as mock_get:
         mock_get.return_value = _page([track])
         items = soundcloud.fetch(settings)
 
-    assert items[0].release_date == "2026-07-10"
+    assert items[0].release_date == _RECENT_ISO
 
 
 def test_link_strips_tracking_query_params(tmp_path):
@@ -409,7 +418,7 @@ def test_parse_extracts_bpm_key_reposts_and_release_fields(tmp_path):
     assert md["reposts_count"] == 33
     assert (md["release_year"], md["release_month"], md["release_day"]) == (2005, 6, 1)
     # release_* are display-only stash — the pipeline release date stays upload-derived
-    assert items[0].release_date == "2026-07-10"
+    assert items[0].release_date == _RECENT_ISO
 
 
 def test_parse_prefers_metadata_artist_over_username(tmp_path):
