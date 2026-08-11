@@ -4,6 +4,16 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.17.0 — 2026-08-11
+
+### Added
+
+- **Volumo tracks now carry a player embed** (`{"type": "volumo", "track_id": N}`). Volumo publishes no widget and refuses framing, so its rows had always been link-only — the one source you had to leave the app to hear. It does serve a prelisten stream keyed by track id, which the SPA plays inline (tunefinder-web v1.8.0). The branch keys off `raw_metadata["volumo_track_id"]` rather than `c.source`, so a track that a cross-source merge awarded to another store still previews, and it sits last in the precedence chain so no track changes the embed it already had. The audition page keeps link-only rows: it has no audio element, and giving it one would put a network dependency in a renderer that is deliberately pure.
+
+### Fixed
+
+- **The SoundCloud test suite no longer rots with the calendar.** `fetch()` enforces the lookback window client-side because the API ignores `created_at[from]`, and the fixtures pinned `created_at` to an absolute date. Once that date aged past the default 28-day window every fixture track was filtered out, `fetch()` returned an empty list, and 20 tests began failing on 2026-08-08 with no code change — v0.16.3 shipped green and went red three days later. Fixture dates are now derived from `date.today()`. No production code was involved; `soundcloud.py` is the only fetcher that filters on `created_from`.
+
 ## v0.16.3 — 2026-08-10
 
 ### Changed
