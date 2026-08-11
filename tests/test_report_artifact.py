@@ -96,6 +96,35 @@ def test_build_artifact_beatport_embed_fallback():
     assert t["embed"] == {"type": "beatport", "track_id": 999}
 
 
+def test_build_artifact_volumo_embed_from_track_id():
+    sections = {"top_picks": [_candidate(source="volumo",
+                                         raw_metadata={"volumo_track_id": 6329388})]}
+    t = _build(sections)["sections"][0]["tracks"][0]
+    assert t["embed"] == {"type": "volumo", "track_id": 6329388}
+
+
+def test_build_artifact_volumo_embed_survives_cross_source_merge():
+    """The id is backfilled by dedup onto a winner from another source, so the
+    embed must key off the id, not c.source."""
+    sections = {"top_picks": [_candidate(source="beatport",
+                                         raw_metadata={"volumo_track_id": 6329388})]}
+    t = _build(sections)["sections"][0]["tracks"][0]
+    assert t["embed"] == {"type": "volumo", "track_id": 6329388}
+
+
+def test_build_artifact_volumo_does_not_displace_existing_embeds():
+    """Volumo is last in the precedence chain — adding it must not change what a
+    track carrying another store's id already got."""
+    for md, expected in (
+        ({"bandcamp_album_id": 111, "volumo_track_id": 6329388},
+         {"type": "bandcamp", "album_id": 111}),
+        ({"beatport_id": 999, "volumo_track_id": 6329388},
+         {"type": "beatport", "track_id": 999}),
+    ):
+        sections = {"top_picks": [_candidate(raw_metadata=md)]}
+        assert _build(sections)["sections"][0]["tracks"][0]["embed"] == expected
+
+
 def test_build_artifact_no_embed_when_no_ids():
     t = _build()["sections"][0]["tracks"][0]
     assert t["embed"] is None

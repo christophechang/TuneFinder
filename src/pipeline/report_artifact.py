@@ -49,6 +49,14 @@ def _embed(c: Candidate) -> Optional[dict]:
     if c.source == "soundcloud" and c.link:
         # SoundCloud's widget embeds from the bare track permalink — no id needed.
         return {"type": "soundcloud", "url": c.link}
+    volumo_id = c.raw_metadata.get("volumo_track_id")
+    if volumo_id and isinstance(volumo_id, int):
+        # Volumo publishes no widget; the SPA plays its prelisten stream from the
+        # track id. Keyed off the id rather than c.source so a cross-source merge
+        # that another store won still previews (the id survives via
+        # dedup._MERGE_BACKFILL_KEYS). Last in the chain so no existing track
+        # changes the embed it already had.
+        return {"type": "volumo", "track_id": volumo_id}
     return None
 
 
