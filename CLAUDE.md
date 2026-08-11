@@ -41,3 +41,31 @@ GitHub release → back to `develop`). Repo specifics:
   `launchctl kickstart -k gui/$(id -u)/com.openclaw.tunefinder-web` (gui-domain LaunchAgent, no sudo).
 - Health check before reporting done (run on the prod box via the same SSH session — the service
   binds locally): `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8420/api/health` → expect `200`.
+- If the change touched `src/web/schemas.py`, confirm the deployed spec agrees before reporting done:
+  `curl -s https://tunefinder.changsta.com/openapi.json` and check the field you added is present.
+
+### Changes that span this repo and tunefinder-web
+
+The same LaunchAgent serves this API and the SPA's `dist/`, but the two repos release separately.
+When a change needs both (a new API field, a new `Embed` type, anything the SPA's
+`npm run generate-types` consumes):
+
+- **Ship tunefinder-web first, this repo second.** A stale SPA against a new backend can render
+  wrongly — a new `Embed` type, for instance, makes the old bundle draw an empty player slot,
+  because its `PlayerEmbed` returns `null` for types it doesn't know. The reverse is merely inert.
+- The SPA regenerates its types from a *locally* running backend on this branch
+  (`TUNEFINDER_WEB_INSECURE=1 ./venv/bin/python -m tunefinder serve`, then `npm run generate-types`
+  there). `TUNEFINDER_WEB_INSECURE=1` binds 127.0.0.1 only and avoids needing the production bearer.
+- Adding a member to an existing `Literal` is additive and safe: persisted artifacts holding only
+  the older values still validate.
+
+### Pipeline changes do not touch existing reports
+
+`build_report_artifact` is pure and runs once per pipeline run; its output is frozen into
+`data/reports/report_*.json`, and `src/web/reportdata.py` replays those files verbatim. **Changing
+how `_embed`, `signals` or `reason` are built has no effect on reports that already exist** — only
+on ones generated afterwards.
+
+Expect "deployed, but the reports look the same" and check the stored artifact before debugging
+anything. Seeing the change means a fresh pipeline run, which does live fetching and can post to
+Discord — that is the operator's decision, never an implicit part of a deploy.
