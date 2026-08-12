@@ -1580,3 +1580,50 @@ def test_skip_penalty_matches_split_collaborator_part():
     sigs = [s for s in c.signals if s.code == "skipped_artist"]
     assert len(sigs) == 1
     assert sigs[0].explanation == "You've skipped Kasia recently."
+
+
+# ---------------------------------------------------------------------------
+# Positive feedback signals (feedback loop spec, Slice A)
+# ---------------------------------------------------------------------------
+
+from src.pipeline.dedup import normalise_artist
+
+
+def test_liked_artist_signal_fires_and_caps():
+    c = Candidate(artist="Sully", title="New One", link="", source="beatport")
+    _score(c, {}, set(), {}, set(),
+           positive_artist_strengths={normalise_artist("Sully"): 6.0})
+    assert any(s.code == "liked_artist" for s in c.signals)
+    # 0.75 * 6.0 = 4.5 → capped at liked_artist_cap 3.0
+    assert c.score == 3.0
+    assert c.familiarity_score == 3.0
+
+
+def test_liked_artist_absent_without_strengths():
+    c = Candidate(artist="Sully", title="New One", link="", source="beatport")
+    _score(c, {}, set(), {}, set())
+    assert not any(s.code == "liked_artist" for s in c.signals)
+
+
+def test_liked_artist_matches_collaboration_part():
+    c = Candidate(artist="Sully & Kasia", title="T", link="", source="beatport")
+    _score(c, {}, set(), {}, set(),
+           positive_artist_strengths={normalise_artist("Kasia"): 2.0})
+    assert any(s.code == "liked_artist" for s in c.signals)
+    assert c.score == 1.5  # 0.75 * 2.0
+
+
+def test_liked_label_signal_flat_boost():
+    c = Candidate(artist="Unknown", title="T", link="", source="beatport", label="Astrophonica")
+    _score(c, {}, set(), {}, set(),
+           positive_label_strengths={"astrophonica": 2.0})
+    assert any(s.code == "liked_label" for s in c.signals)
+    assert c.score == 0.5
+    assert c.discovery_score == 0.5
+
+
+def test_liked_label_absent_when_label_not_positive():
+    c = Candidate(artist="Unknown", title="T", link="", source="beatport", label="Other")
+    _score(c, {}, set(), {}, set(),
+           positive_label_strengths={"astrophonica": 2.0})
+    assert not any(s.code == "liked_label" for s in c.signals)

@@ -74,6 +74,11 @@ class ScoringWeights:
     w_skipped_artist: float = 1.0        # penalty subtracted (once, from the total score only) when a matched artist is in the skip set
     skipped_artist_min_skips: int = 2    # latest-mark 'skip' outcomes (zero positives) an artist needs before the penalty applies — see src/pipeline/feedback.skipped_artists
 
+    # --- Positive feedback signals (feedback loop spec, Slice A) ---
+    w_liked_artist: float = 0.75     # × positive strength (bought=2/liked=1, capped), familiarity axis
+    liked_artist_cap: float = 3.0    # cap on the liked_artist contribution
+    w_liked_label: float = 0.5       # flat boost when the label carries positive marks, discovery axis
+
 
 _GENRE_AUGMENT_MIN_ARTISTS = 3
 
@@ -267,6 +272,8 @@ def _score(
     aliases: dict[str, str] | None = None,
     scene_data: tuple[dict[str, str], dict[str, int]] | None = None,
     skip_penalty_artists: set[str] | None = None,
+    positive_artist_strengths: dict[str, float] | None = None,
+    positive_label_strengths: dict[str, float] | None = None,
 ) -> None:
     """Mutate candidate in place: assign signals and total score.
 
@@ -278,6 +285,11 @@ def _score(
     skip_penalty_artists: normalised artist names (dedup.normalise_artist) from
     `feedback.skipped_artists` (issue #11) — None/empty disables the
     `skipped_artist` penalty entirely (backwards-compatible default).
+
+    positive_artist_strengths / positive_label_strengths: from
+    `feedback.positive_artists` / `feedback.positive_labels` (feedback loop
+    spec, Slice A) — None/empty disables the liked_artist / liked_label
+    signals entirely (backwards-compatible default).
     """
     if weights is None:
         weights = ScoringWeights()
@@ -385,6 +397,39 @@ def _score(
             c.signals.append(RecommendationSignal(
                 code="skipped_artist",
                 explanation=f"You've skipped {skip_name} recently.",
+            ))
+
+    # --- Positive feedback signals (feedback loop spec, Slice A) ---
+    # liked_artist mirrors skipped_artist in reverse: derived from latest marks
+    # (feedback.positive_artists), mutually exclusive with the skip penalty at
+    # the derivation level (an artist with any latest-mark skip gets no
+    # strength). Familiarity axis — direct evidence you like this artist.
+    # Deliberately NOT auto-tuned (Slice B allowlist).
+    if positive_artist_strengths:
+        liked_name = None
+        liked_strength = 0.0
+        for part in artist_parts:
+            s = positive_artist_strengths.get(normalise_artist(part), 0.0)
+            if s > liked_strength:
+                liked_strength = s
+                liked_name = part.strip()
+        if liked_name is not None:
+            bonus = min(weights.w_liked_artist * liked_strength, weights.liked_artist_cap)
+            score += bonus
+            familiarity += bonus
+            c.signals.append(RecommendationSignal(
+                code="liked_artist",
+                explanation=f"You've liked or bought {liked_name} from past reports.",
+            ))
+
+    # liked_label — flat nudge when the label itself carries positive marks.
+    if positive_label_strengths and c.label:
+        if c.label.lower().strip() in positive_label_strengths:
+            score += weights.w_liked_label
+            discovery += weights.w_liked_label
+            c.signals.append(RecommendationSignal(
+                code="liked_label",
+                explanation=f"{c.label} — you've liked or bought tracks on this label.",
             ))
 
     # --- Label signal (discovery axis) ---
@@ -751,6 +796,8 @@ def rank_candidates(
     genre_affinity: dict[str, float] | None = None,
     label_memory: tuple[dict[str, int], dict[str, list[str]]] | None = None,
     skip_penalty_artists: set[str] | None = None,
+    positive_artist_strengths: dict[str, float] | None = None,
+    positive_label_strengths: dict[str, float] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score all candidates, assign signals, sort, and split into report sections.
@@ -797,7 +844,9 @@ def rank_candidates(
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_penalty_artists)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_penalty_artists,
+               positive_artist_strengths=positive_artist_strengths,
+               positive_label_strengths=positive_label_strengths)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -889,6 +938,8 @@ def rank_candidates_mix_prep(
     demoted_keys: set[str] | None = None,
     skip_penalty_artists: set[str] | None = None,
     free_downloads_count: int | None = None,
+    positive_artist_strengths: dict[str, float] | None = None,
+    positive_label_strengths: dict[str, float] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score and section candidates for a mix-prep run.
@@ -924,7 +975,9 @@ def rank_candidates_mix_prep(
     recent_artists = recent_recommended_artists(settings.data_dir, weeks=weights.recency_weeks)
 
     for c in candidates:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_penalty_artists)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_penalty_artists,
+               positive_artist_strengths=positive_artist_strengths,
+               positive_label_strengths=positive_label_strengths)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
