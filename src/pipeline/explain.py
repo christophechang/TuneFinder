@@ -68,6 +68,18 @@ def explain_track(selector: str, settings) -> str:
     lines.append(f"Dedup key: {target_key!r}")
     lines.append("")
 
+    # Learned multipliers (feedback loop spec, Slice B) — read-only, applied
+    # to scoring below so explain matches an actual run.
+    from src.pipeline.learning import load_learned_weights, signal_multipliers
+    learned_mults = signal_multipliers(load_learned_weights(settings.data_dir))
+    if learned_mults:
+        lines.append("Learned multipliers (data/learned_weights.json):")
+        for code, m in sorted(learned_mults.items()):
+            lines.append(f"  {code} ×{m:.2f}")
+    else:
+        lines.append("Learned multipliers: none (baseline weights)")
+    lines.append("")
+
     # Load offline data
     source_items = load_source_items(settings.data_dir)
     feedback_entries = load_feedback(settings.data_dir)
@@ -237,7 +249,8 @@ def explain_track(selector: str, settings) -> str:
     for c in all_scored:
         _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_set,
                positive_artist_strengths=positive_strengths,
-               positive_label_strengths=label_strengths)
+               positive_label_strengths=label_strengths,
+               signal_multipliers=learned_mults)
 
     ranked = sorted(all_scored, key=lambda c: c.score, reverse=True)
 
@@ -253,7 +266,8 @@ def explain_track(selector: str, settings) -> str:
             hyp.score = 0.0
             _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_set,
                    positive_artist_strengths=positive_strengths,
-                   positive_label_strengths=label_strengths)
+                   positive_label_strengths=label_strengths,
+                   signal_multipliers=learned_mults)
             target_scored = hyp
             hypothetical = True
         else:

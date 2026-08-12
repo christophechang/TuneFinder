@@ -301,17 +301,36 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
         positive_strengths = positive_artists(feedback_entries)
         mix_prep_history = load_mix_prep_history(settings.data_dir)
         label_strengths = positive_labels(feedback_entries, history, mix_prep_history)
+
+        # Auto-tuning (feedback loop spec, Slice B) — one convergent update per
+        # weekly run from all marks to date, then applied to this run's scoring.
+        # Dry runs compute and apply but never persist.
+        from src.pipeline.feedback import tune_data
+        from src.pipeline.learning import (
+            load_learned_weights, save_learned_weights, signal_multipliers,
+            update_learned_weights,
+        )
+        now_iso = datetime.now(timezone.utc).isoformat()
+        learned = load_learned_weights(settings.data_dir)
+        tune = tune_data(history, mix_prep_history, feedback_entries)
+        learned, adjustments = update_learned_weights(learned, tune, now_iso)
+        if not dry_run:
+            save_learned_weights(learned, settings.data_dir)
+        multipliers = signal_multipliers(learned)
+        for line in adjustments:
+            logger.info(f"[learning] {line}")
+
         sections, label_artists = rank_candidates(
             candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
             label_memory=label_memory, skip_penalty_artists=skip_set,
             positive_artist_strengths=positive_strengths,
             positive_label_strengths=label_strengths,
+            signal_multipliers=multipliers,
         )
         aliases = settings.artist_aliases()
 
         # 5b. Update label affinity store from this run's label_seed (live runs only —
         # a dry-run must not persist state it didn't actually recommend from).
-        now_iso = datetime.now(timezone.utc).isoformat()
         if not dry_run:
             profiles_lower = {k.lower(): v for k, v in profiles.items()}
             label_store = update_label_affinity(label_store, label_seed, profiles_lower, aliases, now_iso)
@@ -413,7 +432,8 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
             f"{after_known} after known filter → {after_history} after history → "
             f"{after_release_date} after {date_filter_note}\n"
             f"Pool: {len(pool_injected)} injected, {len(new_pool)} total (cap {POOL_CAP})\n"
-            f"Recommended: {len(new_records)} tracks"
+            f"Recommended: {len(new_records)} tracks\n"
+            + ("Learning: " + "; ".join(adjustments) if adjustments else "Learning: no adjustments")
         )
         if not dry_run:
             discord.post_log(log_msg)
@@ -597,12 +617,17 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
         positive_strengths = positive_artists(feedback_entries)
         weekly_history = load_history(settings.data_dir)
         label_strengths = positive_labels(feedback_entries, weekly_history, mix_prep_history)
+        # Learned multipliers (Slice B) — applied read-only; only the WEEKLY
+        # run updates learned_weights.json.
+        from src.pipeline.learning import load_learned_weights, signal_multipliers
+        multipliers = signal_multipliers(load_learned_weights(settings.data_dir))
         sections, label_artists = rank_candidates_mix_prep(
             candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
             label_memory=label_memory, demoted_keys=demoted_keys, skip_penalty_artists=skip_set,
             free_downloads_count=settings.pipeline_free_downloads_mode_count if free_only else None,
             positive_artist_strengths=positive_strengths,
             positive_label_strengths=label_strengths,
+            signal_multipliers=multipliers,
         )
         aliases = settings.artist_aliases()
 

@@ -347,3 +347,76 @@ def test_weekly_run_applies_liked_artist_signal(tmp_path):
         for s in t["signals"]
     }
     assert "liked_artist" in codes
+
+
+# ---------------------------------------------------------------------------
+# Auto-tuning wiring (feedback loop spec, Slice B)
+# ---------------------------------------------------------------------------
+
+def _seed_learning_data(data_dir):
+    """20 weekly records: 10 label_match (all liked) + 10 cross_source (all skip).
+    baseline = 10/20 = 0.5; label_match lift = 2.0; cross_source lift = 0."""
+    from src.models import RecommendationRecord
+    from src.pipeline.history import append_records
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key
+
+    records, entries = [], []
+    for i in range(10):
+        records.append(RecommendationRecord(
+            artist=f"LmArtist{i}", title=f"L{i}", link="", source="beatport",
+            recommended_at="2026-07-01T00:00:00+00:00", report_id="2026-W27",
+            track_no=i + 1, signal_codes=["label_match"], genre_tags=["breaks"],
+        ))
+        entries.append(FeedbackEntry(
+            key=make_dedup_key(f"LmArtist{i}", f"L{i}"), artist=f"LmArtist{i}", title=f"L{i}",
+            outcome="liked", marked_at="2026-07-02T00:00:00+00:00",
+            report_id="2026-W27", track_no=i + 1, history="weekly",
+        ))
+    for i in range(10):
+        records.append(RecommendationRecord(
+            artist=f"CsArtist{i}", title=f"X{i}", link="", source="beatport",
+            recommended_at="2026-07-01T00:00:00+00:00", report_id="2026-W27",
+            track_no=i + 11, signal_codes=["cross_source"], genre_tags=["breaks"],
+        ))
+        entries.append(FeedbackEntry(
+            key=make_dedup_key(f"CsArtist{i}", f"X{i}"), artist=f"CsArtist{i}", title=f"X{i}",
+            outcome="skip", marked_at="2026-07-02T00:00:00+00:00",
+            report_id="2026-W27", track_no=i + 11, history="weekly",
+        ))
+    append_records(records, data_dir)
+    for e in entries:
+        append_feedback(e, data_dir)
+
+
+def test_weekly_run_updates_learned_weights(tmp_path):
+    import json as _json
+    _seed_learning_data(str(tmp_path))
+    settings = _settings(str(tmp_path))
+    _patched(run_weekly, settings, WeeklyRunOptions(dry_run=False))
+
+    path = tmp_path / "learned_weights.json"
+    assert path.exists()
+    learned = _json.loads(path.read_text())
+    assert learned["label_match"]["multiplier"] == pytest.approx(1.2)
+    assert learned["cross_source"]["multiplier"] == pytest.approx(0.85)
+
+
+def test_dry_run_never_writes_learned_weights(tmp_path):
+    _seed_learning_data(str(tmp_path))
+    settings = _settings(str(tmp_path))
+    _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
+    assert not (tmp_path / "learned_weights.json").exists()
+
+
+def test_mix_prep_applies_but_never_updates(tmp_path):
+    import json as _json
+    _seed_learning_data(str(tmp_path))
+    original = {"label_match": {"multiplier": 2.0, "lift": 2.0, "samples": 20,
+                                "updated_at": "2026-08-01T00:00:00+00:00"}}
+    (tmp_path / "learned_weights.json").write_text(_json.dumps(original))
+
+    settings = _settings(str(tmp_path))
+    _patched(run_mix_prep, settings, MixPrepOptions(genre="breaks", dry_run=False))
+
+    assert _json.loads((tmp_path / "learned_weights.json").read_text()) == original

@@ -258,3 +258,23 @@ def test_liked_artist_signal_in_trace():
         )
         out = explain_track(f"{artist} - {title}", _settings(tmpdir))
         assert "[liked_artist]" in out
+
+
+def test_learned_multipliers_shown_and_applied():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        artist, title = "Nobody", "Fresh Cut"
+        _setup_data(tmpdir, source_items=[_source_item(artist, title, source="bandcamp")])
+        _write_json(os.path.join(tmpdir, "learned_weights.json"), {
+            "bandcamp_discovery": {"multiplier": 2.0, "lift": 2.0, "samples": 20,
+                                   "updated_at": "2026-08-01T00:00:00+00:00"},
+        })
+        out = explain_track(f"{artist} - {title}", _settings(tmpdir))
+        assert "Learned multipliers" in out
+        assert "bandcamp_discovery ×2.00" in out
+
+
+def test_no_learned_multipliers_states_baseline():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _setup_data(tmpdir)
+        out = explain_track("No One - Nowhere", _settings(tmpdir))
+        assert "Learned multipliers: none (baseline weights)" in out
