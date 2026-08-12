@@ -445,6 +445,17 @@ def _score(
                 explanation=f"{c.label} — you've liked or bought tracks on this label.",
             ))
 
+    # Zero-weight measurement tag (feedback loop spec, Slice C): a seeded
+    # candidate carries a 'seeded' signal so the existing by-signal lift table
+    # measures whether taste-seeded fetching converts better than static
+    # queries. Contributes NOTHING to any score and is never tuned.
+    seeded_by = c.raw_metadata.get("seeded_by")
+    if seeded_by:
+        c.signals.append(RecommendationSignal(
+            code="seeded",
+            explanation=f"Fetched because you liked {seeded_by}.",
+        ))
+
     # --- Label signal (discovery axis) ---
     if c.label and c.label.lower().strip() in relevant_labels:
         label_key = c.label.lower().strip()

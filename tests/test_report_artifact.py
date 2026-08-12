@@ -221,3 +221,14 @@ def test_track_payload_defaults_without_free_metadata():
     payload = _payload_for(_candidate())
     assert payload["free_gate"] is False
     assert payload["acquisition_url"] is None
+
+
+def test_track_payload_carries_seeded_by():
+    from src.models import Candidate
+    from src.pipeline.report_artifact import _track_payload
+
+    seeded = Candidate(artist="X", title="T", link="", source="soundcloud",
+                       raw_metadata={"seeded_by": "om unit"})
+    plain = Candidate(artist="Y", title="U", link="", source="beatport")
+    assert _track_payload(1, seeded, {}, None, None, None)["seeded_by"] == "om unit"
+    assert _track_payload(1, plain, {}, None, None, None)["seeded_by"] is None

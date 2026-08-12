@@ -181,7 +181,7 @@ def _is_free_gate(track: dict) -> bool:
     return host in _GATE_DOMAINS
 
 
-def _parse_track(track: dict, tag: str, free_gate: bool = False) -> SourceItem | None:
+def _parse_track(track: dict, tag: str | None, free_gate: bool = False) -> SourceItem | None:
     title = (track.get("title") or "").strip()
     artist = (track.get("metadata_artist") or "").strip() \
         or ((track.get("user") or {}).get("username") or "").strip()
@@ -197,7 +197,8 @@ def _parse_track(track: dict, tag: str, free_gate: bool = False) -> SourceItem |
         link=link,
         label=track.get("label_name") or None,
         release_date=_parse_release_date(track.get("created_at")),
-        genre_tags=[tag],
+        # tag=None → no genre claim (taste-seeded searches have no target genre)
+        genre_tags=[tag] if tag else [],
         raw_metadata={
             "soundcloud_id": track.get("id"),
             "urn": track.get("urn"),
@@ -247,7 +248,8 @@ def fetch(settings, target_genre: str | None = None,
     targets = [t for t in cfg.get("targets", []) if t.get("tf_tag")]
     if target_genre is not None:
         targets = [t for t in targets if t.get("tf_tag") == target_genre]
-    if not targets:
+        seed_queries = None  # genre-targeted runs (mix-prep) never seed
+    if not targets and not seed_queries:
         return []
 
     downloadable_only = cfg.get("downloadable_only", True)
@@ -328,6 +330,45 @@ def fetch(settings, target_genre: str | None = None,
 
         logger.info(f"[soundcloud] {tag}: {len(tag_items)} tracks")
         all_items.extend(tag_items)
+
+    # --- Taste-seeded searches (feedback loop spec, Slice C) ---
+    # Free-text q searches derived from positive marks. Deliberately outside
+    # the target fail-safe accounting: seeded failures degrade silently, and
+    # if every static target fails the RuntimeError below still fires (a
+    # genuine outage discards seeded items too — acceptable).
+    seeded_seen_ids: set = set()
+    for seed_no, seed in enumerate(seed_queries or []):
+        if targets or seed_no:
+            polite_sleep(1.0)
+        try:
+            url: str | None = _build_search_url({"q": seed}, created_from, limit)
+            page = 0
+            while url and page < _MAX_PAGES:
+                logger.info(f"[soundcloud] seeded '{seed}': page {page + 1} — {url}")
+                data = _get_json(url, session)
+                page += 1
+                for track in (data.get("collection") or []):
+                    track_id = track.get("id")
+                    if track_id is not None and track_id in seeded_seen_ids:
+                        continue
+                    gate = include_gated and _is_free_gate(track)
+                    if downloadable_only and track.get("downloadable") is not True and not gate:
+                        continue
+                    duration = track.get("duration")
+                    if max_duration_ms and duration and duration > max_duration_ms:
+                        continue
+                    item = _parse_track(track, None, free_gate=gate)
+                    if item is None:
+                        continue
+                    if item.release_date is not None and item.release_date < created_from:
+                        continue
+                    if track_id is not None:
+                        seeded_seen_ids.add(track_id)
+                    item.raw_metadata["seeded_by"] = seed
+                    all_items.append(item)
+                url = data.get("next_href")
+        except Exception as e:
+            logger.warning(f"[soundcloud] seeded '{seed}': fetch failed: {e}")
 
     if attempted > 0 and completed == 0:
         raise RuntimeError(f"soundcloud: all {attempted} targets failed")

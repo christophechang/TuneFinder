@@ -1665,3 +1665,11 @@ def test_no_multipliers_is_baseline():
     c = Candidate(artist="Nobody", title="T", link="", source="bandcamp")
     _score(c, {}, set(), {}, set())
     assert c.score == 1.0  # w_bandcamp default
+
+
+def test_seeded_signal_zero_contribution():
+    c = Candidate(artist="X", title="T", link="", source="soundcloud",
+                  raw_metadata={"seeded_by": "om unit"})
+    _score(c, {}, set(), {}, set())
+    assert any(s.code == "seeded" for s in c.signals)
+    assert c.score == 0.0

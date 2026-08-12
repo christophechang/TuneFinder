@@ -64,6 +64,8 @@ class ReportTrack(ApiModel):
     feedback: Optional[TrackFeedback] = None
     free_gate: bool = False
     acquisition_url: Optional[str] = None
+    # Taste-seeded fetch attribution (feedback loop spec, Slice C)
+    seeded_by: Optional[str] = None
 
 
 class ReportSection(ApiModel):

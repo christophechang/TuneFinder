@@ -94,6 +94,7 @@ def _track_payload(
         "pool_added_at": c.pool_added_at,
         "free_gate": bool(c.raw_metadata.get("free_gate")),
         "acquisition_url": c.raw_metadata.get("acquisition_url"),
+        "seeded_by": c.raw_metadata.get("seeded_by"),
     }
 
 
