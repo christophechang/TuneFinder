@@ -224,3 +224,21 @@ def test_completely_unknown_selector():
         out = explain_track("Unknown Artist - Ghost Track", _settings(tmpdir))
         assert "Not in the current week" in out or "not in the current week" in out.lower()
         assert "Not in pool" in out or "not in pool" in out.lower()
+
+
+def test_own_marked_track_filtered_by_feedback_merge():
+    """Feedback loop spec Slice A — an own/bought mark excludes the track even
+    though known_tracks.json doesn't contain it."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        artist, title = "Sully", "Skyline"
+        _setup_data(
+            tmpdir,
+            source_items=[_source_item(artist, title)],
+            feedback=[{
+                "key": "sully||skyline", "artist": artist, "title": title,
+                "outcome": "own", "marked_at": "2026-08-01T00:00:00+00:00",
+                "report_id": "2026-W30", "track_no": 1, "history": "weekly",
+            }],
+        )
+        out = explain_track(f"{artist} - {title}", _settings(tmpdir))
+        assert "FILTERED — track matches known-track exclusion set." in out

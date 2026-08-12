@@ -279,3 +279,48 @@ def test_run_mix_prep_regular_sends_no_only_sources_or_bpm_ranges(tmp_path):
         run_mix_prep(settings, options)
     assert mock_fetch.call_args.kwargs.get("only_sources") is None
     assert mock_fetch.call_args.kwargs.get("bpm_ranges") is None
+
+
+# ---------------------------------------------------------------------------
+# Known-track merge from feedback (feedback loop spec, Slice A)
+# ---------------------------------------------------------------------------
+
+def test_owned_feedback_track_never_resurfaces(tmp_path):
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key
+
+    # Latest mark 'own' for the exact track the sources return
+    append_feedback(FeedbackEntry(
+        key=make_dedup_key("Sully", "New Track"), artist="Sully", title="New Track",
+        outcome="own", marked_at="2026-08-01T00:00:00+00:00",
+        report_id="2026-W30", track_no=1, history="weekly",
+    ), str(tmp_path))
+
+    settings = _settings(str(tmp_path))
+    outcome = _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
+
+    # The only candidate is excluded by the feedback-derived known merge
+    assert outcome.no_candidates is True
+
+
+def test_bought_pool_record_not_injected(tmp_path):
+    from src.models import PoolRecord
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key
+    from src.pipeline.pool import save_pool
+
+    # Pool record whose RAW key differs from the bought mark's normalised key
+    save_pool([PoolRecord(
+        artist="Sully", title="Other Track (Original Mix)", link="", source="beatport",
+        added_at="2026-07-01T00:00:00+00:00", last_score=2.0,
+    )], str(tmp_path))
+    append_feedback(FeedbackEntry(
+        key=make_dedup_key("Sully", "Other Track"), artist="Sully", title="Other Track",
+        outcome="bought", marked_at="2026-08-01T00:00:00+00:00",
+        report_id="2026-W30", track_no=1, history="weekly",
+    ), str(tmp_path))
+
+    settings = _settings(str(tmp_path))
+    outcome = _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
+
+    assert outcome.stats["pool_injected"] == 0

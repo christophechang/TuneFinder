@@ -84,13 +84,21 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=Fa
 
     post_alert_fn: callable(message: str) to post alerts. Called on live runs
     only (mirrors existing anomaly-alert gating); dry-run logs instead.
+
+    Known-key merge (feedback loop spec, Slice A): the returned known_keys are
+    unioned with feedback-derived own/bought exclusion keys at this single
+    point, so every consumer — weekly, mix-prep, explain, pool injection —
+    inherits the merge. Derived at run time; never written to known_tracks.json.
     """
     from src.fetchers.catalog import fetch_all_mixes, fetch_all_tracks
+    from src.pipeline.feedback import feedback_known_keys, load_feedback
     from src.pipeline.profile import (
         apply_recency_weights, build_artist_profiles, build_genre_affinity, build_known_track_keys,
         save_known_tracks, save_artist_profiles, save_genre_affinity,
         load_artist_profiles, load_genre_affinity, load_known_tracks,
     )
+
+    fb_keys = feedback_known_keys(load_feedback(settings.data_dir), remix_aware)
 
     try:
         logger.info("[load_profile_state] Fetching tracks from catalog API...")
@@ -117,7 +125,7 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=Fa
         else:
             logger.warning(f"[load_profile_state] ALERT (dry-run, not posted): {alert_msg}")
 
-        return profiles, genre_affinity, known_keys, True
+        return profiles, genre_affinity, known_keys | fb_keys, True
 
     profiles = build_artist_profiles(tracks)
     genre_affinity = build_genre_affinity(tracks)
@@ -139,7 +147,7 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=Fa
     save_artist_profiles(profiles, settings.data_dir)
     save_genre_affinity(genre_affinity, settings.data_dir)
     logger.info(f"[load_profile_state] Refreshed profile state from {len(tracks)} known tracks")
-    return profiles, genre_affinity, known_keys, False
+    return profiles, genre_affinity, known_keys | fb_keys, False
 
 
 def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressFn] = None) -> RunOutcome:
@@ -154,7 +162,7 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
     )
     from src.pipeline.dedup import (
         deduplicate_source_items, items_to_candidates,
-        filter_known, filter_history, filter_release_date,
+        filter_known, filter_history, filter_release_date, make_dedup_key,
     )
     from src.pipeline.ranker import rank_candidates
     from src.pipeline.labels import (
@@ -249,7 +257,9 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
         fresh_keys = {c.key for c in fresh_candidates}
         pool_injected = [
             c for c in pool_to_candidates([r for r in pool_records if r.key not in fresh_keys])
-            if c.key not in known_keys and c.key not in history_keys
+            if c.key not in known_keys
+            and make_dedup_key(c.artist, c.title, remix_aware) not in known_keys
+            and c.key not in history_keys
         ]
         all_candidates = fresh_candidates + pool_injected
         candidates = all_candidates
@@ -421,7 +431,7 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
     )
     from src.pipeline.dedup import (
         deduplicate_source_items, items_to_candidates,
-        filter_known, filter_genre, filter_genre_exclusions, filter_release_date,
+        filter_known, filter_genre, filter_genre_exclusions, filter_release_date, make_dedup_key,
     )
     from src.pipeline.ranker import rank_candidates_mix_prep
     from src.pipeline.labels import (
@@ -519,7 +529,9 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
         # Pool injection is deliberately exempt from the release-date window (same as the weekly run) — the pool-age penalty handles staleness. See docs/scoring-review.md §2.5.
         pool_injected = [
             c for c in _pool
-            if c.key not in known_keys and c.key not in mix_prep_history_keys
+            if c.key not in known_keys
+            and make_dedup_key(c.artist, c.title, remix_aware) not in known_keys
+            and c.key not in mix_prep_history_keys
         ]
         if free_only:
             pool_injected = [c for c in pool_injected if c.raw_metadata.get("free_download") is True]

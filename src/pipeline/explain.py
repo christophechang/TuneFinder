@@ -18,7 +18,7 @@ from src.pipeline.dedup import (
     items_to_candidates,
     make_dedup_key,
 )
-from src.pipeline.feedback import load_feedback, skipped_artists
+from src.pipeline.feedback import feedback_known_keys, load_feedback, skipped_artists
 from src.pipeline.history import build_history_keys, load_history
 from src.pipeline.labels import fresh_label_artist_data, load_label_affinity
 from src.pipeline.pool import load_pool, pool_to_candidates
@@ -64,13 +64,15 @@ def explain_track(selector: str, settings) -> str:
 
     # Load offline data
     source_items = load_source_items(settings.data_dir)
-    known_keys = load_known_tracks(settings.data_dir)
+    feedback_entries = load_feedback(settings.data_dir)
+    # Known-key merge (feedback loop spec, Slice A) — mirror _load_profile_state
+    # so explain's known-track verdicts match an actual run.
+    known_keys = load_known_tracks(settings.data_dir) | feedback_known_keys(feedback_entries, remix_aware)
     profiles = load_artist_profiles(settings.data_dir)
     genre_affinity = load_genre_affinity(settings.data_dir)
     history = load_history(settings.data_dir)
     history_keys = build_history_keys(history, remix_aware)
     pool_records = load_pool(settings.data_dir)
-    feedback_entries = load_feedback(settings.data_dir)
 
     # --- Fetched ---
     lines.append("=== FETCHED ===")
@@ -187,7 +189,9 @@ def explain_track(selector: str, settings) -> str:
     fresh_keys_set = {c.key for c in scored_candidates}
     pool_injected = [
         c for c in pool_to_candidates([r for r in pool_records if r.key not in fresh_keys_set])
-        if c.key not in known_keys and c.key not in history_keys
+        if c.key not in known_keys
+        and make_dedup_key(c.artist, c.title, remix_aware) not in known_keys
+        and c.key not in history_keys
     ]
     all_scored = scored_candidates + pool_injected
 
