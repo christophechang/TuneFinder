@@ -152,6 +152,16 @@ class Settings:
         return self._data.get("pipeline", {}).get("genre_exclusions", {})
 
     @property
+    def pipeline_seeded_artist_count(self) -> int:
+        """Top-K positive artists used as taste-seeded fetch queries (feedback loop spec, Slice C)."""
+        return self._data.get("pipeline", {}).get("seeded_artist_count", 10)
+
+    @property
+    def pipeline_seeded_label_count(self) -> int:
+        """Top-K positive labels used as taste-seeded fetch queries (feedback loop spec, Slice C)."""
+        return self._data.get("pipeline", {}).get("seeded_label_count", 5)
+
+    @property
     def pipeline_remix_aware_identity(self) -> bool:
         """Whether named remixes get a distinct track identity (issue #9).
 

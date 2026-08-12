@@ -238,7 +238,8 @@ def _parse_track(track: dict, tag: str, free_gate: bool = False) -> SourceItem |
 # ---------------------------------------------------------------------------
 
 def fetch(settings, target_genre: str | None = None,
-          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
+          bpm_ranges: list[tuple[float, float]] | None = None,
+          seed_queries: list[str] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("soundcloud")
     if not cfg.get("enabled", False):
         return []

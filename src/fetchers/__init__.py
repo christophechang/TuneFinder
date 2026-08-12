@@ -33,7 +33,8 @@ _FETCHERS = [
 
 def fetch_all_sources(settings, target_genre: str | None = None,
                       only_sources: list[str] | None = None,
-                      bpm_ranges: list[tuple[float, float]] | None = None) -> tuple[list[SourceItem], dict[str, dict]]:
+                      bpm_ranges: list[tuple[float, float]] | None = None,
+                      seed_queries: list[str] | None = None) -> tuple[list[SourceItem], dict[str, dict]]:
     """
     Run all enabled fetchers and return (items, health).
 
@@ -43,6 +44,9 @@ def fetch_all_sources(settings, target_genre: str | None = None,
     only_sources restricts the run to the named fetchers (free-downloads mode);
     bpm_ranges is forwarded to fetchers — those without server-side BPM search
     ignore it.
+
+    seed_queries: free-text taste-seeded queries derived from positive feedback
+    (feedback loop spec, Slice C) — sources without seeded search ignore it.
 
     health is a dict keyed by source name:
       {"count": int, "error": str | None}
@@ -59,7 +63,8 @@ def fetch_all_sources(settings, target_genre: str | None = None,
         if only_sources is not None and name not in only_sources:
             continue
         try:
-            items = fetch_fn(settings, target_genre=target_genre, bpm_ranges=bpm_ranges)
+            items = fetch_fn(settings, target_genre=target_genre, bpm_ranges=bpm_ranges,
+                             seed_queries=seed_queries)
             health[name] = {"count": len(items), "error": None}
             all_items.extend(items)
         except Exception as e:

@@ -213,9 +213,27 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
         history_keys = build_history_keys(history, remix_aware)
         pool_records = load_pool(settings.data_dir)
 
+        # 2b. Feedback derivations (feedback loop spec, Slices A + C) — loaded
+        # before the fetch so positive marks can seed source queries.
+        from src.pipeline.history import load_mix_prep_history
+        weights = settings.scoring_weights()
+        feedback_entries = load_feedback(settings.data_dir)
+        skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
+        positive_strengths = positive_artists(feedback_entries)
+        mix_prep_history = load_mix_prep_history(settings.data_dir)
+        label_strengths = positive_labels(feedback_entries, history, mix_prep_history)
+
+        # Taste-seeded fetch queries (Slice C): top-K positive artists + labels.
+        seed_queries = [
+            name for name, _ in sorted(positive_strengths.items(), key=lambda kv: -kv[1])
+        ][: settings.pipeline_seeded_artist_count]
+        seed_queries += [
+            label for label, _ in sorted(label_strengths.items(), key=lambda kv: -kv[1])
+        ][: settings.pipeline_seeded_label_count]
+
         # 3. Fetch external sources
         emit("sources", "Fetching enabled sources")
-        source_items, fetcher_health = fetch_all_sources(settings)
+        source_items, fetcher_health = fetch_all_sources(settings, seed_queries=seed_queries or None)
         save_source_items(source_items, settings.data_dir)
         archive_source_items(source_items, settings.data_dir, report_id)
         sources_fetched = len(source_items)
@@ -287,20 +305,10 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
                 duration_seconds=int(time.time() - start), stats=stats, no_candidates=True,
             )
 
-        # 5. Rank and split into sections
+        # 5. Rank and split into sections. The skip penalty (issue #11) and
+        # positive artist/label strengths were derived at step 2b.
         emit("rank", f"Scoring {len(candidates)} candidates")
-        weights = settings.scoring_weights()
         label_memory = fresh_label_artist_data(label_store, weights.label_memory_max_age_weeks)
-        # Skip-derived negative signal (issue #11) — artists with repeated 'skip'
-        # marks and no positives get a soft penalty. See src/pipeline/feedback.skipped_artists.
-        feedback_entries = load_feedback(settings.data_dir)
-        skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
-        # Positive feedback signals (feedback loop spec, Slice A) — liked/bought
-        # marks boost artists and labels, symmetric with the skip penalty.
-        from src.pipeline.history import load_mix_prep_history
-        positive_strengths = positive_artists(feedback_entries)
-        mix_prep_history = load_mix_prep_history(settings.data_dir)
-        label_strengths = positive_labels(feedback_entries, history, mix_prep_history)
 
         # Auto-tuning (feedback loop spec, Slice B) — one convergent update per
         # weekly run from all marks to date, then applied to this run's scoring.

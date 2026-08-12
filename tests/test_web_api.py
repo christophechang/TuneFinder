@@ -458,7 +458,7 @@ def test_run_conflict_409_while_running(client):
     release = threading.Event()
     started = threading.Event()
 
-    def blocking_fetch(settings, target_genre=None):
+    def blocking_fetch(settings, target_genre=None, **kwargs):
         started.set()
         release.wait(timeout=15)
         return [], {}

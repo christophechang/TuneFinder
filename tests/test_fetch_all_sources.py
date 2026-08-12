@@ -27,3 +27,11 @@ def test_bpm_ranges_forwarded_to_fetchers():
     with patch("src.fetchers._FETCHERS", [("soundcloud", sc)]):
         fetch_all_sources(s, only_sources=["soundcloud"], bpm_ranges=[(170.0, 180.0)])
     assert sc.call_args.kwargs["bpm_ranges"] == [(170.0, 180.0)]
+
+
+def test_seed_queries_forwarded_to_fetchers():
+    s = _settings_all_enabled()
+    sc = MagicMock(return_value=[])
+    with patch("src.fetchers._FETCHERS", [("soundcloud", sc)]):
+        fetch_all_sources(s, seed_queries=["om unit", "astrophonica"])
+    assert sc.call_args.kwargs["seed_queries"] == ["om unit", "astrophonica"]

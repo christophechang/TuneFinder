@@ -420,3 +420,32 @@ def test_mix_prep_applies_but_never_updates(tmp_path):
     _patched(run_mix_prep, settings, MixPrepOptions(genre="breaks", dry_run=False))
 
     assert _json.loads((tmp_path / "learned_weights.json").read_text()) == original
+
+
+# ---------------------------------------------------------------------------
+# Feedback-seeded fetching (feedback loop spec, Slice C)
+# ---------------------------------------------------------------------------
+
+def test_weekly_run_passes_seeds_from_positive_marks(tmp_path):
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key, normalise_artist
+
+    append_feedback(FeedbackEntry(
+        key=make_dedup_key("Om Unit", "Past Tune"), artist="Om Unit", title="Past Tune",
+        outcome="bought", marked_at="2026-08-01T00:00:00+00:00",
+        report_id="2026-W30", track_no=1, history="weekly",
+    ), str(tmp_path))
+
+    settings = _settings(str(tmp_path))
+    settings.pipeline_seeded_artist_count = 10
+    settings.pipeline_seeded_label_count = 5
+
+    fetch_mock = MagicMock(return_value=([_source_item()], {"beatport": {"count": 1, "error": None}}))
+    with patch("src.fetchers.catalog.fetch_all_tracks", return_value=[_known_track()]), \
+         patch("src.fetchers.catalog.fetch_all_mixes", return_value=[]), \
+         patch("src.fetchers.fetch_all_sources", fetch_mock), \
+         patch("src.output.discord.make_discord_client", return_value=MagicMock()):
+        run_weekly(settings, WeeklyRunOptions(dry_run=True))
+
+    seeds = fetch_mock.call_args.kwargs["seed_queries"]
+    assert normalise_artist("Om Unit") in seeds
