@@ -449,3 +449,16 @@ def test_weekly_run_passes_seeds_from_positive_marks(tmp_path):
 
     seeds = fetch_mock.call_args.kwargs["seed_queries"]
     assert normalise_artist("Om Unit") in seeds
+
+
+def test_no_candidates_week_still_updates_learned_weights(tmp_path):
+    _seed_learning_data(str(tmp_path))
+    settings = _settings(str(tmp_path))
+    # Sources return nothing → no_candidates path
+    with patch("src.fetchers.catalog.fetch_all_tracks", return_value=[_known_track()]), \
+         patch("src.fetchers.catalog.fetch_all_mixes", return_value=[]), \
+         patch("src.fetchers.fetch_all_sources", return_value=([], {})), \
+         patch("src.output.discord.make_discord_client", return_value=MagicMock()):
+        outcome = run_weekly(settings, WeeklyRunOptions(dry_run=False))
+    assert outcome.no_candidates is True
+    assert (tmp_path / "learned_weights.json").exists()

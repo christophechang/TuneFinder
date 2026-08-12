@@ -353,3 +353,18 @@ def test_dedup_flag_off_named_remix_still_merges():
     ]
     assert len(deduplicate_source_items(items, remix_aware=False)) == 1
     assert len(deduplicate_source_items(items)) == 1  # default
+
+
+def test_merge_backfills_chart_position_and_seeded_by():
+    from src.models import SourceItem
+    from src.pipeline.dedup import deduplicate_source_items
+
+    chart = SourceItem(source="beatport", artist="Om Unit", title="New Cut",
+                       link="l1", label="Metalheadz", release_date="2026-08-01",
+                       genre_tags=["dnb"], raw_metadata={"chart_position": 12})
+    seeded = SourceItem(source="beatport", artist="Om Unit", title="New Cut",
+                        link="l2", raw_metadata={"seeded_by": "om unit"})
+    merged = deduplicate_source_items([chart, seeded])
+    assert len(merged) == 1
+    assert merged[0].raw_metadata["chart_position"] == 12
+    assert merged[0].raw_metadata["seeded_by"] == "om unit"

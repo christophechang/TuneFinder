@@ -423,6 +423,13 @@ def _score(
         liked_strength = 0.0
         for part in artist_parts:
             s = positive_artist_strengths.get(normalise_artist(part), 0.0)
+            if s == 0.0 and aliases:
+                # Alias resolution, mirroring how the skip penalty benefits from
+                # resolve_profile: a candidate credited under an alias must
+                # still earn the boost its canonical name accrued.
+                canonical = aliases.get(part.lower().strip())
+                if canonical:
+                    s = positive_artist_strengths.get(normalise_artist(canonical), 0.0)
             if s > liked_strength:
                 liked_strength = s
                 liked_name = part.strip()

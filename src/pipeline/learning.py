@@ -45,7 +45,17 @@ def load_learned_weights(data_dir: str) -> dict[str, dict]:
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning(f"[learning] Corrupt {path} ignored ({exc}) — baseline weights")
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    # Entry-level validation: the kill-switch model ("delete the file") means
+    # malformed state must degrade to baseline, never abort a run.
+    valid = {
+        code: entry for code, entry in data.items()
+        if isinstance(entry, dict) and isinstance(entry.get("multiplier"), (int, float))
+    }
+    if len(valid) != len(data):
+        logger.warning(f"[learning] Dropped {len(data) - len(valid)} malformed entries from {path}")
+    return valid
 
 
 def save_learned_weights(learned: dict[str, dict], data_dir: str) -> None:

@@ -103,3 +103,14 @@ def test_load_missing_or_corrupt_returns_empty(tmp_path):
 def test_signal_multipliers_skips_neutral():
     learned = {"a": {"multiplier": 1.0}, "b": {"multiplier": 1.25}}
     assert signal_multipliers(learned) == {"b": 1.25}
+
+
+def test_load_drops_malformed_entries(tmp_path):
+    import json
+    (tmp_path / "learned_weights.json").write_text(json.dumps({
+        "label_match": {"multiplier": 1.2, "lift": 1.4, "samples": 20, "updated_at": "t"},
+        "broken_str": "nope",
+        "broken_mult": {"multiplier": "high"},
+    }))
+    learned = load_learned_weights(str(tmp_path))
+    assert list(learned) == ["label_match"]

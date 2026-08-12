@@ -223,6 +223,25 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
         mix_prep_history = load_mix_prep_history(settings.data_dir)
         label_strengths = positive_labels(feedback_entries, history, mix_prep_history)
 
+        # Auto-tuning (feedback loop spec, Slice B) — one convergent update per
+        # weekly run from all marks to date, applied to this run's scoring.
+        # Sits here, before the fetch, so the update happens even on a
+        # no-candidates week; dry runs compute and apply but never persist.
+        from src.pipeline.feedback import tune_data
+        from src.pipeline.learning import (
+            load_learned_weights, save_learned_weights, signal_multipliers,
+            update_learned_weights,
+        )
+        now_iso = datetime.now(timezone.utc).isoformat()
+        learned = load_learned_weights(settings.data_dir)
+        tune = tune_data(history, mix_prep_history, feedback_entries)
+        learned, adjustments = update_learned_weights(learned, tune, now_iso)
+        if not dry_run:
+            save_learned_weights(learned, settings.data_dir)
+        multipliers = signal_multipliers(learned)
+        for line in adjustments:
+            logger.info(f"[learning] {line}")
+
         # Taste-seeded fetch queries (Slice C): top-K positive artists + labels.
         seed_queries = [
             name for name, _ in sorted(positive_strengths.items(), key=lambda kv: -kv[1])
@@ -305,28 +324,10 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
                 duration_seconds=int(time.time() - start), stats=stats, no_candidates=True,
             )
 
-        # 5. Rank and split into sections. The skip penalty (issue #11) and
-        # positive artist/label strengths were derived at step 2b.
+        # 5. Rank and split into sections. The skip penalty (issue #11),
+        # positive strengths and learned multipliers were derived at step 2b.
         emit("rank", f"Scoring {len(candidates)} candidates")
         label_memory = fresh_label_artist_data(label_store, weights.label_memory_max_age_weeks)
-
-        # Auto-tuning (feedback loop spec, Slice B) — one convergent update per
-        # weekly run from all marks to date, then applied to this run's scoring.
-        # Dry runs compute and apply but never persist.
-        from src.pipeline.feedback import tune_data
-        from src.pipeline.learning import (
-            load_learned_weights, save_learned_weights, signal_multipliers,
-            update_learned_weights,
-        )
-        now_iso = datetime.now(timezone.utc).isoformat()
-        learned = load_learned_weights(settings.data_dir)
-        tune = tune_data(history, mix_prep_history, feedback_entries)
-        learned, adjustments = update_learned_weights(learned, tune, now_iso)
-        if not dry_run:
-            save_learned_weights(learned, settings.data_dir)
-        multipliers = signal_multipliers(learned)
-        for line in adjustments:
-            logger.info(f"[learning] {line}")
 
         sections, label_artists = rank_candidates(
             candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,

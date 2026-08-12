@@ -1673,3 +1673,13 @@ def test_seeded_signal_zero_contribution():
     _score(c, {}, set(), {}, set())
     assert any(s.code == "seeded" for s in c.signals)
     assert c.score == 0.0
+
+
+def test_liked_artist_resolves_aliases():
+    # aliases map "jim coles" → "om unit"; strength accrued under the canonical name
+    c = Candidate(artist="Jim Coles", title="T", link="", source="beatport")
+    _score(c, {}, set(), {}, set(),
+           aliases={"jim coles": "om unit"},
+           positive_artist_strengths={normalise_artist("Om Unit"): 2.0})
+    assert any(s.code == "liked_artist" for s in c.signals)
+    assert c.score == 1.5
