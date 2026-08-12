@@ -172,13 +172,15 @@ Web (`tunefinder-web`):
 
 ## Rollout & rollback
 
-Slices land as separate PRs into `develop`, in order A → B → C → D.
+Two PRs into each repo's `develop`: the engine PR carries slices A → B → C as
+slice-labeled commit groups (in that order, each group independently
+revertable); the web PR carries slice D.
 
 | Slice | Rollback |
 | --- | --- |
-| A | revert PR (derived at run time, no persistent state) |
-| B | delete `data/learned_weights.json` (or revert PR) |
-| C | revert PR (seeded queries are derived, not stored config) |
+| A | revert its commits (derived at run time, no persistent state) |
+| B | delete `data/learned_weights.json` (or revert its commits) |
+| C | revert its commits (seeded queries are derived, not stored config) |
 | D | UI-only; revert PR |
 
 ## Risks
