@@ -185,6 +185,42 @@ class ConfigResponse(ApiModel):
     data_dir: str
 
 
+class LearnedSignal(ApiModel):
+    """One learned multiplier entry (feedback loop spec, Slice B/D).
+
+    `gated` is computed from CURRENT feedback counts (the same non_own number
+    the insights desk uses for its confidence gate), not from the stored
+    samples snapshot — the page must never show a multiplier as actively
+    moving on a signal it elsewhere brands thin-data.
+    """
+    multiplier: float
+    lift: Optional[float] = None
+    samples: int = 0
+    updated_at: Optional[str] = None
+    gated: bool = False
+
+
+class PositiveArtist(ApiModel):
+    name: str
+    strength: float
+
+
+class PositiveLabel(ApiModel):
+    label: str
+    strength: float
+
+
+class LearningResponse(ApiModel):
+    learned: dict[str, LearnedSignal] = Field(default_factory=dict)
+    tunable_signals: list[str] = Field(default_factory=list)
+    min_samples: int = 10
+    positive_artists: list[PositiveArtist] = Field(default_factory=list)
+    positive_labels: list[PositiveLabel] = Field(default_factory=list)
+    seeded_artist_count: int = 10
+    seeded_label_count: int = 5
+    feedback_known_count: int = 0
+
+
 class HealthResponse(ApiModel):
     status: str
     version: str

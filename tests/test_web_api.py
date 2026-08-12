@@ -584,3 +584,42 @@ def test_static_spa_mount_serves_index_fallback(tmp_path, monkeypatch):
         assert "tunefinder-web" in c.get("/reports/2026-W27").text  # SPA fallback
         assert c.get("/app.js").text.startswith("console.log")
         assert c.get("/api/health").json()["status"] == "ok"  # API still wins
+
+
+# ---------------------------------------------------------------------------
+# GET /api/learning (feedback loop spec, Slice D)
+# ---------------------------------------------------------------------------
+
+def test_learning_requires_auth(client):
+    assert client.get("/api/learning").status_code == 401
+
+
+def test_learning_returns_state_and_gates_from_current_counts(client):
+    import json as _json
+    # Stored entry claims samples=30, but CURRENT feedback gives label_match
+    # far fewer rated marks → gated must be computed from current counts.
+    (client.tmp_path / "learned_weights.json").write_text(_json.dumps({
+        "label_match": {"multiplier": 1.2, "lift": 1.4, "samples": 30,
+                        "updated_at": "2026-08-01T00:00:00+00:00"},
+    }))
+    # One bought mark on Sully/Alpha (label Astrophonica, signal known_artist)
+    client.post("/api/feedback", headers=AUTH,
+                json={"outcome": "bought", "report_id": "2026-W27", "track_no": 1})
+
+    r = client.get("/api/learning", headers=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body["learned"]["label_match"]["multiplier"] == 1.2
+    assert body["learned"]["label_match"]["gated"] is True  # current non_own < 10
+    assert body["min_samples"] == 10
+    assert "label_match" in body["tunable_signals"]
+    assert "skipped_artist" not in body["tunable_signals"]
+
+    # positive affinities from the bought mark
+    assert body["positive_artists"][0]["name"] == "sully"
+    assert body["positive_artists"][0]["strength"] == 2.0
+    assert body["positive_labels"][0]["label"] == "astrophonica"
+    assert body["feedback_known_count"] == 1
+    assert body["seeded_artist_count"] == 10
+    assert body["seeded_label_count"] == 5
