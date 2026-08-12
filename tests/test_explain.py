@@ -242,3 +242,19 @@ def test_own_marked_track_filtered_by_feedback_merge():
         )
         out = explain_track(f"{artist} - {title}", _settings(tmpdir))
         assert "FILTERED — track matches known-track exclusion set." in out
+
+
+def test_liked_artist_signal_in_trace():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        artist, title = "Sully", "Skyline"
+        _setup_data(
+            tmpdir,
+            source_items=[_source_item(artist, title)],
+            feedback=[{
+                "key": "sully||past tune", "artist": artist, "title": "Past Tune",
+                "outcome": "liked", "marked_at": "2026-08-01T00:00:00+00:00",
+                "report_id": "2026-W30", "track_no": 1, "history": "weekly",
+            }],
+        )
+        out = explain_track(f"{artist} - {title}", _settings(tmpdir))
+        assert "[liked_artist]" in out

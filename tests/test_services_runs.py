@@ -324,3 +324,26 @@ def test_bought_pool_record_not_injected(tmp_path):
     outcome = _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
 
     assert outcome.stats["pool_injected"] == 0
+
+
+def test_weekly_run_applies_liked_artist_signal(tmp_path):
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key
+
+    # Latest mark 'liked' for a past track by the same artist the sources return
+    append_feedback(FeedbackEntry(
+        key=make_dedup_key("Sully", "Past Tune"), artist="Sully", title="Past Tune",
+        outcome="liked", marked_at="2026-08-01T00:00:00+00:00",
+        report_id="2026-W30", track_no=1, history="weekly",
+    ), str(tmp_path))
+
+    settings = _settings(str(tmp_path))
+    outcome = _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
+
+    codes = {
+        s["code"]
+        for section in outcome.artifact["sections"]
+        for t in section["tracks"]
+        for s in t["signals"]
+    }
+    assert "liked_artist" in codes

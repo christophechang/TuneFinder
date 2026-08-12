@@ -168,7 +168,7 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
     from src.pipeline.labels import (
         load_label_affinity, update_label_affinity, save_label_affinity, fresh_label_artist_data,
     )
-    from src.pipeline.feedback import load_feedback, skipped_artists
+    from src.pipeline.feedback import load_feedback, positive_artists, positive_labels, skipped_artists
     from src.pipeline.pool import load_pool, pool_to_candidates, save_pool, POOL_CAP
     from src.pipeline.report import generate_report, report_order
     from src.pipeline.report_artifact import build_report_artifact, write_report_artifact
@@ -295,9 +295,17 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
         # marks and no positives get a soft penalty. See src/pipeline/feedback.skipped_artists.
         feedback_entries = load_feedback(settings.data_dir)
         skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
+        # Positive feedback signals (feedback loop spec, Slice A) — liked/bought
+        # marks boost artists and labels, symmetric with the skip penalty.
+        from src.pipeline.history import load_mix_prep_history
+        positive_strengths = positive_artists(feedback_entries)
+        mix_prep_history = load_mix_prep_history(settings.data_dir)
+        label_strengths = positive_labels(feedback_entries, history, mix_prep_history)
         sections, label_artists = rank_candidates(
             candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
             label_memory=label_memory, skip_penalty_artists=skip_set,
+            positive_artist_strengths=positive_strengths,
+            positive_label_strengths=label_strengths,
         )
         aliases = settings.artist_aliases()
 
@@ -437,7 +445,7 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
     from src.pipeline.labels import (
         load_label_affinity, update_label_affinity, save_label_affinity, fresh_label_artist_data,
     )
-    from src.pipeline.feedback import load_feedback, skipped_artists
+    from src.pipeline.feedback import load_feedback, positive_artists, positive_labels, skipped_artists
     from src.pipeline.pool import load_pool, pool_to_candidates
     from src.pipeline.report import generate_mix_prep_report, report_order
     from src.pipeline.report_artifact import build_report_artifact, write_report_artifact
@@ -584,10 +592,17 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
         # Skip-derived negative signal (issue #11) — see run_weekly.
         feedback_entries = load_feedback(settings.data_dir)
         skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
+        # Positive feedback signals (feedback loop spec, Slice A) — see run_weekly.
+        from src.pipeline.history import load_history
+        positive_strengths = positive_artists(feedback_entries)
+        weekly_history = load_history(settings.data_dir)
+        label_strengths = positive_labels(feedback_entries, weekly_history, mix_prep_history)
         sections, label_artists = rank_candidates_mix_prep(
             candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
             label_memory=label_memory, demoted_keys=demoted_keys, skip_penalty_artists=skip_set,
             free_downloads_count=settings.pipeline_free_downloads_mode_count if free_only else None,
+            positive_artist_strengths=positive_strengths,
+            positive_label_strengths=label_strengths,
         )
         aliases = settings.artist_aliases()
 
