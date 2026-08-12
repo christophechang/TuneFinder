@@ -38,7 +38,7 @@
 **Interfaces:**
 - Produces: `positive_artists(entries: list[FeedbackEntry]) -> dict[str, float]` (normalised artist → strength), `positive_labels(entries, weekly: list[RecommendationRecord], mix_prep: list[RecommendationRecord]) -> dict[str, float]` (lowercased label → strength), `feedback_known_keys(entries, remix_aware: bool = False) -> set[str]`, module constants `POSITIVE_STRENGTH_CAP = 6.0`, `_POSITIVE_STRENGTHS = {"bought": 2.0, "liked": 1.0}`.
 
-- [ ] **Step 1: Write failing tests** in `tests/test_feedback.py` (follow the existing `_entry(...)` helper style already used by the `skipped_artists` tests there):
+- [ ] **Step 1: Write failing tests** in `tests/test_feedback.py` (follow the existing `_entry(...)` helper style already used by the `skipped_artists` tests there; add the needed top-level imports — `normalise_artist`, `make_dedup_key`, `RecommendationRecord`, and the three new functions — `make_dedup_key` is currently only imported inside `_entry`):
 
 ```python
 def test_positive_artists_bought_outweighs_liked():
@@ -62,10 +62,12 @@ def test_positive_artists_strength_capped():
     assert positive_artists(entries)[normalise_artist("Om Unit")] == 6.0
 
 def test_positive_artists_latest_mark_wins():
-    # liked then re-marked skip on the same track → no boost
+    # liked then re-marked skip on the same track → no boost.
+    # NOTE: the existing _entry helper takes days_ago (it computes marked_at
+    # itself) — same convention as the re-mark tests around line 281.
     entries = [
-        _entry("Sully", "Track B", "liked", marked_at="2026-01-01T00:00:00"),
-        _entry("Sully", "Track B", "skip", marked_at="2026-02-01T00:00:00"),
+        _entry("Sully", "Track B", "liked", days_ago=31),
+        _entry("Sully", "Track B", "skip", days_ago=0),
     ]
     assert positive_artists(entries) == {}
 
@@ -195,7 +197,7 @@ def feedback_known_keys(entries: list[FeedbackEntry], remix_aware: bool = False)
 - Consumes: `positive_artists` / `positive_labels` outputs (dicts from A1).
 - Produces: `ScoringWeights` fields `w_liked_artist: float = 0.75`, `liked_artist_cap: float = 3.0`, `w_liked_label: float = 0.5`. New keyword params (default `None`) threaded through: `_score(..., positive_artist_strengths=None, positive_label_strengths=None)`, same on `rank_candidates` and `rank_candidates_mix_prep`.
 
-- [ ] **Step 1: Write failing tests** in `tests/test_ranker.py` (follow the file's existing `_score`-direct test style with empty profiles):
+- [ ] **Step 1: Write failing tests** in `tests/test_ranker.py` (follow the file's existing `_score`-direct test style with empty profiles; add `from src.pipeline.dedup import normalise_artist` — the file doesn't import it today):
 
 ```python
 def test_liked_artist_signal_fires_and_caps():
@@ -381,6 +383,8 @@ Also in `tests/test_explain.py`: an `own`-marked track shows `FILTERED` in the K
 - [ ] **Step 1: Write failing tests** in `tests/test_learning.py`:
 
 ```python
+import pytest
+
 from src.pipeline.learning import (
     MIN_SAMPLES, MULTIPLIER_MAX, MULTIPLIER_MIN, TUNABLE_SIGNALS,
     load_learned_weights, save_learned_weights, signal_multipliers,
@@ -588,8 +592,11 @@ def test_multiplier_applies_after_cap():
     profiles = {"sully": ArtistProfile(name="Sully", play_count=10)}
     c = Candidate(artist="Sully", title="T", link="", source="beatport")
     _score(c, profiles, set(), {}, set(), signal_multipliers={"known_artist": 0.5})
-    # 10 plays * 3.0 = 30 → capped 10.0 → ×0.5 = 5.0 (symmetric both directions)
-    assert c.score == 5.0
+    # known_artist: 10 plays * 3.0 = 30 → capped 10.0 → ×0.5 = 5.0.
+    # play_count 10 also clears recurring_threshold 3 → recurring_artist +2.0
+    # (untouched — its own multiplier wasn't passed). Total 7.0.
+    assert c.score == 7.0
+    assert c.familiarity_score == 7.0
 
 def test_multiplier_ignores_unknown_and_penalty_codes():
     c = Candidate(artist="Nobody", title="T", link="", source="bandcamp")
@@ -686,7 +693,7 @@ Pass `signal_multipliers=multipliers` into `rank_candidates(...)`. Append to the
         log_msg = log_msg + f"\n{learning_note}"
 ```
 
-`run_mix_prep`: `multipliers = signal_multipliers(load_learned_weights(settings.data_dir))` (no update, no save), passed to `rank_candidates_mix_prep`. `explain.py`: load + build multipliers, pass to both `_score` calls, and after the weights line print:
+`run_mix_prep`: `multipliers = signal_multipliers(load_learned_weights(settings.data_dir))` (no update, no save), passed to `rank_candidates_mix_prep`. `explain.py`: load + build multipliers, pass to both `_score` calls, and print after the `Dedup key` header block (explain.py:62-63; existing test assertions are substring-based, inserted lines are safe):
 
 ```python
     from src.pipeline.learning import load_learned_weights, signal_multipliers
@@ -763,7 +770,7 @@ def test_weekly_run_passes_seeds_from_positive_marks(tmp_path, ...):
         ][: settings.pipeline_seeded_label_count]
 ```
 
-    and pass `seed_queries=seed_queries or None` to `fetch_all_sources`. (Step 5 then reuses `positive_strengths`/`label_strengths` — delete the duplicate derivation from A4.) Mix-prep does NOT seed (genre-targeted runs stay genre-pure).
+    and pass `seed_queries=seed_queries or None` to `fetch_all_sources`. Explicitly: this moves `feedback_entries = load_feedback(...)`, `skip_set = skipped_artists(...)` AND adds `mix_prep_history = load_mix_prep_history(settings.data_dir)` all to before step 3 (weekly `history` already loads pre-fetch at step 2); step 5 then reuses `positive_strengths`/`label_strengths`/`skip_set` — delete the duplicate derivations from A4. Mix-prep does NOT seed (genre-targeted runs stay genre-pure).
 
 - [ ] **Step 4: Run tests** — full suite → PASS.
 - [ ] **Step 5: Commit** — `git commit -m "feat(fetchers): thread taste-seeded queries from positive marks (weekly)"`
@@ -813,6 +820,7 @@ def test_track_payload_carries_seeded_by():
   - `soundcloud.py`: change `_parse_track(track, tag, free_gate=False)` so `tag=None` yields `genre_tags=[]` (`genre_tags=[tag] if tag else []`). In `fetch`, after the configured-targets loop (before the fail-safe check), when `seed_queries` and `target_genre is None`:
 
 ```python
+    seeded_seen_ids: set = set()
     for seed in (seed_queries or []):
         polite_sleep(1.0)
         try:
@@ -822,6 +830,9 @@ def test_track_payload_carries_seeded_by():
                 data = _get_json(url, session)
                 page += 1
                 for track in (data.get("collection") or []):
+                    track_id = track.get("id")
+                    if track_id is not None and track_id in seeded_seen_ids:
+                        continue
                     gate = include_gated and _is_free_gate(track)
                     if downloadable_only and track.get("downloadable") is not True and not gate:
                         continue
@@ -833,6 +844,8 @@ def test_track_payload_carries_seeded_by():
                         continue
                     if item.release_date is not None and item.release_date < created_from:
                         continue
+                    if track_id is not None:
+                        seeded_seen_ids.add(track_id)
                     item.raw_metadata["seeded_by"] = seed
                     all_items.append(item)
                 url = data.get("next_href")
@@ -840,7 +853,11 @@ def test_track_payload_carries_seeded_by():
             logger.warning(f"[soundcloud] seeded '{seed}': fetch failed: {e}")
 ```
 
-    (dedupe by track id across seeds with a shared `seen_ids` set, mirroring the target loop; seeded failures never count toward the all-targets-failed fail-safe).
+    Placement + guards, all deliberate:
+    - The early return `if not targets: return []` (soundcloud.py:249-250) must become `if not targets and not seed_queries: return []`, and the target loop must tolerate an empty `targets` list — otherwise seeding is dead whenever no static targets are configured.
+    - Seeded failures never count toward the all-targets-failed fail-safe (`attempted`/`completed` untouched). If every static target fails, the existing `RuntimeError` still fires and discards seeded items too — acceptable: that is a genuine source outage.
+    - **Seed/organic overlap decision:** when a seeded item and an organic target item are the same track, cross-source dedup keeps the richer organic copy and `seeded_by` is dropped (`_merge_group` keeps the winner's raw_metadata; `seeded_by` is deliberately NOT added to `_MERGE_BACKFILL_KEYS`). The `seeded` tag therefore measures *seed-exclusive* discoveries — the honest counterfactual ("what did seeding surface that static queries didn't").
+    - **Pool stickiness decision:** `raw_metadata` round-trips through `PoolRecord`, so a seeded candidate re-injected from the pool in a later week still carries `seeded_by`. Correct — its exposure remains attributable to seeding.
   - `ranker.py` `_score` — after the liked_label block:
 
 ```python
@@ -857,6 +874,7 @@ def test_track_payload_carries_seeded_by():
 ```
 
   - `report_artifact.py` `_track_payload`: add `"seeded_by": c.raw_metadata.get("seeded_by"),` alongside the other raw_metadata passthroughs.
+  - `src/web/schemas.py`: add `seeded_by: str | None = None` to the report track model (`ReportTrack` or equivalent) — pydantic silently strips unknown keys from `GET /api/reports/{id}` responses, so without the field the artifact value never crosses the API.
 
 - [ ] **Step 4: Run tests** — full suite → PASS.
 - [ ] **Step 5: Commit** — `git commit -m "feat(soundcloud): taste-seeded track search with zero-weight seeded tag"`
@@ -899,7 +917,7 @@ Beatport currently only walks genre top-100 charts. This task is explicitly cond
 }
 ```
 
-- [ ] **Step 1: Write failing test** in `tests/test_web_api.py` (existing authed TestClient fixture): seed `data/` with feedback + history + a `learned_weights.json`; `GET /api/learning` → 200 with the multiplier present, `gated` computed as `samples < min_samples`, positives sorted by strength descending; unauthenticated → 401/403 (match the file's existing auth assertion).
+- [ ] **Step 1: Write failing test** in `tests/test_web_api.py` (existing authed TestClient fixture): seed `data/` with feedback + history + a `learned_weights.json`; `GET /api/learning` → 200 with the multiplier present, positives sorted by strength descending; unauthenticated → 401/403 (match the file's existing auth assertion). **`gated` must be computed from CURRENT `tune_data` counts, not the stored `samples` snapshot** — stored entries always had `samples ≥ 10` at write time, so a snapshot-based flag would never be true; the desk's "anecdote" branding uses current `non_own`, and the page must agree with it. Test case: learned entry with `samples: 30` but current feedback where that signal's `non_own` is 4 → `gated: true`.
 
 - [ ] **Step 2: Run to verify failure.**
 
@@ -922,9 +940,16 @@ Beatport currently only walks genre top-100 charts. This task is explicitly cond
         remix_aware = settings.pipeline_remix_aware_identity
         artists = positive_artists(entries)
         labels = positive_labels(entries, weekly, mix_prep)
+        # Gate state from CURRENT counts — the same non_own number the desk's
+        # "anecdote" branding uses — never from the stored samples snapshot.
+        from src.pipeline.feedback import tune_data
+        signal_slots = tune_data(weekly, mix_prep, entries)["dimensions"]["signal"]
         return {
             "learned": {
-                code: {**entry, "gated": entry.get("samples", 0) < MIN_SAMPLES}
+                code: {
+                    **entry,
+                    "gated": signal_slots.get(code, {}).get("non_own", 0) < MIN_SAMPLES,
+                }
                 for code, entry in learned.items()
             },
             "tunable_signals": sorted(TUNABLE_SIGNALS),
@@ -955,15 +980,15 @@ Beatport currently only walks genre top-100 charts. This task is explicitly cond
 - Test: `src/api/client.test.ts` if wrapper tests exist there (follow file conventions)
 
 - [ ] **Step 1:** Start the engine locally from the TuneFinder repo (with Slice D merged into the working branch): `TUNEFINDER_WEB_INSECURE=1 ./venv/bin/python -m tunefinder serve` — then in tunefinder-web: `npm run generate-types`. Verify `LearningResponse` appears in `types.gen.ts`.
-- [ ] **Step 2:** Add wrapper in `client.ts` following the exact pattern of `getProfile` (line ~118):
+- [ ] **Step 2:** Add wrapper in `client.ts` following the exact pattern of `getProfile` (line ~118). The file's private helper is `request<T>(conn, path)` (client.ts:59-75), NOT `apiGet` — mirror `getProfile` verbatim:
 
 ```typescript
 export function getLearning(conn: Connection): Promise<LearningResponse> {
-  return apiGet<LearningResponse>(conn, "/api/learning");
+  return request<LearningResponse>(conn, "/api/learning");
 }
 ```
 
-(match the file's actual helper name/signature — read the neighbouring wrappers first; export the type re-export alongside the others.)
+(re-export the `LearningResponse` type alongside the existing type re-exports.)
 - [ ] **Step 3:** `npx vitest run` + `npm run lint` + `npm run build` → all green.
 - [ ] **Step 4: Commit** — `feat(api): learning endpoint types + client wrapper`.
 
