@@ -274,6 +274,7 @@ def _score(
     skip_penalty_artists: set[str] | None = None,
     positive_artist_strengths: dict[str, float] | None = None,
     positive_label_strengths: dict[str, float] | None = None,
+    signal_multipliers: dict[str, float] | None = None,
 ) -> None:
     """Mutate candidate in place: assign signals and total score.
 
@@ -290,9 +291,20 @@ def _score(
     `feedback.positive_artists` / `feedback.positive_labels` (feedback loop
     spec, Slice A) — None/empty disables the liked_artist / liked_label
     signals entirely (backwards-compatible default).
+
+    signal_multipliers: learned per-signal multipliers from
+    `learning.signal_multipliers` (Slice B). Each scales its signal's FINAL
+    contribution (after internal formulas and caps) so learning stays
+    symmetric in both directions. Penalty and feedback-derived blocks never
+    consult it — defense in depth on top of the learning allowlist.
     """
     if weights is None:
         weights = ScoringWeights()
+
+    mult = signal_multipliers or {}
+
+    def _m(code: str) -> float:
+        return mult.get(code, 1.0)
 
     score = 0.0
     # Two-axis scoring (P2): the same signals feed a familiarity sub-total and a
@@ -348,7 +360,7 @@ def _score(
         matched.append(profile.name)
 
     if matched:
-        artist_score = min(artist_score, weights.max_artist_score)
+        artist_score = min(artist_score, weights.max_artist_score) * _m("known_artist")
         score += artist_score
         familiarity += artist_score
         names = ", ".join(matched[:2])
@@ -358,8 +370,9 @@ def _score(
         ))
 
         if best_effective_count >= weights.recurring_threshold:
-            score += weights.w_recurring
-            familiarity += weights.w_recurring
+            recurring_bonus = weights.w_recurring * _m("recurring_artist")
+            score += recurring_bonus
+            familiarity += recurring_bonus
             c.signals.append(RecommendationSignal(
                 code="recurring_artist",
                 explanation=f"{matched[0]} appears in {best_raw_play_count} of your mixes.",
@@ -436,7 +449,7 @@ def _score(
     if c.label and c.label.lower().strip() in relevant_labels:
         label_key = c.label.lower().strip()
         known_on_label = min(label_artist_counts.get(label_key, 1), weights.label_artist_cap)
-        label_bonus = weights.w_label_base + weights.w_label_per_artist * known_on_label
+        label_bonus = (weights.w_label_base + weights.w_label_per_artist * known_on_label) * _m("label_match")
         score += label_bonus
         discovery += label_bonus
         c.signals.append(RecommendationSignal(
@@ -468,8 +481,9 @@ def _score(
             # SEE are huge, not about labels we simply have no data for.
             roster_size = roster_by_label.get(label_key, 0)
             if anchor is not None and roster_size <= weights.scene_label_roster_cap:
-                score += weights.w_scene_adjacent
-                discovery += weights.w_scene_adjacent
+                scene_bonus = weights.w_scene_adjacent * _m("scene_adjacent")
+                score += scene_bonus
+                discovery += scene_bonus
                 c.signals.append(RecommendationSignal(
                     code="scene_adjacent",
                     explanation=f"Label-mate of {anchor} on {c.label}.",
@@ -479,7 +493,7 @@ def _score(
     seen_on = c.raw_metadata.get("seen_on_sources", [c.source])
     if len(seen_on) >= 2:
         capped = min(len(seen_on), weights.cross_source_cap)
-        cross_source_bonus = weights.w_cross_source_per * capped
+        cross_source_bonus = weights.w_cross_source_per * capped * _m("cross_source")
         score += cross_source_bonus
         discovery += cross_source_bonus
         c.signals.append(RecommendationSignal(
@@ -501,7 +515,7 @@ def _score(
         genre_bonus = sum(
             weights.w_genre * _genre_affinity_multiplier(g, genre_affinity, weights)
             for g in counted
-        )
+        ) * _m("genre_match")
         score += genre_bonus
         discovery += genre_bonus
         c.signals.append(RecommendationSignal(
@@ -515,8 +529,9 @@ def _score(
             rel = datetime.strptime(c.release_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
             days_old = (datetime.now(timezone.utc) - rel).days
             if 0 <= days_old <= weights.fresh_days:
-                score += weights.w_fresh
-                discovery += weights.w_fresh
+                fresh_bonus = weights.w_fresh * _m("fresh_release")
+                score += fresh_bonus
+                discovery += fresh_bonus
                 c.signals.append(RecommendationSignal(
                     code="fresh_release",
                     explanation=f"Released {days_old} day{'s' if days_old != 1 else ''} ago.",
@@ -527,7 +542,7 @@ def _score(
     # --- Chart position, discovery axis (any source that sets chart_position, e.g. Beatport) ---
     chart_pos = c.raw_metadata.get("chart_position")
     if chart_pos and isinstance(chart_pos, int) and 1 <= chart_pos <= _CHART_SCALE:
-        chart_bonus = weights.w_chart_top * (1 - (chart_pos - 1) / _CHART_SCALE)
+        chart_bonus = weights.w_chart_top * (1 - (chart_pos - 1) / _CHART_SCALE) * _m("chart_position")
         score += chart_bonus
         discovery += chart_bonus
         chart_period = c.raw_metadata.get("chart_period", "weekly")
@@ -538,8 +553,9 @@ def _score(
 
     # --- Bandcamp discovery bonus (discovery axis; compensates for no chart_position signal) ---
     if c.source == "bandcamp":
-        score += weights.w_bandcamp
-        discovery += weights.w_bandcamp
+        bandcamp_bonus = weights.w_bandcamp * _m("bandcamp_discovery")
+        score += bandcamp_bonus
+        discovery += bandcamp_bonus
         c.signals.append(RecommendationSignal(
             code="bandcamp_discovery",
             explanation="Bandcamp discovery — independent release outside chart sources.",
@@ -551,8 +567,9 @@ def _score(
     download_count = c.raw_metadata.get("download_count")
     if (c.source == "mixupload" and download_count is not None and isinstance(download_count, int) and
         download_count >= weights.mixupload_popularity_downloads):
-        score += weights.w_mixupload_popularity
-        discovery += weights.w_mixupload_popularity
+        mixupload_bonus = weights.w_mixupload_popularity * _m("source_popularity")
+        score += mixupload_bonus
+        discovery += mixupload_bonus
         c.signals.append(RecommendationSignal(
             code="source_popularity",
             explanation=f"{download_count} downloads on Mixupload.",
@@ -565,8 +582,9 @@ def _score(
     reposts_fire = (isinstance(reposts_count, int)
                     and reposts_count >= weights.soundcloud_popularity_reposts)
     if c.source == "soundcloud" and (downloads_fire or reposts_fire):
-        score += weights.w_soundcloud_popularity
-        discovery += weights.w_soundcloud_popularity
+        sc_bonus = weights.w_soundcloud_popularity * _m("source_popularity")
+        score += sc_bonus
+        discovery += sc_bonus
         explanation = (f"{download_count} downloads on SoundCloud." if downloads_fire
                        else f"{reposts_count} reposts on SoundCloud.")
         c.signals.append(RecommendationSignal(code="source_popularity", explanation=explanation))
@@ -798,6 +816,7 @@ def rank_candidates(
     skip_penalty_artists: set[str] | None = None,
     positive_artist_strengths: dict[str, float] | None = None,
     positive_label_strengths: dict[str, float] | None = None,
+    signal_multipliers: dict[str, float] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score all candidates, assign signals, sort, and split into report sections.
@@ -846,7 +865,8 @@ def rank_candidates(
     for c in candidates:
         _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_penalty_artists,
                positive_artist_strengths=positive_artist_strengths,
-               positive_label_strengths=positive_label_strengths)
+               positive_label_strengths=positive_label_strengths,
+               signal_multipliers=signal_multipliers)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")
@@ -940,6 +960,7 @@ def rank_candidates_mix_prep(
     free_downloads_count: int | None = None,
     positive_artist_strengths: dict[str, float] | None = None,
     positive_label_strengths: dict[str, float] | None = None,
+    signal_multipliers: dict[str, float] | None = None,
 ) -> tuple[dict[str, list[Candidate]], dict[str, list[str]]]:
     """
     Score and section candidates for a mix-prep run.
@@ -977,7 +998,8 @@ def rank_candidates_mix_prep(
     for c in candidates:
         _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_penalty_artists,
                positive_artist_strengths=positive_artist_strengths,
-               positive_label_strengths=positive_label_strengths)
+               positive_label_strengths=positive_label_strengths,
+               signal_multipliers=signal_multipliers)
 
     ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
     logger.info(f"[ranker] Mix-prep scored {len(ranked)} candidates — top score: {ranked[0].score if ranked else 0}")

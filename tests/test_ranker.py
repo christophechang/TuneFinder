@@ -1627,3 +1627,41 @@ def test_liked_label_absent_when_label_not_positive():
     _score(c, {}, set(), {}, set(),
            positive_label_strengths={"astrophonica": 2.0})
     assert not any(s.code == "liked_label" for s in c.signals)
+
+
+# ---------------------------------------------------------------------------
+# Learned signal multipliers (feedback loop spec, Slice B)
+# ---------------------------------------------------------------------------
+
+def test_multiplier_scales_signal_contribution():
+    profiles = {"sully": ArtistProfile(name="Sully", play_count=2)}
+    c = Candidate(artist="Sully", title="T", link="", source="beatport")
+    _score(c, profiles, set(), {}, set(), signal_multipliers={"known_artist": 1.5})
+    # base known_artist: 2 plays * 3.0 = 6.0 → ×1.5 = 9.0 (still under 10.0 cap)
+    assert c.score == 9.0
+    assert c.familiarity_score == 9.0
+
+
+def test_multiplier_applies_after_cap():
+    profiles = {"sully": ArtistProfile(name="Sully", play_count=10)}
+    c = Candidate(artist="Sully", title="T", link="", source="beatport")
+    _score(c, profiles, set(), {}, set(), signal_multipliers={"known_artist": 0.5})
+    # known_artist: 10 plays * 3.0 = 30 → capped 10.0 → ×0.5 = 5.0.
+    # play_count 10 also clears recurring_threshold 3 → recurring_artist +2.0
+    # (untouched — its own multiplier wasn't passed). Total 7.0.
+    assert c.score == 7.0
+    assert c.familiarity_score == 7.0
+
+
+def test_multiplier_ignores_unknown_and_penalty_codes():
+    c = Candidate(artist="Nobody", title="T", link="", source="bandcamp")
+    _score(c, {}, set(), {}, set(),
+           signal_multipliers={"pool_age": 4.0, "bandcamp_discovery": 2.0})
+    # bandcamp_discovery 1.0 ×2.0 = 2.0; pool_age multiplier has no landing block
+    assert c.score == 2.0
+
+
+def test_no_multipliers_is_baseline():
+    c = Candidate(artist="Nobody", title="T", link="", source="bandcamp")
+    _score(c, {}, set(), {}, set())
+    assert c.score == 1.0  # w_bandcamp default
