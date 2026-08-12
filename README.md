@@ -66,9 +66,20 @@ TuneFinder ships a web application — [tunefinder-web](https://github.com/chris
 | `source_popularity` | +0.25 | Popular free-DL — source-gated: Mixupload tracks need ≥100 downloads, SoundCloud tracks need ≥50 downloads OR ≥25 reposts (`scoring.soundcloud_popularity_reposts`); each store's threshold applies only to its own tracks |
 | `genre_match` | +0.5 per tag (cap 2), scaled ×0.5–×2.0 by genre affinity | Soft match against catalog-augmented genre set; `electronic` excluded (too broad); capped at 2 tags (highest-affinity tags counted first) to prevent cross-source tag inflation |
 | `fresh_release` | +0.5 | Released within 7 days |
+| `liked_artist` | ×0.75 per strength point (cap 3.0) | Artist carries latest-mark `liked`/`bought` outcomes (bought=2, liked=1, capped 6); any latest-mark `skip` disqualifies the boost — the mirror of `skipped_artist` |
+| `liked_label` | +0.5 | Label carries liked/bought marks (via recommendation history) |
+| `seeded` | 0 | Measurement tag only — track was fetched by a taste-seeded query (see below); rides the by-signal lift table, never scores |
 | `recent_recommendation` | −0.75 | Artist appeared in weekly or mix-prep history within last 4 weeks |
 | `skipped_artist` | −1.0 | Artist has ≥2 latest-mark `skip` outcomes and zero bought/liked marks — soft correction, not evidence (total score only) |
 | `pool_age` | −0.25 per week (cap −1.5) | Carried over from the persistent pool — older entries lose ground |
+
+### Auto-tuning (learned weights)
+
+Each weekly run measures every tunable signal's lift (positive rate vs. the overall baseline, `own`/`heard` excluded) and nudges a per-signal multiplier a fifth of the way toward it: `new = old + 0.2·(clamp(lift, 0.25, 4.0) − old)`, gated at ≥10 rated marks per signal. Multipliers scale each signal's final contribution (after caps) identically in weekly, mix-prep and `explain`. Penalty codes and the feedback-derived `liked_artist`/`liked_label`/`seeded` are never tuned. State lives in `data/learned_weights.json` only — **delete the file to reset to the baseline weights above**; dry runs never write it, and every adjustment is reported in the Discord run summary.
+
+### Taste-seeded fetching
+
+The weekly run turns your top positive artists (10) and labels (5) into extra fetch queries: SoundCloud free-text search and Beatport catalog search (results kept only when the seed actually matches an artist or the release label — Beatport search is fuzzy). Seeded items carry `raw_metadata.seeded_by` and the zero-weight `seeded` signal, so the tune report shows whether seeding converts better than the static genre queries. Mix-prep runs never seed. `own`/`bought` marks also merge into the known-track exclusion at run time, so a track you've marked owned or bought can never resurface.
 
 Every candidate also gets two sub-totals alongside the combined score: **familiarity** (`known_artist`, `recurring_artist`, `recent_recommendation`) and **discovery** (`label_match`, `scene_adjacent`, `cross_source`, `genre_match`, `chart_position`, `fresh_release`, `bandcamp_discovery`, `source_popularity`). Top Picks, Label Watch, and Artist Watch still rank by the combined score — only Wildcards selection reads the discovery axis (see below). The `pool_age` and `skipped_artist` penalties are deducted from the combined total only; both axes stay gross.
 

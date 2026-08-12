@@ -4,6 +4,17 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.18.0 — 2026-08-12
+
+### Added
+
+- **The feedback loop closes** (spec: `docs/superpowers/specs/2026-08-12-feedback-loop-design.md`). Until now only `skip` fed scoring; the other four marks were bookkeeping. Now:
+  - **Positive signals** — `liked_artist` (×0.75 per strength point, bought=2/liked=1 capped at 6, contribution capped 3.0, familiarity axis, alias-aware) and `liked_label` (+0.5, discovery axis). Mutually exclusive with the skip penalty at the derivation level: any latest-mark `skip` disqualifies an artist's boost, mirroring the penalty's zero-positive rule.
+  - **Identity fix** — `own`/`bought` latest marks merge into the known-track exclusion at run time (single point in `_load_profile_state`, inherited by weekly, mix-prep, explain and pool injection, which now also checks the normalised key). An owned track can no longer resurface.
+  - **Auto-tuning** (`src/pipeline/learning.py`) — per-signal lift (same math as the insights desk) drives a convergent bounded multiplier: `new = old + 0.2·(clamp(lift, 0.25, 4.0) − old)`, gated at ≥10 rated marks. Ten tunable codes; penalties and feedback-derived signals excluded. Multipliers scale each signal's final contribution in the shared `_score` path, so weekly, mix-prep and `explain` agree. State in `data/learned_weights.json` only (delete = reset); never written on dry runs; only weekly runs update it (even no-candidates weeks); adjustments reported in the Discord run summary and the explain trace header.
+  - **Taste-seeded fetching** — weekly runs turn top-10 positive artists + top-5 labels into extra fetch queries: SoundCloud free-text search and Beatport `/v4/catalog/search` (client-side artist/label match — the search is fuzzy). Seeded items carry `seeded_by` plus a zero-weight `seeded` signal so the tune report measures seed conversion; `chart_position`/`seeded_by` survive cross-source merges. Mix-prep never seeds.
+  - **`GET /api/learning`** — learned multipliers with gate state computed from current mark counts, positive artist/label affinities, seed caps and the exclusion-merge count. `ReportTrack` gains `seeded_by`. Surfaced by tunefinder-web v1.10.0 (WHAT THE ENGINE CHANGED).
+
 ## v0.17.0 — 2026-08-11
 
 ### Added
