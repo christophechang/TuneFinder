@@ -148,3 +148,68 @@ def test_merged_feed_uses_per_track_genre_slug():
          patch("src.fetchers.beatport._get_json", return_value=_page([track])):
         items = beatport.fetch(settings)
     assert items[0].genre_tags == ["breaks", "uk-bass"]      # per-track slug → both tags, not the feed name
+
+
+# ---------------------------------------------------------------------------
+# Taste-seeded search (feedback loop spec, Slice C)
+# ---------------------------------------------------------------------------
+
+def _search_track(name="New Cut", artist="Om Unit", label="Metalheadz", track_id=999):
+    return {
+        "id": track_id, "name": name, "slug": "new-cut", "bpm": 170, "mix_name": "Original Mix",
+        "isrc": "GB2", "publish_date": "2026-08-01",
+        "artists": [{"name": artist}],
+        "genre": {"slug": "drum-bass"},
+        "key": {"name": "F Minor"},
+        "release": {"name": "New Cut EP", "label": {"name": label}},
+    }
+
+
+def _seeded_get_json(url, session):
+    if "/catalog/search/" in url:
+        # fuzzy search: right artist + an unrelated stray result
+        return {"tracks": [_search_track(), _search_track(name="Stray", artist="Someone Else", track_id=1000)]}
+    return _page([])
+
+
+def test_seeded_search_matches_artist_and_tags(tmp_path):
+    settings = _settings(genres=[])
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_seeded_get_json):
+        items = beatport.fetch(settings, seed_queries=["om unit"])
+    assert len(items) == 1
+    assert items[0].artist == "Om Unit"
+    assert items[0].raw_metadata["seeded_by"] == "om unit"
+    assert items[0].raw_metadata["chart_position"] is None
+
+
+def test_seeded_search_matches_label_seed(tmp_path):
+    settings = _settings(genres=[])
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_seeded_get_json):
+        items = beatport.fetch(settings, seed_queries=["metalheadz"])
+    # both results carry the Metalheadz label → both match the label seed
+    assert len(items) == 2
+    assert all(i.raw_metadata["seeded_by"] == "metalheadz" for i in items)
+
+
+def test_seeded_search_failure_does_not_raise(tmp_path):
+    settings = _settings(genres=[])
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=RuntimeError("boom")):
+        items = beatport.fetch(settings, seed_queries=["om unit"])
+    assert items == []
+
+
+def test_seeded_never_runs_for_genre_targeted_fetch(tmp_path):
+    settings = _settings()
+    calls = []
+
+    def _get(url, session):
+        calls.append(url)
+        return _page([_track()])
+
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_get):
+        beatport.fetch(settings, target_genre="dnb", seed_queries=["om unit"])
+    assert not any("search" in u for u in calls)

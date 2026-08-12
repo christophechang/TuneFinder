@@ -169,9 +169,13 @@ def _richness(item: SourceItem) -> int:
 
 # Embed/display metadata worth preserving from merged-away duplicates.
 # Backfill only — the winning item's values are never overwritten.
+# chart_position and seeded_by (feedback loop spec, Slice C) are here so a
+# track found by BOTH a genre chart and a taste-seeded search keeps its chart
+# signal and its seed attribution regardless of which copy wins the merge.
 _MERGE_BACKFILL_KEYS = (
     "beatport_id", "volumo_track_id", "volumo_album_id",
     "bandcamp_album_id", "bpm", "key", "keysign",
+    "chart_position", "seeded_by",
 )
 
 

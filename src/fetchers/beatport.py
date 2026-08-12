@@ -7,12 +7,15 @@ Endpoint: GET /v4/catalog/genres/{id}/top/100/.
 
 Key signals: chart_position (rank in the genre top-100), bpm, key (harmonic mixing).
 """
+import urllib.parse
+
 import requests
 
 from src.fetchers import beatport_auth
 from src.fetchers.common import polite_sleep
 from src.logger import get_logger
 from src.models import SourceItem
+from src.pipeline.dedup import normalise_artist
 
 logger = get_logger(__name__)
 
@@ -111,7 +114,8 @@ def _fetch_genre_top(session: requests.Session, genre_id) -> list[dict]:
 
 
 def fetch(settings, target_genre: str | None = None,
-          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
+          bpm_ranges: list[tuple[float, float]] | None = None,
+          seed_queries: list[str] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("beatport")
     if not cfg.get("enabled", False):
         return []
@@ -122,7 +126,8 @@ def fetch(settings, target_genre: str | None = None,
             g for g in genres
             if target_genre in (_SLUG_TO_TAGS.get(g.get("slug", "")) or [g.get("name", "")])
         ]
-    if not genres:
+        seed_queries = None  # genre-targeted runs (mix-prep) never seed
+    if not genres and not seed_queries:
         return []
 
     token = beatport_auth.get_access_token(settings)  # raises BeatportAuthError
@@ -159,6 +164,45 @@ def fetch(settings, target_genre: str | None = None,
         logger.info(f"[beatport] {name}: {len(genre_items)} tracks")
         all_items.extend(genre_items)
         polite_sleep(2.0)
+
+    # --- Taste-seeded searches (feedback loop spec, Slice C) ---
+    # /v4/catalog/search?q=&type=tracks with the same Bearer session (verified
+    # live 2026-08-12). Search is fuzzy, so results are kept only when the seed
+    # actually matches an artist (normalise_artist) or the release label —
+    # /catalog/tracks?artist_name= was tried and returns unrelated tracks.
+    # Old releases pass through here; the pipeline's release-date window drops
+    # them downstream. Failures degrade per seed and never count toward the
+    # all-genres-failed fail-safe.
+    seeded_seen_ids: set = set()
+    for seed in (seed_queries or []):
+        polite_sleep(2.0)
+        try:
+            url = f"{_BASE}/catalog/search/?q={urllib.parse.quote(seed)}&type=tracks&per_page=25"
+            data = _get_json(url, session)
+            matched = 0
+            for raw in (data.get("tracks") or []):
+                track_id = raw.get("id")
+                if track_id is not None and track_id in seeded_seen_ids:
+                    continue
+                artist_match = any(
+                    normalise_artist(a.get("name", "")) == seed
+                    for a in (raw.get("artists") or [])
+                )
+                label_name = ((raw.get("release") or {}).get("label") or {}).get("name") or ""
+                label_match = label_name.lower().strip() == seed
+                if not artist_match and not label_match:
+                    continue
+                item = _parse_track(raw, fallback_tags=[])
+                if item is None:
+                    continue
+                if track_id is not None:
+                    seeded_seen_ids.add(track_id)
+                item.raw_metadata["seeded_by"] = seed
+                all_items.append(item)
+                matched += 1
+            logger.info(f"[beatport] seeded '{seed}': {matched} matched tracks")
+        except Exception as e:
+            logger.warning(f"[beatport] seeded '{seed}': fetch failed: {e}")
 
     if attempted > 0 and completed == 0:
         raise RuntimeError(f"beatport: all {attempted} genres failed to fetch")

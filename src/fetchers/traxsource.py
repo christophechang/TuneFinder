@@ -54,7 +54,8 @@ def _parse_track_row(row) -> SourceItem | None:
 
 
 def fetch(settings, target_genre: str | None = None,
-          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
+          bpm_ranges: list[tuple[float, float]] | None = None,
+          seed_queries: list[str] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("traxsource")
     if not cfg.get("enabled", False):
         return []

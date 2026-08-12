@@ -18,8 +18,14 @@ from src.pipeline.dedup import (
     items_to_candidates,
     make_dedup_key,
 )
-from src.pipeline.feedback import load_feedback, skipped_artists
-from src.pipeline.history import build_history_keys, load_history
+from src.pipeline.feedback import (
+    feedback_known_keys,
+    load_feedback,
+    positive_artists,
+    positive_labels,
+    skipped_artists,
+)
+from src.pipeline.history import build_history_keys, load_history, load_mix_prep_history
 from src.pipeline.labels import fresh_label_artist_data, load_label_affinity
 from src.pipeline.pool import load_pool, pool_to_candidates
 from src.pipeline.profile import load_artist_profiles, load_genre_affinity, load_known_tracks
@@ -62,15 +68,29 @@ def explain_track(selector: str, settings) -> str:
     lines.append(f"Dedup key: {target_key!r}")
     lines.append("")
 
+    # Learned multipliers (feedback loop spec, Slice B) — read-only, applied
+    # to scoring below so explain matches an actual run.
+    from src.pipeline.learning import load_learned_weights, signal_multipliers
+    learned_mults = signal_multipliers(load_learned_weights(settings.data_dir))
+    if learned_mults:
+        lines.append("Learned multipliers (data/learned_weights.json):")
+        for code, m in sorted(learned_mults.items()):
+            lines.append(f"  {code} ×{m:.2f}")
+    else:
+        lines.append("Learned multipliers: none (baseline weights)")
+    lines.append("")
+
     # Load offline data
     source_items = load_source_items(settings.data_dir)
-    known_keys = load_known_tracks(settings.data_dir)
+    feedback_entries = load_feedback(settings.data_dir)
+    # Known-key merge (feedback loop spec, Slice A) — mirror _load_profile_state
+    # so explain's known-track verdicts match an actual run.
+    known_keys = load_known_tracks(settings.data_dir) | feedback_known_keys(feedback_entries, remix_aware)
     profiles = load_artist_profiles(settings.data_dir)
     genre_affinity = load_genre_affinity(settings.data_dir)
     history = load_history(settings.data_dir)
     history_keys = build_history_keys(history, remix_aware)
     pool_records = load_pool(settings.data_dir)
-    feedback_entries = load_feedback(settings.data_dir)
 
     # --- Fetched ---
     lines.append("=== FETCHED ===")
@@ -187,7 +207,9 @@ def explain_track(selector: str, settings) -> str:
     fresh_keys_set = {c.key for c in scored_candidates}
     pool_injected = [
         c for c in pool_to_candidates([r for r in pool_records if r.key not in fresh_keys_set])
-        if c.key not in known_keys and c.key not in history_keys
+        if c.key not in known_keys
+        and make_dedup_key(c.artist, c.title, remix_aware) not in known_keys
+        and c.key not in history_keys
     ]
     all_scored = scored_candidates + pool_injected
 
@@ -217,9 +239,18 @@ def explain_track(selector: str, settings) -> str:
     # explain's reconstruction matches an actual run.
     skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
 
+    # Positive feedback signals (feedback loop spec, Slice A) — mirror run_weekly.
+    positive_strengths = positive_artists(feedback_entries)
+    label_strengths = positive_labels(
+        feedback_entries, history, load_mix_prep_history(settings.data_dir)
+    )
+
     # Single scoring pass
     for c in all_scored:
-        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_set)
+        _score(c, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_set,
+               positive_artist_strengths=positive_strengths,
+               positive_label_strengths=label_strengths,
+               signal_multipliers=learned_mults)
 
     ranked = sorted(all_scored, key=lambda c: c.score, reverse=True)
 
@@ -233,7 +264,10 @@ def explain_track(selector: str, settings) -> str:
             hyp = copy.copy(target_candidate)
             hyp.signals = []
             hyp.score = 0.0
-            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_set)
+            _score(hyp, profiles_lower, relevant_labels, label_artist_counts, genres_set, recent_artists, weights, genre_affinity, aliases, scene_data, skip_set,
+                   positive_artist_strengths=positive_strengths,
+                   positive_label_strengths=label_strengths,
+                   signal_multipliers=learned_mults)
             target_scored = hyp
             hypothetical = True
         else:

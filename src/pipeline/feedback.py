@@ -240,6 +240,80 @@ def skipped_artists(entries: list[FeedbackEntry], min_skips: int) -> set[str]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Positive feedback derivations (feedback loop spec, Slice A)
+# ---------------------------------------------------------------------------
+
+_POSITIVE_STRENGTHS = {"bought": 2.0, "liked": 1.0}
+POSITIVE_STRENGTH_CAP = 6.0
+
+
+def positive_artists(entries: list[FeedbackEntry]) -> dict[str, float]:
+    """Normalised artist → positive strength (bought=2, liked=1, capped).
+
+    Mirror image of skipped_artists: any latest-mark 'skip' on the artist
+    disqualifies the boost entirely, so one mark can never both cancel the
+    skip penalty and add a boost. Neutral outcomes are no-ops.
+    """
+    strengths: dict[str, float] = {}
+    has_skip: set[str] = set()
+    for entry in latest_marks(entries):
+        for part in _split_artists(entry.artist):
+            name = normalise_artist(part)
+            if not name:
+                continue
+            if entry.outcome == "skip":
+                has_skip.add(name)
+            elif entry.outcome in _POSITIVE_STRENGTHS:
+                strengths[name] = strengths.get(name, 0.0) + _POSITIVE_STRENGTHS[entry.outcome]
+    return {
+        name: min(s, POSITIVE_STRENGTH_CAP)
+        for name, s in strengths.items() if name not in has_skip
+    }
+
+
+def positive_labels(
+    entries: list[FeedbackEntry],
+    weekly: list[RecommendationRecord],
+    mix_prep: list[RecommendationRecord],
+) -> dict[str, float]:
+    """Lowercased label → positive strength, joined via recommendation records
+    (same (history, key) join as tune_data; ranker's lower().strip() convention).
+    """
+    records_by_hk: dict[tuple[str, str], RecommendationRecord] = {}
+    for history_name, records in (("weekly", weekly), ("mix-prep", mix_prep)):
+        for r in records:
+            hk = (history_name, make_dedup_key(r.artist, r.title))
+            if hk not in records_by_hk or r.recommended_at > records_by_hk[hk].recommended_at:
+                records_by_hk[hk] = r
+
+    strengths: dict[str, float] = {}
+    for entry in latest_marks(entries):
+        if entry.outcome not in _POSITIVE_STRENGTHS:
+            continue
+        rec = records_by_hk.get((entry.history, entry.key))
+        if rec is None or not rec.label:
+            continue
+        label_key = rec.label.lower().strip()
+        strengths[label_key] = strengths.get(label_key, 0.0) + _POSITIVE_STRENGTHS[entry.outcome]
+    return {k: min(s, POSITIVE_STRENGTH_CAP) for k, s in strengths.items()}
+
+
+def feedback_known_keys(entries: list[FeedbackEntry], remix_aware: bool = False) -> set[str]:
+    """Exclusion keys for tracks whose latest mark is 'own' or 'bought'.
+
+    Emits both key regimes when remix_aware (mirror of build_known_track_keys)
+    so the merge behaves under either pipeline.remix_aware_identity setting.
+    """
+    keys: set[str] = set()
+    for entry in latest_marks(entries):
+        if entry.outcome in ("own", "bought"):
+            keys.add(make_dedup_key(entry.artist, entry.title))
+            if remix_aware:
+                keys.add(make_dedup_key(entry.artist, entry.title, remix_aware=True))
+    return keys
+
+
 def summarise_feedback(
     weekly: list[RecommendationRecord],
     mix_prep: list[RecommendationRecord],

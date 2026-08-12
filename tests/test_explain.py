@@ -224,3 +224,57 @@ def test_completely_unknown_selector():
         out = explain_track("Unknown Artist - Ghost Track", _settings(tmpdir))
         assert "Not in the current week" in out or "not in the current week" in out.lower()
         assert "Not in pool" in out or "not in pool" in out.lower()
+
+
+def test_own_marked_track_filtered_by_feedback_merge():
+    """Feedback loop spec Slice A — an own/bought mark excludes the track even
+    though known_tracks.json doesn't contain it."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        artist, title = "Sully", "Skyline"
+        _setup_data(
+            tmpdir,
+            source_items=[_source_item(artist, title)],
+            feedback=[{
+                "key": "sully||skyline", "artist": artist, "title": title,
+                "outcome": "own", "marked_at": "2026-08-01T00:00:00+00:00",
+                "report_id": "2026-W30", "track_no": 1, "history": "weekly",
+            }],
+        )
+        out = explain_track(f"{artist} - {title}", _settings(tmpdir))
+        assert "FILTERED — track matches known-track exclusion set." in out
+
+
+def test_liked_artist_signal_in_trace():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        artist, title = "Sully", "Skyline"
+        _setup_data(
+            tmpdir,
+            source_items=[_source_item(artist, title)],
+            feedback=[{
+                "key": "sully||past tune", "artist": artist, "title": "Past Tune",
+                "outcome": "liked", "marked_at": "2026-08-01T00:00:00+00:00",
+                "report_id": "2026-W30", "track_no": 1, "history": "weekly",
+            }],
+        )
+        out = explain_track(f"{artist} - {title}", _settings(tmpdir))
+        assert "[liked_artist]" in out
+
+
+def test_learned_multipliers_shown_and_applied():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        artist, title = "Nobody", "Fresh Cut"
+        _setup_data(tmpdir, source_items=[_source_item(artist, title, source="bandcamp")])
+        _write_json(os.path.join(tmpdir, "learned_weights.json"), {
+            "bandcamp_discovery": {"multiplier": 2.0, "lift": 2.0, "samples": 20,
+                                   "updated_at": "2026-08-01T00:00:00+00:00"},
+        })
+        out = explain_track(f"{artist} - {title}", _settings(tmpdir))
+        assert "Learned multipliers" in out
+        assert "bandcamp_discovery ×2.00" in out
+
+
+def test_no_learned_multipliers_states_baseline():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _setup_data(tmpdir)
+        out = explain_track("No One - Nowhere", _settings(tmpdir))
+        assert "Learned multipliers: none (baseline weights)" in out

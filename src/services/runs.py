@@ -84,13 +84,21 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=Fa
 
     post_alert_fn: callable(message: str) to post alerts. Called on live runs
     only (mirrors existing anomaly-alert gating); dry-run logs instead.
+
+    Known-key merge (feedback loop spec, Slice A): the returned known_keys are
+    unioned with feedback-derived own/bought exclusion keys at this single
+    point, so every consumer — weekly, mix-prep, explain, pool injection —
+    inherits the merge. Derived at run time; never written to known_tracks.json.
     """
     from src.fetchers.catalog import fetch_all_mixes, fetch_all_tracks
+    from src.pipeline.feedback import feedback_known_keys, load_feedback
     from src.pipeline.profile import (
         apply_recency_weights, build_artist_profiles, build_genre_affinity, build_known_track_keys,
         save_known_tracks, save_artist_profiles, save_genre_affinity,
         load_artist_profiles, load_genre_affinity, load_known_tracks,
     )
+
+    fb_keys = feedback_known_keys(load_feedback(settings.data_dir), remix_aware)
 
     try:
         logger.info("[load_profile_state] Fetching tracks from catalog API...")
@@ -117,7 +125,7 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=Fa
         else:
             logger.warning(f"[load_profile_state] ALERT (dry-run, not posted): {alert_msg}")
 
-        return profiles, genre_affinity, known_keys, True
+        return profiles, genre_affinity, known_keys | fb_keys, True
 
     profiles = build_artist_profiles(tracks)
     genre_affinity = build_genre_affinity(tracks)
@@ -139,7 +147,7 @@ def _load_profile_state(settings, logger, dry_run, post_alert_fn, remix_aware=Fa
     save_artist_profiles(profiles, settings.data_dir)
     save_genre_affinity(genre_affinity, settings.data_dir)
     logger.info(f"[load_profile_state] Refreshed profile state from {len(tracks)} known tracks")
-    return profiles, genre_affinity, known_keys, False
+    return profiles, genre_affinity, known_keys | fb_keys, False
 
 
 def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressFn] = None) -> RunOutcome:
@@ -154,13 +162,13 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
     )
     from src.pipeline.dedup import (
         deduplicate_source_items, items_to_candidates,
-        filter_known, filter_history, filter_release_date,
+        filter_known, filter_history, filter_release_date, make_dedup_key,
     )
     from src.pipeline.ranker import rank_candidates
     from src.pipeline.labels import (
         load_label_affinity, update_label_affinity, save_label_affinity, fresh_label_artist_data,
     )
-    from src.pipeline.feedback import load_feedback, skipped_artists
+    from src.pipeline.feedback import load_feedback, positive_artists, positive_labels, skipped_artists
     from src.pipeline.pool import load_pool, pool_to_candidates, save_pool, POOL_CAP
     from src.pipeline.report import generate_report, report_order
     from src.pipeline.report_artifact import build_report_artifact, write_report_artifact
@@ -205,9 +213,46 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
         history_keys = build_history_keys(history, remix_aware)
         pool_records = load_pool(settings.data_dir)
 
+        # 2b. Feedback derivations (feedback loop spec, Slices A + C) — loaded
+        # before the fetch so positive marks can seed source queries.
+        from src.pipeline.history import load_mix_prep_history
+        weights = settings.scoring_weights()
+        feedback_entries = load_feedback(settings.data_dir)
+        skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
+        positive_strengths = positive_artists(feedback_entries)
+        mix_prep_history = load_mix_prep_history(settings.data_dir)
+        label_strengths = positive_labels(feedback_entries, history, mix_prep_history)
+
+        # Auto-tuning (feedback loop spec, Slice B) — one convergent update per
+        # weekly run from all marks to date, applied to this run's scoring.
+        # Sits here, before the fetch, so the update happens even on a
+        # no-candidates week; dry runs compute and apply but never persist.
+        from src.pipeline.feedback import tune_data
+        from src.pipeline.learning import (
+            load_learned_weights, save_learned_weights, signal_multipliers,
+            update_learned_weights,
+        )
+        now_iso = datetime.now(timezone.utc).isoformat()
+        learned = load_learned_weights(settings.data_dir)
+        tune = tune_data(history, mix_prep_history, feedback_entries)
+        learned, adjustments = update_learned_weights(learned, tune, now_iso)
+        if not dry_run:
+            save_learned_weights(learned, settings.data_dir)
+        multipliers = signal_multipliers(learned)
+        for line in adjustments:
+            logger.info(f"[learning] {line}")
+
+        # Taste-seeded fetch queries (Slice C): top-K positive artists + labels.
+        seed_queries = [
+            name for name, _ in sorted(positive_strengths.items(), key=lambda kv: -kv[1])
+        ][: settings.pipeline_seeded_artist_count]
+        seed_queries += [
+            label for label, _ in sorted(label_strengths.items(), key=lambda kv: -kv[1])
+        ][: settings.pipeline_seeded_label_count]
+
         # 3. Fetch external sources
         emit("sources", "Fetching enabled sources")
-        source_items, fetcher_health = fetch_all_sources(settings)
+        source_items, fetcher_health = fetch_all_sources(settings, seed_queries=seed_queries or None)
         save_source_items(source_items, settings.data_dir)
         archive_source_items(source_items, settings.data_dir, report_id)
         sources_fetched = len(source_items)
@@ -249,7 +294,9 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
         fresh_keys = {c.key for c in fresh_candidates}
         pool_injected = [
             c for c in pool_to_candidates([r for r in pool_records if r.key not in fresh_keys])
-            if c.key not in known_keys and c.key not in history_keys
+            if c.key not in known_keys
+            and make_dedup_key(c.artist, c.title, remix_aware) not in known_keys
+            and c.key not in history_keys
         ]
         all_candidates = fresh_candidates + pool_injected
         candidates = all_candidates
@@ -277,23 +324,22 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
                 duration_seconds=int(time.time() - start), stats=stats, no_candidates=True,
             )
 
-        # 5. Rank and split into sections
+        # 5. Rank and split into sections. The skip penalty (issue #11),
+        # positive strengths and learned multipliers were derived at step 2b.
         emit("rank", f"Scoring {len(candidates)} candidates")
-        weights = settings.scoring_weights()
         label_memory = fresh_label_artist_data(label_store, weights.label_memory_max_age_weeks)
-        # Skip-derived negative signal (issue #11) — artists with repeated 'skip'
-        # marks and no positives get a soft penalty. See src/pipeline/feedback.skipped_artists.
-        feedback_entries = load_feedback(settings.data_dir)
-        skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
+
         sections, label_artists = rank_candidates(
             candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
             label_memory=label_memory, skip_penalty_artists=skip_set,
+            positive_artist_strengths=positive_strengths,
+            positive_label_strengths=label_strengths,
+            signal_multipliers=multipliers,
         )
         aliases = settings.artist_aliases()
 
         # 5b. Update label affinity store from this run's label_seed (live runs only —
         # a dry-run must not persist state it didn't actually recommend from).
-        now_iso = datetime.now(timezone.utc).isoformat()
         if not dry_run:
             profiles_lower = {k.lower(): v for k, v in profiles.items()}
             label_store = update_label_affinity(label_store, label_seed, profiles_lower, aliases, now_iso)
@@ -395,7 +441,8 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
             f"{after_known} after known filter → {after_history} after history → "
             f"{after_release_date} after {date_filter_note}\n"
             f"Pool: {len(pool_injected)} injected, {len(new_pool)} total (cap {POOL_CAP})\n"
-            f"Recommended: {len(new_records)} tracks"
+            f"Recommended: {len(new_records)} tracks\n"
+            + ("Learning: " + "; ".join(adjustments) if adjustments else "Learning: no adjustments")
         )
         if not dry_run:
             discord.post_log(log_msg)
@@ -421,13 +468,13 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
     )
     from src.pipeline.dedup import (
         deduplicate_source_items, items_to_candidates,
-        filter_known, filter_genre, filter_genre_exclusions, filter_release_date,
+        filter_known, filter_genre, filter_genre_exclusions, filter_release_date, make_dedup_key,
     )
     from src.pipeline.ranker import rank_candidates_mix_prep
     from src.pipeline.labels import (
         load_label_affinity, update_label_affinity, save_label_affinity, fresh_label_artist_data,
     )
-    from src.pipeline.feedback import load_feedback, skipped_artists
+    from src.pipeline.feedback import load_feedback, positive_artists, positive_labels, skipped_artists
     from src.pipeline.pool import load_pool, pool_to_candidates
     from src.pipeline.report import generate_mix_prep_report, report_order
     from src.pipeline.report_artifact import build_report_artifact, write_report_artifact
@@ -519,7 +566,9 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
         # Pool injection is deliberately exempt from the release-date window (same as the weekly run) — the pool-age penalty handles staleness. See docs/scoring-review.md §2.5.
         pool_injected = [
             c for c in _pool
-            if c.key not in known_keys and c.key not in mix_prep_history_keys
+            if c.key not in known_keys
+            and make_dedup_key(c.artist, c.title, remix_aware) not in known_keys
+            and c.key not in mix_prep_history_keys
         ]
         if free_only:
             pool_injected = [c for c in pool_injected if c.raw_metadata.get("free_download") is True]
@@ -572,10 +621,22 @@ def run_mix_prep(settings, options: MixPrepOptions, progress: Optional[ProgressF
         # Skip-derived negative signal (issue #11) — see run_weekly.
         feedback_entries = load_feedback(settings.data_dir)
         skip_set = skipped_artists(feedback_entries, weights.skipped_artist_min_skips)
+        # Positive feedback signals (feedback loop spec, Slice A) — see run_weekly.
+        from src.pipeline.history import load_history
+        positive_strengths = positive_artists(feedback_entries)
+        weekly_history = load_history(settings.data_dir)
+        label_strengths = positive_labels(feedback_entries, weekly_history, mix_prep_history)
+        # Learned multipliers (Slice B) — applied read-only; only the WEEKLY
+        # run updates learned_weights.json.
+        from src.pipeline.learning import load_learned_weights, signal_multipliers
+        multipliers = signal_multipliers(load_learned_weights(settings.data_dir))
         sections, label_artists = rank_candidates_mix_prep(
             candidates, profiles, settings, label_seed=label_seed, genre_affinity=genre_affinity,
             label_memory=label_memory, demoted_keys=demoted_keys, skip_penalty_artists=skip_set,
             free_downloads_count=settings.pipeline_free_downloads_mode_count if free_only else None,
+            positive_artist_strengths=positive_strengths,
+            positive_label_strengths=label_strengths,
+            signal_multipliers=multipliers,
         )
         aliases = settings.artist_aliases()
 

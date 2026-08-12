@@ -262,6 +262,48 @@ def create_app(settings=None, job_manager: JobManager | None = None) -> FastAPI:
             "data_dir": settings.data_dir,
         }
 
+    @app.get("/api/learning", response_model=schemas.LearningResponse,
+             dependencies=[Depends(require_auth)])
+    def learning_view():
+        from src.pipeline.feedback import (
+            feedback_known_keys, load_feedback, positive_artists, positive_labels, tune_data,
+        )
+        from src.pipeline.history import load_history, load_mix_prep_history
+        from src.pipeline.learning import MIN_SAMPLES, TUNABLE_SIGNALS, load_learned_weights
+
+        entries = load_feedback(settings.data_dir)
+        weekly = load_history(settings.data_dir)
+        mix_prep = load_mix_prep_history(settings.data_dir)
+        learned = load_learned_weights(settings.data_dir)
+        remix_aware = settings.pipeline_remix_aware_identity
+        artists = positive_artists(entries)
+        labels = positive_labels(entries, weekly, mix_prep)
+        # Gate state from CURRENT counts — the same non_own number the desk's
+        # thin-data branding uses — never from the stored samples snapshot.
+        signal_slots = tune_data(weekly, mix_prep, entries)["dimensions"]["signal"]
+        return {
+            "learned": {
+                code: {
+                    **entry,
+                    "gated": signal_slots.get(code, {}).get("non_own", 0) < MIN_SAMPLES,
+                }
+                for code, entry in learned.items()
+            },
+            "tunable_signals": sorted(TUNABLE_SIGNALS),
+            "min_samples": MIN_SAMPLES,
+            "positive_artists": [
+                {"name": n, "strength": s}
+                for n, s in sorted(artists.items(), key=lambda kv: (-kv[1], kv[0]))
+            ],
+            "positive_labels": [
+                {"label": l, "strength": s}
+                for l, s in sorted(labels.items(), key=lambda kv: (-kv[1], kv[0]))
+            ],
+            "seeded_artist_count": settings.pipeline_seeded_artist_count,
+            "seeded_label_count": settings.pipeline_seeded_label_count,
+            "feedback_known_count": len(feedback_known_keys(entries, remix_aware)),
+        }
+
     # --- runs (jobs) ---
 
     @app.post("/api/runs", response_model=schemas.RunAccepted, status_code=202,

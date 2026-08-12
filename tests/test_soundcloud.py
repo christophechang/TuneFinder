@@ -572,3 +572,60 @@ def test_fetch_multi_range_searches_and_dedupes(tmp_path):
     called_urls = [c.args[0] for c in mock_get.call_args_list]
     assert "bpm%5Bfrom%5D=170" in called_urls[0]
     assert "bpm%5Bfrom%5D=85" in called_urls[1]
+
+
+# ---------------------------------------------------------------------------
+# Taste-seeded search (feedback loop spec, Slice C)
+# ---------------------------------------------------------------------------
+
+def test_seeded_queries_searched_and_tagged(tmp_path):
+    settings = _make_settings(tmp_path)
+    calls = []
+
+    def _get(url, session):
+        calls.append(url)
+        if "om+unit" in url or "om%20unit" in url:
+            return _page([_track(track_id=555)])
+        return _page([_track()])
+
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json", side_effect=_get):
+        items = soundcloud.fetch(settings, seed_queries=["om unit"])
+
+    seeded = [i for i in items if i.raw_metadata.get("seeded_by")]
+    assert len(seeded) == 1
+    assert seeded[0].raw_metadata["seeded_by"] == "om unit"
+    assert seeded[0].genre_tags == []
+    # one target search + one seeded search
+    assert any("q=om" in u for u in calls)
+
+
+def test_seeded_respects_downloadable_only(tmp_path):
+    settings = _make_settings(tmp_path, targets=[])
+    non_dl = _track(track_id=777, downloadable=False)
+    non_dl["purchase_url"] = "https://store.example.com/buy"  # not a free gate
+    non_dl["purchase_title"] = "Buy"
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json", return_value=_page([non_dl])):
+        items = soundcloud.fetch(settings, seed_queries=["om unit"])
+    assert items == []
+
+
+def test_seeded_runs_with_no_configured_targets(tmp_path):
+    settings = _make_settings(tmp_path, targets=[])
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json", return_value=_page([_track(track_id=888)])):
+        items = soundcloud.fetch(settings, seed_queries=["om unit"])
+    assert len(items) == 1
+    assert items[0].raw_metadata["seeded_by"] == "om unit"
+
+
+def test_seeded_failure_does_not_raise(tmp_path):
+    settings = _make_settings(tmp_path, targets=[])
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json", side_effect=RuntimeError("boom")):
+        items = soundcloud.fetch(settings, seed_queries=["om unit"])
+    assert items == []
+
+
+def test_seeded_dedupes_track_ids_across_seeds(tmp_path):
+    settings = _make_settings(tmp_path, targets=[])
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json", return_value=_page([_track(track_id=999)])):
+        items = soundcloud.fetch(settings, seed_queries=["om unit", "sully"])
+    assert len(items) == 1

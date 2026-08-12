@@ -5,11 +5,15 @@ import pytest
 from datetime import datetime, timezone, timedelta
 
 from src.models import RecommendationRecord
+from src.pipeline.dedup import make_dedup_key, normalise_artist
 from src.pipeline.feedback import (
     FeedbackEntry,
     OUTCOMES,
+    feedback_known_keys,
     load_feedback,
     append_feedback,
+    positive_artists,
+    positive_labels,
     resolve_selector,
     summarise_feedback,
     latest_marks,
@@ -533,3 +537,104 @@ def test_tune_report_latest_mark_wins():
     ]
     out = tune_report(w, [], entries)
     assert "known_artist: recommended=1 marked=1 positive=1 rate=100.0%" in out
+
+
+# ---------------------------------------------------------------------------
+# Positive feedback derivations (feedback loop spec, Slice A)
+# ---------------------------------------------------------------------------
+
+def test_positive_artists_bought_outweighs_liked():
+    entries = [
+        _entry("Om Unit", "Track A", "bought"),
+        _entry("Sully", "Track B", "liked"),
+    ]
+    strengths = positive_artists(entries)
+    assert strengths[normalise_artist("Om Unit")] == 2.0
+    assert strengths[normalise_artist("Sully")] == 1.0
+
+
+def test_positive_artists_any_skip_disqualifies():
+    entries = [
+        _entry("Sully", "Track B", "liked"),
+        _entry("Sully", "Track C", "skip"),
+    ]
+    assert positive_artists(entries) == {}
+
+
+def test_positive_artists_strength_capped():
+    entries = [_entry("Om Unit", f"T{i}", "bought") for i in range(5)]
+    assert positive_artists(entries)[normalise_artist("Om Unit")] == 6.0
+
+
+def test_positive_artists_latest_mark_wins():
+    # liked then re-marked skip on the same track → no boost.
+    entries = [
+        _entry("Sully", "Track B", "liked", days_ago=31),
+        _entry("Sully", "Track B", "skip", days_ago=0),
+    ]
+    assert positive_artists(entries) == {}
+
+
+def test_positive_artists_neutral_outcomes_are_noops():
+    entries = [
+        _entry("Om Unit", "T1", "own"),
+        _entry("Om Unit", "T2", "heard"),
+    ]
+    assert positive_artists(entries) == {}
+
+
+def test_positive_artists_splits_collaborations():
+    entries = [_entry("Bakey, Kasia", "Track A", "liked")]
+    strengths = positive_artists(entries)
+    assert strengths[normalise_artist("Bakey")] == 1.0
+    assert strengths[normalise_artist("Kasia")] == 1.0
+
+
+def test_positive_labels_joins_history_label():
+    rec = _rec(artist="Sully", title="Track B", report_id="2026-W01", label="Astrophonica")
+    entries = [_entry("Sully", "Track B", "bought", report_id="2026-W01")]
+    strengths = positive_labels(entries, [rec], [])
+    assert strengths["astrophonica"] == 2.0
+
+
+def test_positive_labels_no_record_or_label_is_skipped():
+    assert positive_labels([_entry("X", "Y", "liked")], [], []) == {}
+    # record exists but has no label
+    rec = _rec(artist="X", title="Y", label=None)
+    assert positive_labels([_entry("X", "Y", "liked")], [rec], []) == {}
+
+
+def test_positive_labels_capped():
+    recs = [_rec(artist="A", title=f"T{i}", label="Astrophonica") for i in range(5)]
+    entries = [_entry("A", f"T{i}", "bought") for i in range(5)]
+    assert positive_labels(entries, recs, [])["astrophonica"] == 6.0
+
+
+def test_feedback_known_keys_own_and_bought_only():
+    entries = [
+        _entry("A", "T1", "own"),
+        _entry("B", "T2", "bought"),
+        _entry("C", "T3", "liked"),
+        _entry("D", "T4", "skip"),
+    ]
+    keys = feedback_known_keys(entries)
+    assert make_dedup_key("A", "T1") in keys
+    assert make_dedup_key("B", "T2") in keys
+    assert make_dedup_key("C", "T3") not in keys
+    assert make_dedup_key("D", "T4") not in keys
+
+
+def test_feedback_known_keys_latest_mark_wins():
+    # own superseded by skip → no longer excluded
+    entries = [
+        _entry("A", "T1", "own", days_ago=10),
+        _entry("A", "T1", "skip", days_ago=0),
+    ]
+    assert feedback_known_keys(entries) == set()
+
+
+def test_feedback_known_keys_remix_aware_emits_both_regimes():
+    entries = [_entry("A", "T1 (Sully Remix)", "own")]
+    keys = feedback_known_keys(entries, remix_aware=True)
+    assert make_dedup_key("A", "T1 (Sully Remix)") in keys
+    assert make_dedup_key("A", "T1 (Sully Remix)", remix_aware=True) in keys

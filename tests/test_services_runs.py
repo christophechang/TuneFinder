@@ -279,3 +279,186 @@ def test_run_mix_prep_regular_sends_no_only_sources_or_bpm_ranges(tmp_path):
         run_mix_prep(settings, options)
     assert mock_fetch.call_args.kwargs.get("only_sources") is None
     assert mock_fetch.call_args.kwargs.get("bpm_ranges") is None
+
+
+# ---------------------------------------------------------------------------
+# Known-track merge from feedback (feedback loop spec, Slice A)
+# ---------------------------------------------------------------------------
+
+def test_owned_feedback_track_never_resurfaces(tmp_path):
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key
+
+    # Latest mark 'own' for the exact track the sources return
+    append_feedback(FeedbackEntry(
+        key=make_dedup_key("Sully", "New Track"), artist="Sully", title="New Track",
+        outcome="own", marked_at="2026-08-01T00:00:00+00:00",
+        report_id="2026-W30", track_no=1, history="weekly",
+    ), str(tmp_path))
+
+    settings = _settings(str(tmp_path))
+    outcome = _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
+
+    # The only candidate is excluded by the feedback-derived known merge
+    assert outcome.no_candidates is True
+
+
+def test_bought_pool_record_not_injected(tmp_path):
+    from src.models import PoolRecord
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key
+    from src.pipeline.pool import save_pool
+
+    # Pool record whose RAW key differs from the bought mark's normalised key
+    save_pool([PoolRecord(
+        artist="Sully", title="Other Track (Original Mix)", link="", source="beatport",
+        added_at="2026-07-01T00:00:00+00:00", last_score=2.0,
+    )], str(tmp_path))
+    append_feedback(FeedbackEntry(
+        key=make_dedup_key("Sully", "Other Track"), artist="Sully", title="Other Track",
+        outcome="bought", marked_at="2026-08-01T00:00:00+00:00",
+        report_id="2026-W30", track_no=1, history="weekly",
+    ), str(tmp_path))
+
+    settings = _settings(str(tmp_path))
+    outcome = _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
+
+    assert outcome.stats["pool_injected"] == 0
+
+
+def test_weekly_run_applies_liked_artist_signal(tmp_path):
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key
+
+    # Latest mark 'liked' for a past track by the same artist the sources return
+    append_feedback(FeedbackEntry(
+        key=make_dedup_key("Sully", "Past Tune"), artist="Sully", title="Past Tune",
+        outcome="liked", marked_at="2026-08-01T00:00:00+00:00",
+        report_id="2026-W30", track_no=1, history="weekly",
+    ), str(tmp_path))
+
+    settings = _settings(str(tmp_path))
+    outcome = _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
+
+    codes = {
+        s["code"]
+        for section in outcome.artifact["sections"]
+        for t in section["tracks"]
+        for s in t["signals"]
+    }
+    assert "liked_artist" in codes
+
+
+# ---------------------------------------------------------------------------
+# Auto-tuning wiring (feedback loop spec, Slice B)
+# ---------------------------------------------------------------------------
+
+def _seed_learning_data(data_dir):
+    """20 weekly records: 10 label_match (all liked) + 10 cross_source (all skip).
+    baseline = 10/20 = 0.5; label_match lift = 2.0; cross_source lift = 0."""
+    from src.models import RecommendationRecord
+    from src.pipeline.history import append_records
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key
+
+    records, entries = [], []
+    for i in range(10):
+        records.append(RecommendationRecord(
+            artist=f"LmArtist{i}", title=f"L{i}", link="", source="beatport",
+            recommended_at="2026-07-01T00:00:00+00:00", report_id="2026-W27",
+            track_no=i + 1, signal_codes=["label_match"], genre_tags=["breaks"],
+        ))
+        entries.append(FeedbackEntry(
+            key=make_dedup_key(f"LmArtist{i}", f"L{i}"), artist=f"LmArtist{i}", title=f"L{i}",
+            outcome="liked", marked_at="2026-07-02T00:00:00+00:00",
+            report_id="2026-W27", track_no=i + 1, history="weekly",
+        ))
+    for i in range(10):
+        records.append(RecommendationRecord(
+            artist=f"CsArtist{i}", title=f"X{i}", link="", source="beatport",
+            recommended_at="2026-07-01T00:00:00+00:00", report_id="2026-W27",
+            track_no=i + 11, signal_codes=["cross_source"], genre_tags=["breaks"],
+        ))
+        entries.append(FeedbackEntry(
+            key=make_dedup_key(f"CsArtist{i}", f"X{i}"), artist=f"CsArtist{i}", title=f"X{i}",
+            outcome="skip", marked_at="2026-07-02T00:00:00+00:00",
+            report_id="2026-W27", track_no=i + 11, history="weekly",
+        ))
+    append_records(records, data_dir)
+    for e in entries:
+        append_feedback(e, data_dir)
+
+
+def test_weekly_run_updates_learned_weights(tmp_path):
+    import json as _json
+    _seed_learning_data(str(tmp_path))
+    settings = _settings(str(tmp_path))
+    _patched(run_weekly, settings, WeeklyRunOptions(dry_run=False))
+
+    path = tmp_path / "learned_weights.json"
+    assert path.exists()
+    learned = _json.loads(path.read_text())
+    assert learned["label_match"]["multiplier"] == pytest.approx(1.2)
+    assert learned["cross_source"]["multiplier"] == pytest.approx(0.85)
+
+
+def test_dry_run_never_writes_learned_weights(tmp_path):
+    _seed_learning_data(str(tmp_path))
+    settings = _settings(str(tmp_path))
+    _patched(run_weekly, settings, WeeklyRunOptions(dry_run=True))
+    assert not (tmp_path / "learned_weights.json").exists()
+
+
+def test_mix_prep_applies_but_never_updates(tmp_path):
+    import json as _json
+    _seed_learning_data(str(tmp_path))
+    original = {"label_match": {"multiplier": 2.0, "lift": 2.0, "samples": 20,
+                                "updated_at": "2026-08-01T00:00:00+00:00"}}
+    (tmp_path / "learned_weights.json").write_text(_json.dumps(original))
+
+    settings = _settings(str(tmp_path))
+    _patched(run_mix_prep, settings, MixPrepOptions(genre="breaks", dry_run=False))
+
+    assert _json.loads((tmp_path / "learned_weights.json").read_text()) == original
+
+
+# ---------------------------------------------------------------------------
+# Feedback-seeded fetching (feedback loop spec, Slice C)
+# ---------------------------------------------------------------------------
+
+def test_weekly_run_passes_seeds_from_positive_marks(tmp_path):
+    from src.pipeline.feedback import FeedbackEntry, append_feedback
+    from src.pipeline.dedup import make_dedup_key, normalise_artist
+
+    append_feedback(FeedbackEntry(
+        key=make_dedup_key("Om Unit", "Past Tune"), artist="Om Unit", title="Past Tune",
+        outcome="bought", marked_at="2026-08-01T00:00:00+00:00",
+        report_id="2026-W30", track_no=1, history="weekly",
+    ), str(tmp_path))
+
+    settings = _settings(str(tmp_path))
+    settings.pipeline_seeded_artist_count = 10
+    settings.pipeline_seeded_label_count = 5
+
+    fetch_mock = MagicMock(return_value=([_source_item()], {"beatport": {"count": 1, "error": None}}))
+    with patch("src.fetchers.catalog.fetch_all_tracks", return_value=[_known_track()]), \
+         patch("src.fetchers.catalog.fetch_all_mixes", return_value=[]), \
+         patch("src.fetchers.fetch_all_sources", fetch_mock), \
+         patch("src.output.discord.make_discord_client", return_value=MagicMock()):
+        run_weekly(settings, WeeklyRunOptions(dry_run=True))
+
+    seeds = fetch_mock.call_args.kwargs["seed_queries"]
+    assert normalise_artist("Om Unit") in seeds
+
+
+def test_no_candidates_week_still_updates_learned_weights(tmp_path):
+    _seed_learning_data(str(tmp_path))
+    settings = _settings(str(tmp_path))
+    # Sources return nothing → no_candidates path
+    with patch("src.fetchers.catalog.fetch_all_tracks", return_value=[_known_track()]), \
+         patch("src.fetchers.catalog.fetch_all_mixes", return_value=[]), \
+         patch("src.fetchers.fetch_all_sources", return_value=([], {})), \
+         patch("src.output.discord.make_discord_client", return_value=MagicMock()):
+        outcome = run_weekly(settings, WeeklyRunOptions(dry_run=False))
+    assert outcome.no_candidates is True
+    assert (tmp_path / "learned_weights.json").exists()

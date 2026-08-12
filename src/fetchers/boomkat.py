@@ -71,7 +71,8 @@ def _parse_release_card(card: Tag) -> SourceItem | None:
 
 
 def fetch(settings, target_genre: str | None = None,
-          bpm_ranges: list[tuple[float, float]] | None = None) -> list[SourceItem]:
+          bpm_ranges: list[tuple[float, float]] | None = None,
+          seed_queries: list[str] | None = None) -> list[SourceItem]:
     cfg = settings.get_source_config("boomkat")
     if not cfg.get("enabled", False):
         return []
