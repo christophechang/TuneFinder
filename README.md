@@ -329,7 +329,17 @@ TUNEFINDER_API_SECRET=            # Bearer secret for the web API (required by `
 TUNEFINDER_WEB_STATIC_DIR=        # Serve a built tunefinder-web bundle from the API origin
 TUNEFINDER_WEB_BASE_URL=          # Discord reports link to the web app when set
 TUNEFINDER_WEB_ALLOWED_ORIGINS=   # CORS origins for a separately-hosted SPA
+
+# Pool publisher (optional — see docs/ops/publish-pool.md)
+TUNEFINDER_POOL_API_DEV=          # Base URL of the dev pool API
+TUNEFINDER_POOL_API_PROD=         # Base URL of the prod pool API
+TUNEFINDER_POOL_TENANT=           # External ID tenant, domain form (e.g. setfolioid.onmicrosoft.com)
+TUNEFINDER_POOL_CLIENT_ID=        # App registration the publisher signs in as
+TUNEFINDER_POOL_CLIENT_SECRET=    # Its client secret
+TUNEFINDER_POOL_SCOPE=            # api://<api app id>/.default
 ```
+
+`check-config` lists the six pool names as SET or MISSING and never prints a value. They are optional — MISSING only means `publish-pool` cannot post; every other command runs without them. The token endpoint is derived from the tenant (`https://<first label>.ciamlogin.com/<tenant>/oauth2/v2.0/token`); `TUNEFINDER_POOL_TOKEN_URL` overrides it with the tenant-GUID form.
 
 ## First-time setup
 
@@ -429,6 +439,8 @@ Edit `config/settings.yaml` to:
 - **Taste recency weighting** — `scoring.taste_half_life_months` (default `18.0`) sets the half-life `known_artist` scoring decays a play toward, using `data/artist_profiles.json`'s `recency_weighted_play_count` (built from dated mixes on every profile refresh). See Taste recency weighting above.
 - **Skip-derived negative signal** — `scoring.w_skipped_artist` (default `1.0`) and `scoring.skipped_artist_min_skips` (default `2`) control the soft down-weight applied to artists you've repeatedly skipped with no offsetting positive mark. See Skip-derived negative signal above.
 
+`config/settings.pool.yaml` is **generated, not edited.** It is the source config `publish-pool` runs on — the full multi-tenant taxonomy (every Beatport chart, Volumo genre, Bandcamp tag and SoundCloud target, tagged with fine genre ids) rendered from `tools/publish-pool-contract/taxonomy.yaml` by `publish-pool --write-settings`. Change the taxonomy in the multi-tenant repo and regenerate; a test fails if the committed file drifts. It replaces only the `sources:` block for a publish run — Discord channels, `data_dir`, scoring and everything else are still read from `config/settings.yaml`, and the Sunday run never reads the pool file.
+
 Traxsource note: the site is currently disabled by default in `config/settings.yaml` because it now presents a human verification checkbox/Cloudflare challenge that makes unattended scraping unreliable.
 
 SoundCloud note: uses the official public API with an app-level `client_credentials` token — no user login or callback URL. The token is cached in `data/soundcloud_token.json` (the token endpoint is itself rate-limited). Each configured target searches by `genres`/`tags`/`q` within a `lookback_days` window; with `downloadable_only: true` (the default) only tracks with downloads enabled survive, making this the free-download/bootleg lane rather than a store mirror.
@@ -491,6 +503,7 @@ tunefinder/
   __main__.py        # CLI entry point
 config/
   settings.yaml      # All non-secret configuration
+  settings.pool.yaml # publish-pool source config — GENERATED from the taxonomy, do not edit
 data/
   recommendation_history.json   # Weekly recommendation records (gitignored)
   mix_prep_history.json         # Mix-prep recommendation records (gitignored)

@@ -113,6 +113,12 @@ def fetch(settings, target_genre: str | None = None,
                     "bandcamp_tag": tag,
                     "item_type": item.get("item_type"),
                     "bandcamp_album_id": item.get("item_id"),  # numeric id from discover_web `item_id` field
+                    # publish-pool artwork id — the payload builder turns it
+                    # into https://f4.bcbits.com/img/a<id>_16.jpg. Verified live
+                    # 2026-09-06: discover_web has no top-level `item_image_id`;
+                    # the release art is `primary_image.image_id` (`band_image`
+                    # is the label avatar).
+                    "item_image_id": (item.get("primary_image") or {}).get("image_id"),
                 },
             ))
 

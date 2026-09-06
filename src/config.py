@@ -21,6 +21,24 @@ _REQUIRED_ENV_VARS = [
 
 _OPTIONAL_ENV_VARS: list[str] = []
 
+# Pool publisher (`publish-pool`). Optional by design: the Sunday run and every
+# other command work without them, and validate() never demands them — a missing
+# value only stops publish-pool from posting. check-config reports SET/MISSING
+# per name and never a value. See docs/ops/publish-pool.md.
+_POOL_ENV_VARS = [
+    "TUNEFINDER_POOL_API_DEV",
+    "TUNEFINDER_POOL_API_PROD",
+    "TUNEFINDER_POOL_TENANT",
+    "TUNEFINDER_POOL_CLIENT_ID",
+    "TUNEFINDER_POOL_CLIENT_SECRET",
+    "TUNEFINDER_POOL_SCOPE",
+]
+
+_POOL_API_ENV_BY_TARGET = {
+    "dev": "TUNEFINDER_POOL_API_DEV",
+    "prod": "TUNEFINDER_POOL_API_PROD",
+}
+
 _CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "config",
@@ -229,6 +247,81 @@ class Settings:
     def web_static_dir(self) -> str:
         """Optional built-SPA directory served by `tunefinder serve` (zero-CORS LAN mode)."""
         return os.getenv("TUNEFINDER_WEB_STATIC_DIR", "")
+
+    # --- Pool publisher (publish-pool) ---
+
+    def pool_api_url(self, env: str) -> str:
+        """Base URL of a pool API target — "dev" or "prod". "" when unset."""
+        try:
+            key = _POOL_API_ENV_BY_TARGET[env]
+        except KeyError:
+            raise ValueError(
+                f"Unknown pool target {env!r} — expected "
+                f"{' or '.join(repr(t) for t in _POOL_API_ENV_BY_TARGET)}"
+            ) from None
+        return os.getenv(key, "").rstrip("/")
+
+    @property
+    def pool_tenant(self) -> str:
+        """External ID tenant, domain form (e.g. setfolioid.onmicrosoft.com)."""
+        return os.getenv("TUNEFINDER_POOL_TENANT", "")
+
+    @property
+    def pool_client_id(self) -> str:
+        return os.getenv("TUNEFINDER_POOL_CLIENT_ID", "")
+
+    @property
+    def pool_client_secret(self) -> str:
+        return os.getenv("TUNEFINDER_POOL_CLIENT_SECRET", "")
+
+    @property
+    def pool_scope(self) -> str:
+        return os.getenv("TUNEFINDER_POOL_SCOPE", "")
+
+    @property
+    def pool_token_url(self) -> str:
+        """client_credentials token endpoint, derived from the tenant domain —
+        https://<first label>.ciamlogin.com/<tenant>/oauth2/v2.0/token.
+        TUNEFINDER_POOL_TOKEN_URL overrides it (the tenant GUID form, should the
+        domain form be refused). "" when no tenant is configured."""
+        override = os.getenv("TUNEFINDER_POOL_TOKEN_URL", "")
+        if override:
+            return override
+        tenant = self.pool_tenant
+        if not tenant:
+            return ""
+        return f"https://{tenant.split('.')[0]}.ciamlogin.com/{tenant}/oauth2/v2.0/token"
+
+    @property
+    def pool_batch_size(self) -> int:
+        return int(self._data.get("pool", {}).get("batch_size", 200))
+
+    @property
+    def pool_targets(self) -> list[str]:
+        """Targets a publish run posts to when --env is not given."""
+        return list(self._data.get("pool", {}).get("targets", ["dev"]))
+
+    @property
+    def pool_snapshot_retention_days(self) -> int:
+        return int(self._data.get("pool", {}).get("snapshot_retention_days", 14))
+
+    @property
+    def pool_artist_weeks(self) -> int:
+        return int(self._data.get("pool", {}).get("artist_weeks", 13))
+
+    @property
+    def pool_lock_retry_seconds(self) -> int:
+        return int(self._data.get("pool", {}).get("lock_retry_seconds", 300))
+
+    @property
+    def pool_lock_wait_max_seconds(self) -> int:
+        return int(self._data.get("pool", {}).get("lock_wait_max_seconds", 7200))
+
+    @property
+    def pool_taxonomy_version(self) -> int | None:
+        """The taxonomy the generated pool file was rendered from — top level,
+        as load_pool_settings() overlays it. None for a plain settings.yaml."""
+        return self._data.get("taxonomy_version")
 
     # --- Testing ---
 

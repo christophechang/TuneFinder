@@ -315,3 +315,151 @@ def test_free_downloads_mode_count_default():
 def test_scoring_weights_reposts_default():
     from src.pipeline.ranker import ScoringWeights
     assert ScoringWeights().soundcloud_popularity_reposts == 25
+
+
+# ---------------------------------------------------------------------------
+# Pool publisher env and `pool:` block (M1d Task 3)
+# ---------------------------------------------------------------------------
+
+
+def _clear_pool_env(monkeypatch):
+    from src.config import _POOL_ENV_VARS
+    for key in _POOL_ENV_VARS + ["TUNEFINDER_POOL_TOKEN_URL"]:
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_pool_env_vars_are_optional(monkeypatch):
+    """The six pool names are never required — validate() must not fail on them."""
+    from src.config import _POOL_ENV_VARS, _REQUIRED_ENV_VARS, Settings
+    assert _POOL_ENV_VARS == [
+        "TUNEFINDER_POOL_API_DEV",
+        "TUNEFINDER_POOL_API_PROD",
+        "TUNEFINDER_POOL_TENANT",
+        "TUNEFINDER_POOL_CLIENT_ID",
+        "TUNEFINDER_POOL_CLIENT_SECRET",
+        "TUNEFINDER_POOL_SCOPE",
+    ]
+    assert not set(_POOL_ENV_VARS) & set(_REQUIRED_ENV_VARS)
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "x")
+    monkeypatch.setenv("DISCORD_GUILD_ID", "x")
+    _clear_pool_env(monkeypatch)
+    Settings({}).validate()          # no raise
+
+
+def test_pool_env_properties_read_env(monkeypatch):
+    from src.config import Settings
+    monkeypatch.setenv("TUNEFINDER_POOL_API_DEV", "https://tunefinder-api-dev.setfolio.app/")
+    monkeypatch.setenv("TUNEFINDER_POOL_API_PROD", "https://tunefinder-api.setfolio.app")
+    monkeypatch.setenv("TUNEFINDER_POOL_TENANT", "setfolioid.onmicrosoft.com")
+    monkeypatch.setenv("TUNEFINDER_POOL_CLIENT_ID", "6dae376a")
+    monkeypatch.setenv("TUNEFINDER_POOL_CLIENT_SECRET", "s3cret")
+    monkeypatch.setenv("TUNEFINDER_POOL_SCOPE", "api://1c43c8d2/.default")
+    s = Settings({})
+    assert s.pool_api_url("dev") == "https://tunefinder-api-dev.setfolio.app"   # trailing / stripped
+    assert s.pool_api_url("prod") == "https://tunefinder-api.setfolio.app"
+    assert s.pool_tenant == "setfolioid.onmicrosoft.com"
+    assert s.pool_client_id == "6dae376a"
+    assert s.pool_client_secret == "s3cret"
+    assert s.pool_scope == "api://1c43c8d2/.default"
+
+
+def test_pool_env_properties_empty_when_unset(monkeypatch):
+    from src.config import Settings
+    _clear_pool_env(monkeypatch)
+    s = Settings({})
+    assert s.pool_api_url("dev") == ""
+    assert s.pool_api_url("prod") == ""
+    assert s.pool_tenant == ""
+    assert s.pool_client_id == ""
+    assert s.pool_client_secret == ""
+    assert s.pool_scope == ""
+    assert s.pool_token_url == ""
+
+
+def test_pool_api_url_rejects_unknown_env(monkeypatch):
+    from src.config import Settings
+    with pytest.raises(ValueError):
+        Settings({}).pool_api_url("staging")
+
+
+def test_pool_token_url_derived_from_tenant(monkeypatch):
+    from src.config import Settings
+    _clear_pool_env(monkeypatch)
+    monkeypatch.setenv("TUNEFINDER_POOL_TENANT", "setfolioid.onmicrosoft.com")
+    assert Settings({}).pool_token_url == (
+        "https://setfolioid.ciamlogin.com/setfolioid.onmicrosoft.com/oauth2/v2.0/token"
+    )
+
+
+def test_pool_token_url_override(monkeypatch):
+    from src.config import Settings
+    monkeypatch.setenv("TUNEFINDER_POOL_TENANT", "setfolioid.onmicrosoft.com")
+    monkeypatch.setenv(
+        "TUNEFINDER_POOL_TOKEN_URL",
+        "https://setfolioid.ciamlogin.com/11111111-2222-3333-4444-555555555555/oauth2/v2.0/token",
+    )
+    assert Settings({}).pool_token_url == (
+        "https://setfolioid.ciamlogin.com/11111111-2222-3333-4444-555555555555/oauth2/v2.0/token"
+    )
+
+
+def test_pool_block_defaults():
+    from src.config import Settings
+    s = Settings({})
+    assert s.pool_batch_size == 200
+    assert s.pool_targets == ["dev"]
+    assert s.pool_snapshot_retention_days == 14
+    assert s.pool_artist_weeks == 13
+    assert s.pool_lock_retry_seconds == 300
+    assert s.pool_lock_wait_max_seconds == 7200
+    assert s.pool_taxonomy_version is None
+
+
+def test_pool_block_from_config():
+    from src.config import Settings
+    s = Settings({
+        "taxonomy_version": 1,
+        "pool": {
+            "batch_size": 50,
+            "targets": ["dev", "prod"],
+            "snapshot_retention_days": 30,
+            "artist_weeks": 26,
+            "lock_retry_seconds": 60,
+            "lock_wait_max_seconds": 600,
+        },
+    })
+    assert s.pool_batch_size == 50
+    assert s.pool_targets == ["dev", "prod"]
+    assert s.pool_snapshot_retention_days == 30
+    assert s.pool_artist_weeks == 26
+    assert s.pool_lock_retry_seconds == 60
+    assert s.pool_lock_wait_max_seconds == 600
+    assert s.pool_taxonomy_version == 1
+
+
+def test_env_example_pool_lines_are_comments_not_values():
+    """Copying .env.example to .env (the documented first step) must not set
+    any pool variable.
+
+    python-dotenv strips an inline `#` comment only when a value precedes it —
+    `NAME=          # prose` with an empty value keeps the prose AS the value.
+    Six pool names written that way would make check-config report SET for
+    every one and pool_api_url("dev") return a comment string. So the prose
+    goes on its own `#` line and the optional keys stay commented out, as the
+    TUNEFINDER_WEB_* block already does.
+    """
+    import os
+
+    from dotenv import dotenv_values
+
+    from src.config import _POOL_ENV_VARS
+
+    example = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.example"
+    )
+    values = dotenv_values(example)
+
+    for key in _POOL_ENV_VARS + ["TUNEFINDER_POOL_TOKEN_URL"]:
+        value = values.get(key)
+        assert not (value or "").startswith("#"), f"{key} parses as a comment string: {value!r}"
+        assert not value, f"{key} is set by .env.example — check-config would report it SET"

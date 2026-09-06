@@ -399,3 +399,35 @@ def test_compilation_album_partial_match():
 
     assert len(items) == 1
     assert items[0].title == "Bass Track"
+
+
+# ---------------------------------------------------------------------------
+# publish-pool raw_metadata (M1d Task 3)
+# ---------------------------------------------------------------------------
+
+def test_raw_metadata_carries_artwork_uuid():
+    """The album's artwork field, verified live on 2026-09-06 against
+    `GET https://volumo.com/api/v1/albums?...` (unauthenticated): the album
+    object carries `artwork_uuid`, a bare UUID string such as
+    "2d4b80fe-3ce5-43bb-ab60-e8e6c249f444". The API exposes no image URL, so
+    the key is named after the source field it holds — never `artwork_url`,
+    which would be a non-URL for every row forever. The publisher templates
+    https://volumo.com/img/size/500x0/<uuid>.jpg from it."""
+    settings = _make_settings(genres=[{"name": "house", "id": 12}])
+    album = {**_album(), "artwork_uuid": "2d4b80fe-3ce5-43bb-ab60-e8e6c249f444"}
+    with patch("src.fetchers.volumo._get_json") as mock_get:
+        mock_get.return_value = [album]
+        items = volumo.fetch(settings)
+
+    md = items[0].raw_metadata
+    assert md["artwork_uuid"] == "2d4b80fe-3ce5-43bb-ab60-e8e6c249f444"
+    assert "artwork_url" not in md
+
+
+def test_raw_metadata_artwork_uuid_none_when_missing():
+    settings = _make_settings(genres=[{"name": "house", "id": 12}])
+    with patch("src.fetchers.volumo._get_json") as mock_get:
+        mock_get.return_value = [_album()]          # no artwork_uuid key
+        items = volumo.fetch(settings)
+
+    assert items[0].raw_metadata["artwork_uuid"] is None

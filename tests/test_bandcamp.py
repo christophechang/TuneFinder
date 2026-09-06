@@ -47,3 +47,24 @@ def test_bandcamp_tag_and_item_type_still_present():
         items = bandcamp.fetch(_settings(tags=["drum-and-bass"]))
     assert items[0].raw_metadata["bandcamp_tag"] == "drum-and-bass"
     assert items[0].raw_metadata["item_type"] == "a"
+
+
+# ---------------------------------------------------------------------------
+# publish-pool raw_metadata (M1d Task 3)
+# ---------------------------------------------------------------------------
+
+def test_raw_metadata_carries_item_image_id():
+    """Verified live on 2026-09-06 with `_fetch_tag("house", 1)`: the
+    discover_web result has NO top-level `item_image_id`. The artwork id lives
+    at `primary_image.image_id` — an int such as 436449664, alongside
+    `is_art: True` (`band_image` is the label's avatar, not the release)."""
+    item = {**_discover_item(), "primary_image": {"image_id": 436449664, "is_art": True}}
+    with patch("src.fetchers.bandcamp._fetch_tag", return_value=[item]):
+        items = bandcamp.fetch(_settings())
+    assert items[0].raw_metadata["item_image_id"] == 436449664
+
+
+def test_raw_metadata_item_image_id_none_when_missing():
+    with patch("src.fetchers.bandcamp._fetch_tag", return_value=[_discover_item()]):
+        items = bandcamp.fetch(_settings())
+    assert items[0].raw_metadata["item_image_id"] is None

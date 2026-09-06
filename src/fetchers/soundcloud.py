@@ -210,6 +210,7 @@ def _parse_track(track: dict, tag: str | None, free_gate: bool = False) -> Sourc
             "purchase_title": track.get("purchase_title"),
             "license": track.get("license"),
             "sc_genre": track.get("genre"),
+            "artwork_url": track.get("artwork_url"),  # publish-pool artwork
             "tag_list": track.get("tag_list"),
             "duration_ms": track.get("duration"),
             "bpm": track.get("bpm"),

@@ -213,3 +213,53 @@ def test_seeded_never_runs_for_genre_targeted_fetch(tmp_path):
          patch("src.fetchers.beatport._get_json", side_effect=_get):
         beatport.fetch(settings, target_genre="dnb", seed_queries=["om unit"])
     assert not any("search" in u for u in calls)
+
+
+# ---------------------------------------------------------------------------
+# publish-pool raw_metadata (M1d Task 3) — additive keys the payload builder reads
+# ---------------------------------------------------------------------------
+
+def _pool_track():
+    """A chart row carrying every field the publisher reads. Shapes taken from
+    the v4 track object: `genre`/`sub_genre` are {id, slug, name}, `image` is
+    {id, uri, dynamic_uri}, the catalogue number sits on `release`."""
+    return {
+        **_track(),
+        "genre": {"id": 9, "slug": "breaks-breakbeat-uk-bass"},
+        "sub_genre": {"id": 66, "slug": "jungle"},
+        "sample_url": "https://geo-samples.beatport.com/track/abc.LOFI.mp3",
+        "image": {"id": 1, "uri": "https://geo-media.beatport.com/image_size/500x500/19283746.jpg"},
+        "release": {
+            "name": "Lock It (Primate Remix)",
+            "label": {"name": "Wobbles & Waffles"},
+            "catalog_number": "WAFFLE001",
+        },
+    }
+
+
+def test_raw_metadata_carries_genre_sub_genre_sample_and_artwork():
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", return_value=_page([_pool_track()])):
+        items = beatport.fetch(_settings())
+    md = items[0].raw_metadata
+    assert md["genre_slug"] == "breaks-breakbeat-uk-bass"
+    assert md["genre_id"] == 9
+    assert md["sub_genre_slug"] == "jungle"
+    assert md["sample_url"] == "https://geo-samples.beatport.com/track/abc.LOFI.mp3"
+    assert md["artwork_url"] == "https://geo-media.beatport.com/image_size/500x500/19283746.jpg"
+    assert md["catalog_number"] == "WAFFLE001"
+
+
+def test_raw_metadata_pool_keys_none_when_fields_missing():
+    """The legacy fixture has no sub_genre/sample_url/image/catalog_number —
+    every added key must read None, never raise."""
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", return_value=_page([_track()])):
+        items = beatport.fetch(_settings())
+    md = items[0].raw_metadata
+    assert md["sub_genre_slug"] is None
+    assert md["sample_url"] is None
+    assert md["artwork_url"] is None
+    assert md["catalog_number"] is None
+    assert md["genre_id"] is None
+    assert md["genre_slug"] == "drum-bass"

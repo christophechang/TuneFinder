@@ -88,6 +88,16 @@ def _parse_track(raw: dict, fallback_tags: list[str], chart_position: int | None
             "key": key,
             "mix_name": raw.get("mix_name"),
             "isrc": raw.get("isrc"),
+            # publish-pool fields: the genre/sub-genre slugs the taxonomy
+            # resolves to fine genres, the public preview MP3, and artwork.
+            "genre_slug": genre_slug,
+            "genre_id": (raw.get("genre") or {}).get("id"),
+            "sub_genre_slug": (raw.get("sub_genre") or {}).get("slug"),
+            "sample_url": raw.get("sample_url"),
+            "artwork_url": (raw.get("image") or {}).get("uri"),
+            # Beatport carries the catalogue number on the release; a chart row
+            # that inlines it at track level wins.
+            "catalog_number": raw.get("catalog_number") or release.get("catalog_number"),
         },
     )
 
