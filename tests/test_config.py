@@ -435,3 +435,31 @@ def test_pool_block_from_config():
     assert s.pool_lock_retry_seconds == 60
     assert s.pool_lock_wait_max_seconds == 600
     assert s.pool_taxonomy_version == 1
+
+
+def test_env_example_pool_lines_are_comments_not_values():
+    """Copying .env.example to .env (the documented first step) must not set
+    any pool variable.
+
+    python-dotenv strips an inline `#` comment only when a value precedes it —
+    `NAME=          # prose` with an empty value keeps the prose AS the value.
+    Six pool names written that way would make check-config report SET for
+    every one and pool_api_url("dev") return a comment string. So the prose
+    goes on its own `#` line and the optional keys stay commented out, as the
+    TUNEFINDER_WEB_* block already does.
+    """
+    import os
+
+    from dotenv import dotenv_values
+
+    from src.config import _POOL_ENV_VARS
+
+    example = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.example"
+    )
+    values = dotenv_values(example)
+
+    for key in _POOL_ENV_VARS + ["TUNEFINDER_POOL_TOKEN_URL"]:
+        value = values.get(key)
+        assert not (value or "").startswith("#"), f"{key} parses as a comment string: {value!r}"
+        assert not value, f"{key} is set by .env.example — check-config would report it SET"
