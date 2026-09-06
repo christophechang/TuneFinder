@@ -1,0 +1,219 @@
+# GENERATED from tools/publish-pool-contract/taxonomy.yaml v1 by 'tunefinder publish-pool --write-settings' — do not edit; edit the taxonomy in the multi-tenant repo and regenerate
+taxonomy_version: 1
+pool:
+  batch_size: 200
+  targets:
+  - dev
+  snapshot_retention_days: 14
+  artist_weeks: 13
+  lock_retry_seconds: 300
+  lock_wait_max_seconds: 7200
+sources:
+  beatport:
+    enabled: true
+    genres:
+    - name: house
+      slug: house
+      id: 5
+    - name: deep-house
+      slug: deep-house
+      id: 12
+    - name: tech-house
+      slug: tech-house
+      id: 11
+    - name: minimal-deep-tech
+      slug: minimal-deep-tech
+      id: 14
+    - name: melodic-house-techno
+      slug: melodic-house-techno
+      id: 90
+    - name: progressive-house
+      slug: progressive-house
+      id: 15
+    - name: funky-jackin-house
+      slug: funky-house
+      id: 81
+    - name: funky-jackin-house
+      slug: jackin-house
+      id: 97
+    - name: afro-house
+      slug: afro-house
+      id: 89
+    - name: organic-house
+      slug: organic-house
+      id: 93
+    - name: bass-house
+      slug: bass-house
+      id: 91
+    - name: indie-dance
+      slug: indie-dance
+      id: 37
+    - name: nu-disco-disco
+      slug: nu-disco-disco
+      id: 50
+    - name: techno-peak-time
+      slug: techno-peak-time-driving
+      id: 6
+    - name: techno-raw-deep
+      slug: techno-raw-deep-hypnotic
+      id: 92
+    - name: hard-techno
+      slug: hard-techno
+      id: 2
+    - name: electro
+      slug: electro-classic-detroit-modern
+      id: 94
+    - name: drum-and-bass
+      slug: drum-bass
+      id: 1
+    - name: breaks-breakbeat
+      slug: breaks-breakbeat-uk-bass
+      id: 9
+    - name: 140-deep-dubstep-grime
+      slug: 140-deep-dubstep-grime
+      id: 95
+    - name: dubstep
+      slug: dubstep
+      id: 18
+    - name: bass-club
+      slug: bass-club
+      id: 85
+    - name: uk-garage-bassline
+      slug: uk-garage-bassline
+      id: 86
+    - name: electronica
+      slug: electronica
+      id: 3
+    - name: downtempo
+      slug: downtempo
+      id: 63
+    - name: ambient
+      slug: ambient-experimental
+      id: 100
+    - name: hip-hop
+      slug: hip-hop
+      id: 105
+    - name: rnb
+      slug: rb
+      id: 108
+    - name: trap-future-bass
+      slug: trap-future-bass
+      id: 38
+  volumo:
+    enabled: true
+    sort: purchase
+    curation: curated
+    lookback_days: 28
+    limit_per_genre: 50
+    genres:
+    - name: house
+      id: 12
+    - name: deep-house
+      id: 4
+    - name: tech-house
+      id: 21
+    - name: minimal-deep-tech
+      id: 16
+    - name: melodic-house-techno
+      id: 15
+    - name: progressive-house
+      id: 19
+    - name: funky-jackin-house
+      id: 10
+    - name: soulful-house
+      id: 20
+    - name: afro-house
+      id: 1
+    - name: bass-house
+      id: 2
+    - name: indie-dance
+      id: 13
+    - name: nu-disco-disco
+      id: 17
+    - name: techno-peak-time
+      id: 23
+    - name: techno-raw-deep
+      id: 22
+    - name: hard-techno
+      id: 11
+    - name: electro
+      id: 27
+    - name: drum-and-bass
+      id: 6
+    - name: breaks-breakbeat
+      id: 3
+    - name: dubstep
+      id: 7
+    - name: uk-garage-bassline
+      id: 25
+    - name: electronica
+      id: 8
+    - name: downtempo
+      id: 18
+    - name: trip-hop-chill-out
+      id: 14
+    - name: idm-leftfield
+      id: 30
+  bandcamp:
+    enabled: true
+    count_per_tag: 20
+    tags:
+    - drum-and-bass
+    - jungle
+    - breakbeat
+    - uk-bass
+    - uk-garage
+    - future-garage
+    - house
+    - techno
+    - electronic
+    - electronica
+    - downtempo
+    - ambient
+    - lounge
+    - idm
+    - funk
+    - r-b-soul
+    - hip-hop-rap
+  soundcloud:
+    enabled: true
+    downloadable_only: true
+    include_gated_free: true
+    lookback_days: 28
+    limit_per_target: 50
+    max_duration_minutes: 15
+    targets:
+    - tf_tag: drum-and-bass
+      genres: drum & bass,drum and bass,dnb
+    - tf_tag: jungle
+      genres: jungle
+    - tf_tag: breaks-breakbeat
+      genres: breakbeat,breaks
+    - tf_tag: uk-bass
+      tags: uk bass,ukbass
+    - tf_tag: uk-garage-bassline
+      genres: uk garage,garage,ukg
+    - tf_tag: future-garage
+      genres: future garage
+    - tf_tag: house
+      genres: house,deep house,tech house
+    - tf_tag: techno-raw-deep
+      genres: techno
+    - tf_tag: electronica
+      genres: electronica
+    - tf_tag: downtempo
+      genres: downtempo
+    - tf_tag: hip-hop
+      genres: hip-hop & rap,hip hop,hip-hop
+    - tf_tag: funk-soul
+      genres: funk,soul,disco
+  traxsource:
+    enabled: false
+  boomkat:
+    enabled: false
+  bleep:
+    enabled: false
+  resident_advisor:
+    enabled: false
+  mixupload:
+    enabled: false

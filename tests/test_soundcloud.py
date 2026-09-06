@@ -629,3 +629,22 @@ def test_seeded_dedupes_track_ids_across_seeds(tmp_path):
     with _patch_token(), patch("src.fetchers.soundcloud._get_json", return_value=_page([_track(track_id=999)])):
         items = soundcloud.fetch(settings, seed_queries=["om unit", "sully"])
     assert len(items) == 1
+
+
+# ---------------------------------------------------------------------------
+# publish-pool raw_metadata (M1d Task 3)
+# ---------------------------------------------------------------------------
+
+def test_raw_metadata_carries_artwork_url(tmp_path):
+    settings = _make_settings(tmp_path)
+    track = {**_track(), "artwork_url": "https://i1.sndcdn.com/artworks-abc-large.jpg"}
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json", return_value=_page([track])):
+        items = soundcloud.fetch(settings)
+    assert items[0].raw_metadata["artwork_url"] == "https://i1.sndcdn.com/artworks-abc-large.jpg"
+
+
+def test_raw_metadata_artwork_url_none_when_missing(tmp_path):
+    settings = _make_settings(tmp_path)
+    with _patch_token(), patch("src.fetchers.soundcloud._get_json", return_value=_page([_track()])):
+        items = soundcloud.fetch(settings)
+    assert items[0].raw_metadata["artwork_url"] is None

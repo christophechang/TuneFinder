@@ -29,9 +29,15 @@ def cmd_check_config(args):
     settings = load_settings()
     settings.validate()
 
-    from src.config import _REQUIRED_ENV_VARS
+    from src.config import _POOL_ENV_VARS, _REQUIRED_ENV_VARS
     print("\nEnvironment variables:")
     for key in _REQUIRED_ENV_VARS:
+        status = "SET" if os.getenv(key) else "MISSING"
+        print(f"  {key:<30}  {status}")
+    # Optional — MISSING here only means `publish-pool` cannot post. Status
+    # only, never the value: one of these is a client secret.
+    print("\nPool publisher (optional):")
+    for key in _POOL_ENV_VARS:
         status = "SET" if os.getenv(key) else "MISSING"
         print(f"  {key:<30}  {status}")
     print("\nReport generation: deterministic (no LLM)")

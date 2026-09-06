@@ -154,6 +154,11 @@ def _parse_track(track: dict, album: dict, tag: str, genre_ids: set[int]) -> Sou
             "label_name": label,
             "label_id": label_id,
             "volumo_genre_id": track_genre_id,
+            # publish-pool artwork. Verified live 2026-09-06 against
+            # GET /api/v1/albums: the album object's only artwork field is
+            # `artwork_uuid`, a bare UUID — Volumo's API returns no image URL,
+            # so this is the raw id a CDN template would need, not a URL.
+            "artwork_url": album.get("artwork_uuid"),
         },
     )
 
