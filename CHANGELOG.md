@@ -4,6 +4,8 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.19.0 — 2026-09-06
+
 ### Added
 
 - **The pool publisher** — `tunefinder publish-pool` (operator guide: `docs/ops/publish-pool.md`). A daily 06:00 launchd job (`com.openclaw.tunefinder-publisher.plist`) that fetches the day's releases under the **whole** multi-tenant taxonomy — not one DJ's genre list — and posts them to TuneFinder's multi-tenant API, which writes them into the shared candidate pool. It is a second consumer of the fetchers, not a second Sunday run: it writes only under `data/pool/`, posts no Discord report, and never touches the history, pool, learning or label stores.
