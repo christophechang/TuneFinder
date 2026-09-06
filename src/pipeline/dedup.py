@@ -63,10 +63,11 @@ def normalise_artist(artist: str) -> str:
 #     recommendations — a DJ who owns the vocal almost never wants the
 #     instrumental/dub resurfaced as a fresh discovery.
 #   NAMED (distinct — qualifier `rmx:<name>`):
-#     "<name> <keyword>" where keyword ∈ {remix, mix, edit, rework, bootleg, vip,
-#     flip, refix, remake, version} and <name> is non-empty after removing the
-#     keyword and any leading/trailing GENERIC modifier words (extended, radio,
-#     club). So "(Calibre Remix)"/"(Calibre remix)"/"[Calibre Remix]" → rmx:calibre;
+#     "<name> <keyword>" (optionally followed by a year) where keyword ∈ {remix,
+#     mix, edit, rework, bootleg, vip, flip, refix, remake, version} and <name> is
+#     non-empty after removing the keyword and every GENERIC modifier word
+#     (extended, radio, club, vocal, dub, instrumental, original) wherever it sits.
+#     So "(Calibre Remix)"/"(Calibre remix)"/"[Calibre Remix]" → rmx:calibre;
 #     "(Break's Deep Mix)" → rmx:break's deep; "(Extended Remix)" → empty name →
 #     GENERIC (merges with the original). A bare "(VIP)" → rmx:vip (a VIP is a
 #     distinct work by the same artist).
@@ -81,22 +82,29 @@ _GENERIC_VERSIONS = {
 }
 # Modifier words stripped from a remix name before deciding named-vs-generic, so
 # "(Extended Remix)"/"(Radio Mix)"/"(Club Edit)" collapse to an empty name → merge.
-_GENERIC_MODIFIERS = {"extended", "radio", "club"}
-# Remix keywords, longest-first in the alternation so "remix" wins over "mix".
+# They are stripped wherever they sit in the name (spike S1a), so
+# "(Lindstrom Extended Vocal Mix)" → rmx:lindstrom and "(Original Distant Music Mix)"
+# → rmx:distant music rather than names no other pressing of the same remix matches.
+# Known and accepted edge: a remixer whose own name is one of these words loses it
+# ("Dub Phizix Remix" → rmx:phizix), which can only merge it with a remix by a
+# "Phizix" that does not exist. S1a rated the change low risk on that basis: it
+# splits identities apart, it never merges an original into its remix.
+_GENERIC_MODIFIERS = {"extended", "radio", "club", "vocal", "dub", "instrumental", "original"}
+# Remix keywords, longest-first in the alternation so "remix" wins over "mix". The
+# optional trailing year keeps "(Blade Rework 2024)" and "(Bushwacka Remix 2001)"
+# named — without it the year defeated the match and the remix merged into the
+# original (spike S1a, the one medium-severity gap).
 _NAMED_RE = re.compile(
-    r"^(?P<name>.*?)\b(?P<kw>remix|rework|bootleg|refix|remake|flip|version|vip|edit|mix)\b\s*$"
+    r"^(?P<name>.*?)\b(?P<kw>remix|rework|bootleg|refix|remake|flip|version|vip|edit|mix)\b"
+    r"(?:\s+(?:19|20)\d{2})?\s*$"
 )
 # Any parenthesised or bracketed group (inner text captured).
 _PAREN_GROUP_RE = re.compile(r"[\(\[]([^)\]]*)[\)\]]")
 
 
 def _strip_generic_modifiers(name: str) -> str:
-    words = name.split()
-    while words and words[0] in _GENERIC_MODIFIERS:
-        words.pop(0)
-    while words and words[-1] in _GENERIC_MODIFIERS:
-        words.pop()
-    return " ".join(words)
+    """Drop every generic modifier word from a remix name, wherever it sits."""
+    return " ".join(w for w in name.split() if w not in _GENERIC_MODIFIERS)
 
 
 def _classify_version(inner: str) -> str | None:
