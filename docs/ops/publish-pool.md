@@ -258,4 +258,18 @@ publisher was built from:
 
 ## 11. What a run costs
 
-Recorded after the first dev run.
+Measured on the first dev run from the mini (spike S3, 2026-09-06, run `2026-09-06T21:42:14Z-b38c55`;
+the full record is `docs/spikes/S3-publish-path.md` in the multi-tenant repository):
+
+| | |
+|---|---|
+| fetch (under the run lock) | 187.5 s — Beatport 2,900, Volumo 6,967, Bandcamp 340, SoundCloud 177 rows |
+| corpus | 9,591 items in 48 batches, 0 skipped |
+| post | 217.3 s, ~4.3 s per batch; 8 artist payloads; manifest |
+| total | 417.6 s |
+| request units | 78,851 RU, **8.22 RU per item** — 0.23 % of a day at dev's 400 RU/s |
+| refused | 165 of 9,666 copies (1.7 %) `throttled` — Cosmos 429s past the API's retry window |
+| replay of the same run | 32.0 s, 11,253 RU (1.17 RU/item): `unchanged 9501`, `upserted 165` (the throttled ones), `rejected 0`; the manifest completed without moving freshness |
+
+So a day costs about 80 k RU and seven minutes; the budget is not the constraint, the API's write rate is. A
+`throttled` copy is not lost: the next day's observation writes it, or `--replay <run_id>` writes it now.
