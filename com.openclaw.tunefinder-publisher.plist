@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Daily pool publisher — see docs/ops/publish-pool.md.
+     Update all paths below to match your actual deployment checkout location.
+     Loading this job does not change com.openclaw.tune-finder (the Sunday run);
+     unloading it disables publishing and nothing else. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openclaw.tunefinder-publisher</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/venv/bin/python</string>
+    <string>-m</string>
+    <string>tunefinder</string>
+    <string>publish-pool</string>
+  </array>
+
+  <!-- The checkout, so load_dotenv() finds .env and data/pool/ lands beside it -->
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/logs/publisher.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/logs/publisher.launchd.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

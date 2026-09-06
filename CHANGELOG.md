@@ -4,6 +4,20 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+### Added
+
+- **The pool publisher** — `tunefinder publish-pool` (operator guide: `docs/ops/publish-pool.md`). A daily 06:00 launchd job (`com.openclaw.tunefinder-publisher.plist`) that fetches the day's releases under the **whole** multi-tenant taxonomy — not one DJ's genre list — and posts them to TuneFinder's multi-tenant API, which writes them into the shared candidate pool. It is a second consumer of the fetchers, not a second Sunday run: it writes only under `data/pool/`, posts no Discord report, and never touches the history, pool, learning or label stores.
+  - **Ordering** — read `GET /api/ingest/config` for every target *before* fetching (a taxonomy or schema-version disagreement, or an unreachable config, skips the day with an alert and costs no source requests); fetch under TuneFinder's **existing** run lock, non-blocking, retrying every five minutes for up to two hours and then skipping with an alert; build and validate every payload against the vendored schemas before a single POST; post batches 1..N in order, then the artist payloads, then the manifest. The lock covers the fetch only — posting touches neither the token caches nor the JSON stores, so a 48-batch upload never blocks a web-triggered run.
+  - **Two targets, independently** — dev and prod are two base URLs with independent acknowledgements. A source is fetched when either target's config wants it, each manifest reports its own `enabled` switch (which is what lets the status page say *disabled* rather than *failed*), and a target that fails a batch records its error, skips its manifest and lets the next target run.
+  - **A truthful record** — `data/pool/snapshots/<run_id>.json.gz` holds the built corpus and is rewritten after every batch acknowledgement, so a crash mid-run leaves a record of exactly what was accepted. `--replay <run_id>` re-posts it under the same run id with no fetch and no lock, which is what a `409 batches_missing` on a manifest asks for. `--dry-run` fetches, builds, validates and snapshots but posts nothing, needs no pool credentials and never alerts. `--write-settings` regenerates `config/settings.pool.yaml` from the vendored taxonomy.
+  - `config/settings.pool.yaml` (generated from `tools/publish-pool-contract/taxonomy.yaml` and guarded by a drift test), the six optional `TUNEFINDER_POOL_*` environment variables, and `data/pool/` with its own retention — 14 days of snapshots, 26 runs of health, 13 weeks of artist counts.
+- **`src/publisher/identity.py`** — the Python side of CONTRACTS §1. Every published item carries `key_v1` (the legacy artist||title key, for matching only) and `key_v2` (the identity: pool document id, dedup group, mark and history key). Version extraction is per source and happens before dedup: Beatport's `mix_name` and Volumo's `version` are the catalogue's own field so the field wins; a hand-typed `Remixer` is a guarded fallback used only when the title carries no named version. `tests/fixtures/identity/cases.json` is the 70-row cross-runtime oracle the TypeScript and .NET sides reproduce.
+- **Additive fetcher fields** — the four live fetchers now expose the genre and sub-genre slugs, the preview refs, the artwork ids and the catalogue numbers the payload builder reads. No existing key, tag, filter or return value moved, so the Sunday run is untouched.
+
+### Changed
+
+- **The remix-aware classifier takes two fixes** (spike S1a), on the `remix_aware=True` branch only. A trailing year no longer defeats the named-remix regex, so `(Blade Rework 2024)` stops collapsing into its original; and generic modifier words are stripped wherever they sit in a name rather than at its ends only, with `vocal`, `dub`, `instrumental` and `original` added to the set, so `(Lindstrom Extended Vocal Mix)` → `rmx:lindstrom`. `make_dedup_key` without the flag is byte-identical on all 70 fixture rows, and `pipeline.remix_aware_identity` stays off by default — the Sunday run's identity does not move.
+
 ## v0.18.0 — 2026-08-12
 
 ### Added

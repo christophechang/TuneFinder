@@ -409,6 +409,13 @@ TUNEFINDER_POOL_SCOPE=            # api://<api app id>/.default
 
 # Run the web API (tunefinder-web backend) — see docs/ops/web-service.md
 ./venv/bin/python -m tunefinder serve --host 127.0.0.1 --port 8420
+
+# Publish today's corpus to the multi-tenant pool API — see docs/ops/publish-pool.md
+./venv/bin/python -m tunefinder publish-pool                      # the pool file's targets
+./venv/bin/python -m tunefinder publish-pool --env prod           # dev | prod | both
+./venv/bin/python -m tunefinder publish-pool --dry-run            # fetch, build, validate, snapshot; post nothing
+./venv/bin/python -m tunefinder publish-pool --replay 2026-09-06T06:00:00Z-71bf51   # re-post a snapshot, same run id
+./venv/bin/python -m tunefinder publish-pool --write-settings     # regenerate config/settings.pool.yaml and exit
 ```
 
 ### mark / stats notes
@@ -465,6 +472,16 @@ launchctl list | grep tune-finder
 launchctl start com.openclaw.tune-finder
 ```
 
+The pool publisher is a **second, separate** job: `com.openclaw.tunefinder-publisher.plist`, daily at 06:00, logging to `logs/publisher.launchd.log`. Same install steps with that file name; `launchctl list | grep tunefinder-publisher` to verify. Unloading it disables publishing and changes nothing about `com.openclaw.tune-finder`. (A third, `com.openclaw.tunefinder-web.plist`, keeps the web API alive — see `docs/ops/web-service.md`.)
+
+## Pool publisher
+
+`tunefinder publish-pool` fetches the day's releases under the multi-tenant taxonomy — the whole taxonomy, not one DJ's genre list — and posts them to TuneFinder's multi-tenant API, which writes them into the shared candidate pool other people's crates are built from. It is a second consumer of the fetchers, not a second Sunday run: it writes only under `data/pool/`, posts no Discord report, and touches none of the history, pool, learning or label stores.
+
+It takes TuneFinder's **existing** run lock for the fetch only (retrying every five minutes for up to two hours, then skipping the day with an alert), so its Beatport and SoundCloud token refreshes can never interleave with a weekly run, a mix-prep run or a web-triggered one.
+
+Full operator guide — the six env vars, the generated settings file, `--dry-run`, `--replay`, the launchd job and how to turn it off: **`docs/ops/publish-pool.md`**.
+
 ## Project structure
 
 ```
@@ -497,6 +514,16 @@ src/
     report.py          # Deterministic report renderer (weekly + mix-prep)
     feedback.py        # Outcome marking and stats aggregation
     source_health.py   # Per-source run health persistence and anomaly detection
+  publisher/           # publish-pool — see docs/ops/publish-pool.md
+    run.py             # The run: config gate, lock + fetch, build, post, snapshots
+    pool_settings.py   # config/settings.pool.yaml — generated from the taxonomy
+    taxonomy.py        # The 8 families / 38 fine genres and the per-source mappings
+    identity.py        # key_v1 / key_v2 — the pool document's identity
+    payload.py         # SourceItems -> contract items, batches, manifest, per-source
+    artists.py         # The thirteen-week artist index and its payloads
+    client.py          # Entra client-credentials token + the four ingest calls
+    contract.py        # Schema gate over the vendored contract
+    snapshots.py       # data/pool/ snapshots, health log, retention
   output/
     discord.py       # Discord bot client
 tunefinder/
@@ -504,10 +531,14 @@ tunefinder/
 config/
   settings.yaml      # All non-secret configuration
   settings.pool.yaml # publish-pool source config — GENERATED from the taxonomy, do not edit
+tools/
+  publish-pool-contract/  # Vendored unchanged from the multi-tenant repo: JSON Schemas,
+                          # samples, taxonomy.yaml. Never edited here.
 data/
   recommendation_history.json   # Weekly recommendation records (gitignored)
   mix_prep_history.json         # Mix-prep recommendation records (gitignored)
   feedback.json                 # Outcome marks (append-only, gitignored)
   source_health.json            # Per-source run health for anomaly detection (gitignored)
   label_affinity.json           # Persisted artist<->label associations (gitignored)
+  pool/                         # publish-pool only: snapshots/, health.json, artist_index.json
 ```
