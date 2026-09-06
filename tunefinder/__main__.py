@@ -396,6 +396,88 @@ def cmd_stats(args):
         _print_section("By report", bucket.get("by_report", {}))
 
 
+def _print_publish_tables(outcome):
+    """The two tables an operator reads after a publish run: what each source
+    gave, and why anything was dropped before it reached the wire."""
+    if outcome.per_source:
+        print("Sources:")
+        for name, entry in sorted(outcome.per_source.items()):
+            if entry.get("error"):
+                status = f"❌ ERROR: {entry['error']}"
+            elif not entry.get("enabled"):
+                status = "disabled"
+            else:
+                status = f"{entry.get('count', 0)} items"
+            print(f"  {name:<18} {status}")
+    if outcome.skipped_items:
+        print(f"Skipped items ({sum(outcome.skipped_items.values())}):")
+        for reason, count in outcome.skipped_items.items():
+            print(f"  {reason:<22} {count}")
+    if outcome.snapshot_path:
+        print(f"Snapshot: {outcome.snapshot_path}")
+
+
+def _write_pool_settings():
+    """Regenerate config/settings.pool.yaml from the vendored taxonomy.
+
+    Written only when the bytes differ, so a no-op regeneration leaves the file
+    (and its mtime) alone. Returns (path, changed).
+    """
+    from src.pipeline.storage import atomic_write_text
+    from src.publisher import pool_settings
+    from src.publisher.taxonomy import load_taxonomy
+
+    path = pool_settings.POOL_SETTINGS_PATH
+    rendered = pool_settings.render_pool_settings(
+        pool_settings.generate_pool_settings(load_taxonomy(), load_settings()._data)
+    )
+    existing = None
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            existing = f.read()
+    if existing == rendered.encode("utf-8"):
+        return path, False
+    atomic_write_text(path, rendered)
+    return path, True
+
+
+def cmd_publish_pool(args):
+    """Publish today's corpus to the multi-tenant pool API.
+
+    `settings.validate()` is deliberately not called: the publisher needs no
+    Discord token to run, and a missing one degrades an alert to a logged
+    warning exactly as `serve` degrades report delivery.
+    """
+    from src.pipeline.storage import RunLockHeldError
+    from src.publisher.pool_settings import load_pool_settings
+    from src.publisher.run import PublishOptions, publish_pool
+
+    if getattr(args, "write_settings", False):
+        path, changed = _write_pool_settings()
+        print(f"{path} — {'updated' if changed else 'unchanged'}")
+        return
+
+    settings = load_pool_settings()
+    if args.env == "both":
+        envs = ["dev", "prod"]
+    elif args.env:
+        envs = [args.env]
+    else:
+        envs = list(settings.pool_targets)
+
+    options = PublishOptions(envs=envs, dry_run=args.dry_run, replay_run_id=args.replay)
+    try:
+        outcome = publish_pool(settings, options)
+    except RunLockHeldError as exc:
+        print(f"Error: {exc}")
+        raise SystemExit(1)
+
+    print(outcome.summary_line() + (" (DRY RUN — nothing posted)" if args.dry_run else ""))
+    _print_publish_tables(outcome)
+    if not outcome.ok:
+        raise SystemExit(1)
+
+
 def cmd_serve(args):
     """Run the web API (and optionally the built SPA) with uvicorn.
 
@@ -539,6 +621,27 @@ def main():
         "tune-report",
         help="Feedback-driven per-signal/source/genre positive-rate and lift report",
     )
+    publish_parser = subparsers.add_parser(
+        "publish-pool",
+        help="Publish today's corpus to the multi-tenant pool API (see docs/ops/publish-pool.md)",
+    )
+    publish_parser.add_argument(
+        "--env", choices=["dev", "prod", "both"], default=None,
+        help="Target(s) to post to (default: the pool settings file's `targets`)",
+    )
+    publish_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Fetch, build, validate and snapshot; post nothing (no pool credentials needed)",
+    )
+    publish_parser.add_argument(
+        "--replay", metavar="RUN_ID", default=None,
+        help="Re-post a snapshot's batches, artists and manifest under the same run id "
+             "(no fetch, no run lock)",
+    )
+    publish_parser.add_argument(
+        "--write-settings", action="store_true",
+        help="Regenerate config/settings.pool.yaml from the vendored taxonomy and exit",
+    )
     serve_parser = subparsers.add_parser(
         "serve",
         help="Run the web API (tunefinder-web backend) with uvicorn",
@@ -578,6 +681,8 @@ def main():
         cmd_replay(args)
     elif args.command == "tune-report":
         cmd_tune_report(args)
+    elif args.command == "publish-pool":
+        cmd_publish_pool(args)
     elif args.command == "serve":
         cmd_serve(args)
 
