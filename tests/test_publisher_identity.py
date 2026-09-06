@@ -95,6 +95,40 @@ def test_beatport_missing_mix_name_falls_back_to_the_title():
         "calibre||new dawn", "calibre||new dawn||rmx:break")
 
 
+# `_VERSION_RE` (frozen legacy) has no vip/flip/refix/remake alternative, so
+# `normalise_title` leaves those tags in the base. `key_v2` must not inherit that:
+# the same track from a catalogue source and from a title-only source has to land on
+# one pool document id.
+_UNSTRIPPED_NAMED_TITLES = [
+    ("Track (Calibre VIP)", "Calibre VIP"),
+    ("Track (Calibre Flip)", "Calibre Flip"),
+    ("Track (Calibre Refix)", "Calibre Refix"),
+    ("Track (Calibre Remake)", "Calibre Remake"),
+]
+
+
+@pytest.mark.parametrize("title,version", _UNSTRIPPED_NAMED_TITLES)
+def test_catalogue_and_title_paths_share_the_key_v2_base(title, version):
+    catalogue = identity_keys("A", title, version)
+    from_title = identity_keys("A", title, None, version_is_catalogue=False)
+    assert catalogue[1] == from_title[1] == "a||track||rmx:calibre"
+    # The title path stays byte-identical to the Sunday run's remix-aware key.
+    assert from_title[1] == make_dedup_key("A", title, remix_aware=True)
+    # key_v1 is the legacy key and does not move.
+    assert catalogue[0] == from_title[0] == f"a||{title.lower()}"
+
+
+def test_catalogue_generic_field_still_excises_the_named_tag():
+    # The field wins (no qualifier), and the title's named tag leaves the base anyway.
+    assert identity_keys("A", "Track (Calibre VIP)", "Original Mix") == (
+        "a||track (calibre vip)", "a||track")
+
+
+def test_catalogue_field_wins_over_a_disagreeing_named_tag():
+    assert identity_keys("A", "Track (Calibre VIP)", "Break Remix") == (
+        "a||track (calibre vip)", "a||track||rmx:break")
+
+
 def test_volumo_version_field_is_catalogue():
     # The catalogue's own field disagrees with the title parenthetical: the field wins
     # and the parenthetical is stripped from the base.

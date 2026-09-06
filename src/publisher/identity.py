@@ -15,10 +15,11 @@ fallback: used only when the title carries no named version and the value is nei
 generic nor domain-like.
 
 The classification rules are not reimplemented here: `_classify_version`,
-`_strip_generic_modifiers`, `_GENERIC_VERSIONS`, `_NAMED_RE` and `_PAREN_GROUP_RE`
-are imported from `src.pipeline.dedup` by their private names on purpose. The
-publisher and the Sunday run must answer "is this a named remix?" identically, and
-there is one implementation of that answer; a copy here would drift.
+`_strip_generic_modifiers`, `_GENERIC_VERSIONS`, `_NAMED_RE`, `_PAREN_GROUP_RE`,
+`_VERSION_RE` and `_FEAT_RE` are imported from `src.pipeline.dedup` by their private
+names on purpose. The publisher and the Sunday run must answer "is this a named
+remix?" identically, and there is one implementation of that answer; a copy here
+would drift.
 
 The cross-runtime oracle for this module is `tests/fixtures/identity/cases.json`
 (spike S1b): the TypeScript library parser and the .NET engine reproduce the same
@@ -28,12 +29,13 @@ import re
 
 from src.models import SourceItem
 from src.pipeline.dedup import (
+    _FEAT_RE,
     _GENERIC_VERSIONS,
     _NAMED_RE,
     _PAREN_GROUP_RE,
+    _VERSION_RE,
     _classify_version,
     _strip_generic_modifiers,
-    make_dedup_key,
     normalise_artist,
     normalise_title,
 )
@@ -72,20 +74,44 @@ def is_domain_like(text: str) -> bool:
     return bool(_DOMAIN_LIKE_RE.search(text))
 
 
-def _title_named_version(title: str) -> tuple[str | None, str | None]:
-    """The last *named* parenthetical of `title`.
+def _remix_aware_key_parts(title: str) -> tuple[str, str | None]:
+    """`(base, qualifier)` — a mirror of `make_dedup_key`'s remix-aware branch.
 
-    Returns `(inner text in its original casing, qualifier)`, or `(None, None)` when
-    the title carries no named version — no parenthetical, or only generic ones.
+    The *last* named parenthetical is excised, then the legacy version and feat
+    regexes run over what is left. Both key_v2 paths use this base, because
+    `normalise_title` alone is not enough: `_VERSION_RE` (frozen legacy) has no
+    `vip`/`flip`/`refix`/`remake` alternative, so a tag like "(Calibre VIP)" survives
+    it. Building the catalogue path's key on `normalise_title` would key the same
+    track two ways — "a||track (calibre vip)||rmx:calibre" from Beatport, and
+    "a||track||rmx:calibre" from SoundCloud — and put it on two pool documents.
+    `key_v1` keeps `normalise_title`'s output: it is the legacy key and never moves.
     """
-    inner_text: str | None = None
+    lowered = title.strip().lower()
     qualifier: str | None = None
-    for match in _PAREN_GROUP_RE.finditer(title):
+    named_span: tuple[int, int] | None = None
+    for match in _PAREN_GROUP_RE.finditer(lowered):
         found = classify_version(match.group(1))
         if found is not None:
-            inner_text = " ".join(match.group(1).split())
             qualifier = found
-    return inner_text, qualifier
+            named_span = match.span()
+    if named_span is not None:
+        lowered = lowered[: named_span[0]] + lowered[named_span[1] :]
+    # Same order as the legacy path (normalise_title): _VERSION_RE before _FEAT_RE.
+    base = _FEAT_RE.sub("", _VERSION_RE.sub("", lowered)).strip()
+    return base, qualifier
+
+
+def _title_version_text(title: str) -> str | None:
+    """The inner text of the title's last named parenthetical, in its original casing.
+
+    This is what the payload sends as `version` for a source with no catalogue field;
+    the keys come from `_remix_aware_key_parts`, which reads the same group.
+    """
+    version_text: str | None = None
+    for match in _PAREN_GROUP_RE.finditer(title):
+        if classify_version(match.group(1)) is not None:
+            version_text = " ".join(match.group(1).split())
+    return version_text
 
 
 def _hand_typed_qualifier(value: str) -> str | None:
@@ -116,26 +142,34 @@ def identity_keys(
     """`(key_v1, key_v2)` for one item.
 
     `version_is_catalogue=True` (Beatport `mix_name`, Volumo `version`): the field
-    wins — the qualifier comes from it and the title's own parentheticals are
-    stripped by `normalise_title`. A missing field falls back to the title rule.
+    wins — the qualifier comes from it, and the title's own named tag leaves the base
+    whether the field agrees with it or not. A missing field falls back to the title.
 
     `version_is_catalogue=False` (Rekordbox `Remixer`, or anything parsed from the
     title with no field at all): the title wins, so `key_v2` is exactly
     `make_dedup_key(artist, title, remix_aware=True)`; the field is used only when
     the title carries no named version and the value survives the guards above.
+
+    Both paths build `key_v2` on the same base (`_remix_aware_key_parts`), so a track
+    keys identically whichever source it came from. `key_v1` is the legacy key.
     """
-    key_v1 = f"{normalise_artist(artist)}||{normalise_title(title)}"
+    artist_key = normalise_artist(artist)
+    key_v1 = f"{artist_key}||{normalise_title(title)}"
     field = version.strip() if version else ""
+    base, title_qualifier = _remix_aware_key_parts(title)
 
     if version_is_catalogue and field:
         qualifier = classify_version(field)
-        return key_v1, f"{key_v1}||{qualifier}" if qualifier else key_v1
-
-    key_v2 = make_dedup_key(artist, title, remix_aware=True)
-    if field and _title_named_version(title)[1] is None:
+    elif title_qualifier:
+        qualifier = title_qualifier
+    elif field:
         qualifier = _hand_typed_qualifier(field)
-        if qualifier:
-            key_v2 = f"{key_v1}||{qualifier}"
+    else:
+        qualifier = None
+
+    key_v2 = f"{artist_key}||{base}"
+    if qualifier:
+        key_v2 += f"||{qualifier}"
     return key_v1, key_v2
 
 
@@ -159,6 +193,6 @@ def item_identity(item: SourceItem) -> tuple[str, str, str | None, str]:
         catalogue_version,
         version_is_catalogue=field_name is not None,
     )
-    version = catalogue_version or _title_named_version(item.title)[0]
+    version = catalogue_version or _title_version_text(item.title)
     granularity = "release" if item.source in _RELEASE_GRANULARITY_SOURCES else "track"
     return key_v1, key_v2, version, granularity
