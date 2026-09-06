@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tunefinder.setfolio.app/schemas/publish-pool/v1/ingest-config.schema.json",
+  "title": "publish-pool ingest config",
+  "description": "The body of GET /api/ingest/config, which the publisher reads at the start of every run to learn the taxonomy the API accepts, the schema versions it still understands, the batch size it enforces and which sources are switched off (CONTRACTS §2, §8).",
+  "type": "object",
+  "required": [
+    "taxonomy_version",
+    "schema_versions",
+    "batch_size",
+    "sources"
+  ],
+  "properties": {
+    "taxonomy_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "schema_versions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "batch_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sources": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "batch.schema.json#/$defs/source_name"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "fetch",
+          "display",
+          "preview"
+        ],
+        "properties": {
+          "fetch": {
+            "type": "boolean"
+          },
+          "display": {
+            "type": "boolean"
+          },
+          "preview": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

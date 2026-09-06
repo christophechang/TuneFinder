@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-09-06T06:00:00Z-a3f9c1",
+  "batch_no": 0,
+  "taxonomy_version": 1,
+  "identity_version": 2,
+  "items": [
+    {
+      "key_v2": "borai, denham audio||make me||rmx:franky rizardo",
+      "key_v1": "borai, denham audio||make me",
+      "artist": "Borai & Denham Audio",
+      "title": "Make Me",
+      "version": "Franky Rizardo Extended Remix",
+      "granularity": "track",
+      "families": [
+        "house",
+        "uk-garage"
+      ],
+      "fine_genres": [
+        "tech-house",
+        "uk-garage-bassline"
+      ],
+      "release_name": "Make Me (Franky Rizardo Remix)",
+      "release_date": "2026-08-28",
+      "label": "Columbia",
+      "sources": [
+        {
+          "source": "beatport",
+          "id": "19283746",
+          "url": "https://www.beatport.com/track/make-me-franky-rizardo-extended-remix/19283746"
+        }
+      ],
+      "primary_source": "beatport",
+      "bpm": 130.0,
+      "camelot": null,
+      "key_raw": null,
+      "download_count": null,
+      "reposts_count": null,
+      "free_download": null,
+      "acquisition_url": null,
+      "isrc": "GBARL2600123",
+      "catalog_number": "COL0026123",
+      "artwork_url": "https://geo-media.beatport.com/image_size/500x500/19283746.jpg",
+      "preview": {
+        "kind": "beatport_sample",
+        "ref": "https://geo-samples.beatport.com/track/19283746.LOFI.mp3",
+        "eligible": true,
+        "checked_at": "2026-09-06T06:12:03Z"
+      },
+      "observation": {
+        "date": "2026-09-06",
+        "source": "beatport",
+        "chart_position": 7,
+        "seen_at": "2026-09-06T06:12:03Z"
+      }
+    },
+    {
+      "key_v2": "drumskull||muscle memory ep",
+      "key_v1": "drumskull||muscle memory ep",
+      "artist": "Drumskull",
+      "title": "Muscle Memory EP",
+      "version": null,
+      "granularity": "release",
+      "families": [
+        "breaks-uk-bass"
+      ],
+      "fine_genres": [
+        "breaks-breakbeat"
+      ],
+      "release_name": "Muscle Memory EP",
+      "release_date": "2026-09-04",
+      "label": "Hooversound Recordings",
+      "sources": [
+        {
+          "source": "bandcamp",
+          "id": "3186429057",
+          "url": "https://hooversound.bandcamp.com/album/muscle-memory-ep"
+        }
+      ],
+      "primary_source": "bandcamp",
+      "bpm": null,
+      "camelot": null,
+      "key_raw": null,
+      "download_count": null,
+      "reposts_count": null,
+      "free_download": false,
+      "acquisition_url": null,
+      "isrc": null,
+      "catalog_number": "HVSD012",
+      "artwork_url": "https://f4.bcbits.com/img/a3186429057_16.jpg",
+      "preview": null,
+      "observation": {
+        "date": "2026-09-06",
+        "source": "bandcamp",
+        "chart_position": null,
+        "seen_at": "2026-09-06T06:21:44Z"
+      }
+    },
+    {
+      "key_v2": "prunk||get down",
+      "key_v1": "prunk||get down",
+      "artist": "Prunk",
+      "title": "Get Down",
+      "version": "Original Mix",
+      "granularity": "track",
+      "families": [
+        "house"
+      ],
+      "fine_genres": [
+        "tech-house"
+      ],
+      "release_name": "Get Down",
+      "release_date": "2026-08-21",
+      "label": "PIV",
+      "sources": [
+        {
+          "source": "volumo",
+          "id": "c7f0a1e2",
+          "url": "https://volumo.com/track/c7f0a1e2"
+        }
+      ],
+      "primary_source": "volumo",
+      "bpm": 126.0,
+      "camelot": "8A",
+      "key_raw": "A Minor",
+      "download_count": null,
+      "reposts_count": null,
+      "free_download": null,
+      "acquisition_url": null,
+      "isrc": "NLZ542600087",
+      "catalog_number": "PIV073",
+      "artwork_url": "https://cdn.volumo.com/artwork/c7f0a1e2.jpg",
+      "preview": {
+        "kind": "volumo_prelisten",
+        "ref": "https://cdn.volumo.com/preview/c7f0a1e2.mp3",
+        "eligible": true,
+        "checked_at": "2026-09-06T06:31:10Z"
+      },
+      "observation": {
+        "date": "2026-09-06",
+        "source": "volumo",
+        "chart_position": 12,
+        "seen_at": "2026-09-06T06:31:10Z"
+      }
+    }
+  ]
+}

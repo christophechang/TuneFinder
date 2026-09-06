@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-09-06T06:00:00Z-a3f9c1",
+  "taxonomy_version": 1,
+  "family": "house",
+  "weeks": [
+    "2026-08-24",
+    "2026-08-31"
+  ],
+  "artists": [
+    {
+      "name": "Prunk",
+      "counts": [
+        2,
+        3
+      ],
+      "labels": [
+        "PIV"
+      ]
+    },
+    {
+      "name": "Franky Rizardo",
+      "counts": [
+        1,
+        0
+      ],
+      "labels": [
+        "Columbia",
+        "Realm"
+      ]
+    },
+    {
+      "name": "Sofia Kourtesis",
+      "counts": [
+        0,
+        1
+      ],
+      "labels": [
+        "Ninja Tune"
+      ]
+    }
+  ]
+}

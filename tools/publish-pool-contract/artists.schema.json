@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tunefinder.setfolio.app/schemas/publish-pool/v1/artists.schema.json",
+  "title": "publish-pool artist index",
+  "description": "One family's artist counts, posted to POST /api/ingest/artists. Weekly buckets for at most thirteen weeks, computed by the publisher rather than derived from pool documents, which expire (CONTRACTS §2).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "taxonomy_version",
+    "family",
+    "weeks",
+    "artists"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "$ref": "batch.schema.json#/$defs/run_id"
+    },
+    "taxonomy_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "family": {
+      "$ref": "batch.schema.json#/$defs/family"
+    },
+    "weeks": {
+      "type": "array",
+      "description": "Mondays, ascending. The API refuses any other day: the buckets are weeks and both ends must agree where a week starts.",
+      "minItems": 1,
+      "maxItems": 13,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "date"
+      }
+    },
+    "artists": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "counts",
+          "labels"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "counts": {
+            "type": "array",
+            "description": "One per week, same length and order as `weeks`.",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

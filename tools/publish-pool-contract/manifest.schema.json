@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tunefinder.setfolio.app/schemas/publish-pool/v1/manifest.schema.json",
+  "title": "publish-pool manifest",
+  "description": "A run declaring itself finished, posted to POST /api/ingest/manifest. Freshness moves on this and on nothing else, and only when every batch number 1..batches has been acknowledged (CONTRACTS §2).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "batches",
+    "started_at",
+    "completed_at",
+    "per_source"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "$ref": "batch.schema.json#/$defs/run_id"
+    },
+    "batches": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "per_source": {
+      "type": "object",
+      "description": "One entry per source the run touched, keyed by source name.",
+      "propertyNames": {
+        "$ref": "batch.schema.json#/$defs/source_name"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "count",
+          "error",
+          "enabled"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500,
+            "description": "Shown verbatim on the public status page, so a short summary with no urls, tokens or paths. The API truncates anything longer than this."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "The fetch switch the publisher read at the start of the run: what tells the status page `disabled` from `failed`."
+          }
+        }
+      }
+    },
+    "publisher_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}
