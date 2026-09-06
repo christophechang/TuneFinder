@@ -376,6 +376,159 @@ def test_families_are_derived_from_fine_genres(taxonomy):
     assert item["families"] == ["house", "uk-garage"]
 
 
+def test_artwork_uuid_survives_a_merge_the_volumo_row_loses(taxonomy):
+    """A Volumo row that loses the richness contest still carries the artwork.
+
+    `artwork_url_for` reads the merged row, so a key the merge does not backfill
+    is a key the item publishes as null.
+    """
+    volumo = _item(
+        "volumo",
+        artist="Prunk",
+        title="Get Down",
+        link=VOLUMO_LINK,
+        label="PIV",
+        raw_metadata={
+            "volumo_track_id": "c7f0a1e2",
+            "volumo_genre_id": 21,
+            "artwork_uuid": "c7f0a1e2",
+        },
+    )
+    beatport = _item(
+        "beatport",
+        artist="Prunk",
+        title="Get Down",
+        link="https://www.beatport.com/track/get-down/321",
+        label="PIV",
+        release_date="2026-08-21",
+        release_name="Get Down",
+        raw_metadata={"beatport_id": 321, "genre_slug": "tech-house"},
+    )
+
+    assert "artwork_uuid" in PUBLISHER_BACKFILL_KEYS
+
+    built = build_items(
+        [volumo, beatport], taxonomy, observed_on=OBSERVED_ON, seen_at=SEEN_AT
+    )
+
+    item = built.items[0]
+    assert item["primary_source"] == "beatport"
+    assert item["artwork_url"] == "https://volumo.com/img/size/500x0/c7f0a1e2.jpg"
+
+
+def test_primary_source_is_the_richest_member_that_produced_a_ref(taxonomy):
+    """A linkless winner must not name a source the item does not carry.
+
+    Bandcamp sends `item_url: ""` for a row it could not resolve, and the
+    sources archive defaults `link` to "" — and a Bandcamp row is typically the
+    richest member of a cross-source group, so this is the common shape, not a
+    corner. Naming it `primary_source` would fail `bad_primary_source` and drop
+    an item that is otherwise perfectly good.
+    """
+    linkless = _item(
+        "volumo",
+        artist="Drumskull",
+        title="Muscle Memory EP",
+        link="",
+        label="Hooversound Recordings",
+        release_date="2026-09-04",
+        release_name="Muscle Memory EP",
+        raw_metadata={"volumo_track_id": "zz", "volumo_genre_id": 3},
+    )
+    beatport = _item(
+        "beatport",
+        artist="Drumskull",
+        title="Muscle Memory EP",
+        link="https://www.beatport.com/track/muscle-memory/777",
+        raw_metadata={"beatport_id": 777, "genre_slug": "breaks-breakbeat-uk-bass"},
+    )
+
+    built = build_items(
+        [linkless, beatport], taxonomy, observed_on=OBSERVED_ON, seen_at=SEEN_AT
+    )
+
+    assert built.skipped == []
+    item = built.items[0]
+    assert [ref["source"] for ref in item["sources"]] == ["beatport"]
+    assert item["primary_source"] == "beatport"
+    assert item["observation"]["source"] == "beatport"
+    # The facts still come from the richest member, linkless or not.
+    assert item["label"] == "Hooversound Recordings"
+    assert item["release_date"] == "2026-09-04"
+    assert check_item_relations(item) is None
+
+
+def test_richness_ties_are_broken_by_source_name(taxonomy):
+    """A tie settled by fetch order would flip a stored pool document daily.
+
+    Each run replaces the document's facts, so the same tied pair arriving in a
+    different order tomorrow would change its granularity, its primary source
+    and its release facts for no reason at all.
+    """
+    bandcamp = _item(
+        "bandcamp",
+        artist="Drumskull",
+        title="Muscle Memory EP",
+        link=BANDCAMP_LINK,
+        label="Hooversound Recordings",
+        release_date="2026-09-04",
+        release_name="Muscle Memory EP",
+        raw_metadata={"bandcamp_album_id": 3186429057, "bandcamp_tag": "breakbeat"},
+    )
+    beatport = _item(
+        "beatport",
+        artist="Drumskull",
+        title="Muscle Memory EP",
+        link="https://www.beatport.com/track/muscle-memory/777",
+        label="Hooversound",
+        release_date="2026-09-03",
+        release_name="Muscle Memory",
+        raw_metadata={"beatport_id": 777, "genre_slug": "breaks-breakbeat-uk-bass"},
+    )
+
+    forwards, backwards = (
+        build_items(members, taxonomy, observed_on=OBSERVED_ON, seen_at=SEEN_AT).items[0]
+        for members in ([bandcamp, beatport], [beatport, bandcamp])
+    )
+
+    assert forwards == backwards
+    assert forwards["granularity"] == "release"
+    assert forwards["primary_source"] == "bandcamp"
+    assert forwards["label"] == "Hooversound Recordings"
+    assert forwards["release_date"] == "2026-09-04"
+    assert merge_facts([bandcamp, beatport]).source == "bandcamp"
+    assert merge_facts([beatport, bandcamp]).source == "bandcamp"
+
+
+def test_blank_artist_or_title_is_skipped_and_names_are_stripped(taxonomy):
+    """One blank name would otherwise cost the whole batch, and with it the
+    manifest — `minLength: 1` is a document-wide schema failure."""
+    def row(number, artist, title):
+        return _item(
+            "beatport",
+            artist=artist,
+            title=title,
+            link=f"https://www.beatport.com/track/get-down/{number}",
+            raw_metadata={"beatport_id": number, "genre_slug": "tech-house"},
+        )
+
+    built = build_items(
+        [row(1, "   ", "Get Down"), row(2, "Prunk", " "), row(3, "  Prunk ", " Get Down  ")],
+        taxonomy,
+        observed_on=OBSERVED_ON,
+        seen_at=SEEN_AT,
+    )
+
+    assert [reason for _, reason in built.skipped] == [
+        "missing_artist_title",
+        "missing_artist_title",
+    ]
+    assert len(built.items) == 1
+    assert built.items[0]["artist"] == "Prunk"
+    assert built.items[0]["title"] == "Get Down"
+    validate("batch", batch_payload(RUN_ID, 1, built.items, taxonomy.version))
+
+
 def test_item_without_fine_genre_is_skipped_with_reason(taxonomy):
     orphan = _item("beatport", raw_metadata={"beatport_id": 1, "genre_slug": "polka"})
 

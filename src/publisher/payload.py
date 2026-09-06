@@ -17,9 +17,9 @@ Two rules of the merge are deliberately *not* the merged item's:
 
 Everything the schema will not accept becomes null rather than an exception: a
 blank Beatport release date, a BPM outside 40..300, a key string `to_camelot`
-cannot parse. What cannot become null — no fine genre, no usable source ref, an
-over-long key — makes the item **skipped with a reason**, never raised, so one
-bad row never costs a run.
+cannot parse. What cannot become null — a blank artist or title, no fine
+genre, no usable source ref, an over-long key — makes the item **skipped with a
+reason**, never raised, so one bad row never costs a run.
 
 Pure functions, no IO, no network: nothing here imports `requests` or touches
 `data/`.
@@ -65,6 +65,7 @@ KNOWN_SOURCES = (
 # untouched — the Sunday run's merge does not change.
 PUBLISHER_BACKFILL_KEYS = _MERGE_BACKFILL_KEYS + (
     "artwork_url",
+    "artwork_uuid",
     "sample_url",
     "isrc",
     "catalog_number",
@@ -130,9 +131,15 @@ def merge_facts(members: list[SourceItem]) -> SourceItem:
     `dedup._merge_group`'s rules over `PUBLISHER_BACKFILL_KEYS`, applied to deep
     copies: the fetchers' items belong to the rest of the run and the publisher
     is a reader of them.
+
+    Ties are broken by source name, lexically first — `_merge_rank`. The Sunday
+    run can let fetch order settle a tie because its output is a report read
+    once; the publisher's is a stored pool document, replaced by every later
+    run, so a tie settled by fetch order would flip the same document's
+    `granularity`, `primary_source` and release facts from day to day.
     """
     copies = deepcopy(members)
-    best = max(copies, key=_richness)
+    best = min(copies, key=_merge_rank)
 
     all_genres: list[str] = []
     for item in copies:
@@ -436,6 +443,14 @@ def _build_one(
     merged = merge_facts(members)
     key_v1, key_v2, version, granularity = item_identity(merged)
 
+    # Both are `minLength: 1` on the wire, and a batch carrying one blank value
+    # is refused whole — so the run would lose its manifest, and freshness with
+    # it, over one row. `missing_artist_title` is the API's own reason name.
+    artist = (merged.artist or "").strip()
+    title = (merged.title or "").strip()
+    if not artist or not title:
+        return None, "missing_artist_title"
+
     if len(key_v2) > _MAX_KEY_LENGTH:
         return None, "key_too_long"
 
@@ -453,7 +468,13 @@ def _build_one(
     if not sources:
         return None, "no_sources"
 
+    # The primary is the richest member that actually produced a ref, not the
+    # richest member: a fetcher that returned no link for its best row (Bandcamp
+    # sends `item_url: ""`, and the archive replay defaults `link` to "") would
+    # otherwise name a source the item does not carry, and the whole item would
+    # be dropped as `bad_primary_source`.
     source_names = {ref["source"] for ref in sources}
+    primary_source = _primary_source(members, source_names)
     charting = next(
         (
             member
@@ -468,8 +489,8 @@ def _build_one(
     item = {
         "key_v2": key_v2,
         "key_v1": key_v1,
-        "artist": merged.artist,
-        "title": merged.title,
+        "artist": artist,
+        "title": title,
         "version": version,
         "granularity": granularity,
         "families": families_for(fine_genres, taxonomy),
@@ -478,7 +499,7 @@ def _build_one(
         "release_date": release_date_or_none(merged.release_date),
         "label": _text_or_none(merged.label),
         "sources": sources,
-        "primary_source": merged.source,
+        "primary_source": primary_source,
         "bpm": bpm_or_none(merged.raw_metadata.get("bpm")),
         "camelot": camelot_or_none(merged),
         "key_raw": key_raw_or_none(merged),
@@ -494,7 +515,7 @@ def _build_one(
         "preview": preview_for(merged, members, seen_at),
         "observation": {
             "date": observed_on.isoformat(),
-            "source": charting.source if charting else merged.source,
+            "source": charting.source if charting else primary_source,
             "chart_position": _chart_position(charting) if charting else None,
             "seen_at": seen_at,
         },
@@ -528,9 +549,29 @@ def _source_refs(members: list[SourceItem]) -> list[dict]:
     return [ref for _, (_, ref) in sorted(best_by_source.items(), key=lambda kv: kv[0])]
 
 
+def _merge_rank(item: SourceItem) -> tuple[int, str]:
+    """The sort key for "richest wins", smallest first: most facts, then the
+    lexically first source name. The second half is what makes the winner
+    independent of the order the fetchers answered in."""
+    return -_richness(item), item.source
+
+
+def _primary_source(members: list[SourceItem], source_names: set[str]) -> str:
+    """The richest member whose source made it into `sources`.
+
+    `primary_source` must be one of the item's own sources (`bad_primary_source`),
+    and a member with no link produces no ref — so the merge's winner is not
+    always a legal answer.
+    """
+    return min(
+        (member for member in members if member.source in source_names),
+        key=_merge_rank,
+    ).source
+
+
 def _richest_member(members: list[SourceItem], source: str) -> SourceItem | None:
     candidates = [member for member in members if member.source == source]
-    return max(candidates, key=_richness) if candidates else None
+    return min(candidates, key=_merge_rank) if candidates else None
 
 
 def _soundcloud_fact(member: SourceItem | None, key: str, coerce):
