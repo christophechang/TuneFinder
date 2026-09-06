@@ -4,3 +4,4 @@ pyyaml
 python-dotenv
 fastapi
 uvicorn
+jsonschema>=4.23

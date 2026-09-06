@@ -1,0 +1,54 @@
+{
+  "taxonomy_version": 1,
+  "schema_versions": [
+    1
+  ],
+  "batch_size": 200,
+  "sources": {
+    "beatport": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    },
+    "bandcamp": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    },
+    "traxsource": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    },
+    "boomkat": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    },
+    "bleep": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    },
+    "resident_advisor": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    },
+    "mixupload": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    },
+    "volumo": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    },
+    "soundcloud": {
+      "fetch": true,
+      "display": true,
+      "preview": true
+    }
+  }
+}

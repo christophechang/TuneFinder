@@ -1,0 +1,234 @@
+# TuneFinder multi-tenant genre taxonomy. ADR 0022; every id below verified live in
+# spike S5 on 2026-09-05 (docs/spikes/S5-genre-lists.md). Editing this file is a
+# founder decision recorded by amending ADR 0022's table.
+#
+# Shape: 8 families, 38 fine genres. Every source id, slug or tag maps to exactly one
+# fine genre (and through it one family) unless marked otherwise. A source row whose
+# store genre is coarser than ours is mapped to the fine genre the founder chose in S5,
+# never loosely; rows the sources lack are listed under `unmapped`, not dropped silently.
+version: 1
+decided: 2026-09-05
+amended: 2026-09-06   # family-only source tags given a fine genre (ADR 0022); ids unchanged, version unchanged
+
+families:
+  house:                  { name: "House" }
+  techno:                 { name: "Techno" }
+  electro:                { name: "Electro" }
+  drum-and-bass:          { name: "Drum & Bass" }
+  breaks-uk-bass:         { name: "Breaks & UK Bass" }
+  uk-garage:              { name: "UK Garage" }
+  electronica-downtempo:  { name: "Electronica & Downtempo" }
+  hip-hop-rnb-soul:       { name: "Hip-Hop, R&B & Soul" }
+
+fine_genres:
+  house:                  { name: "House",                              family: house }
+  deep-house:             { name: "Deep House",                         family: house }
+  tech-house:             { name: "Tech House",                         family: house }
+  minimal-deep-tech:      { name: "Minimal / Deep Tech",                family: house }
+  melodic-house-techno:   { name: "Melodic House & Techno",             family: house }
+  progressive-house:      { name: "Progressive House",                  family: house }
+  funky-jackin-house:     { name: "Funky / Jackin' House",              family: house }
+  soulful-house:          { name: "Soulful House",                      family: house }
+  afro-house:             { name: "Afro House",                         family: house }
+  organic-house:          { name: "Organic House",                      family: house }
+  bass-house:             { name: "Bass House",                         family: house }
+  indie-dance:            { name: "Indie Dance",                        family: house }
+  nu-disco-disco:         { name: "Nu Disco / Disco",                   family: house }
+  techno-peak-time:       { name: "Techno (Peak Time / Driving)",       family: techno }
+  techno-raw-deep:        { name: "Techno (Raw / Deep / Hypnotic)",     family: techno }
+  hard-techno:            { name: "Hard Techno",                        family: techno }
+  # minimal-techno dropped in S5 (decision E): no Beatport genre; Volumo's nearest is
+  # Microhouse / Rominimal, a loose fit. Minimal House lives under minimal-deep-tech.
+  electro:                { name: "Electro (Classic / Detroit / Modern)", family: electro }
+  drum-and-bass:          { name: "Drum & Bass",                        family: drum-and-bass }
+  liquid:                 { name: "Liquid",                             family: drum-and-bass }
+  neurofunk-jump-up:      { name: "Neurofunk / Jump Up",                family: drum-and-bass }   # Beatport has Jump Up only; Neurofunk reaches this row through tags (decision F)
+  jungle:                 { name: "Jungle",                             family: drum-and-bass }
+  breaks-breakbeat:       { name: "Breaks / Breakbeat",                 family: breaks-uk-bass }
+  uk-bass:                { name: "UK Bass",                            family: breaks-uk-bass }
+  140-deep-dubstep-grime: { name: "140 / Deep Dubstep / Grime",         family: breaks-uk-bass }
+  dubstep:                { name: "Dubstep",                            family: breaks-uk-bass }
+  bass-club:              { name: "Bass / Club",                        family: breaks-uk-bass }
+  uk-garage-bassline:     { name: "UK Garage / Bassline",               family: uk-garage }
+  2-step-speed-garage:    { name: "2-Step / Speed Garage",              family: uk-garage }
+  future-garage:          { name: "Future Garage",                      family: uk-garage }        # tag-only: no store carries it (decision I)
+  electronica:            { name: "Electronica",                        family: electronica-downtempo }
+  downtempo:              { name: "Downtempo",                          family: electronica-downtempo }
+  ambient:                { name: "Ambient",                            family: electronica-downtempo }
+  trip-hop-chill-out:     { name: "Trip-Hop / Chill-Out",               family: electronica-downtempo }
+  idm-leftfield:          { name: "IDM / Leftfield",                    family: electronica-downtempo }
+  hip-hop:                { name: "Hip-Hop",                            family: hip-hop-rnb-soul }
+  rnb:                    { name: "R&B",                                family: hip-hop-rnb-soul }
+  funk-soul:              { name: "Funk / Soul",                        family: hip-hop-rnb-soul }
+  trap-future-bass:       { name: "Trap / Future Bass",                 family: hip-hop-rnb-soul }
+
+beatport:
+  # One top-100 chart per genre below (GET /v4/catalog/genres/{id}/top/100/). A row's fine
+  # genre is `fine`, unless the row carries a `sub_genre` listed under `sub_genres`, which
+  # then wins (decision A). Beatport has no chart per sub-genre; this is how sub-genre fine
+  # genres are reached.
+  genres:
+    - { id: 5,   slug: house,                          fine: house }
+    - { id: 12,  slug: deep-house,                     fine: deep-house }
+    - { id: 11,  slug: tech-house,                     fine: tech-house }
+    - { id: 14,  slug: minimal-deep-tech,              fine: minimal-deep-tech }
+    - { id: 90,  slug: melodic-house-techno,           fine: melodic-house-techno }
+    - { id: 15,  slug: progressive-house,              fine: progressive-house }
+    - { id: 81,  slug: funky-house,                    fine: funky-jackin-house }
+    - { id: 97,  slug: jackin-house,                   fine: funky-jackin-house }
+    - { id: 89,  slug: afro-house,                     fine: afro-house }
+    - { id: 93,  slug: organic-house,                  fine: organic-house }
+    - { id: 91,  slug: bass-house,                     fine: bass-house }
+    - { id: 37,  slug: indie-dance,                    fine: indie-dance }
+    - { id: 50,  slug: nu-disco-disco,                 fine: nu-disco-disco }
+    - { id: 6,   slug: techno-peak-time-driving,       fine: techno-peak-time }
+    - { id: 92,  slug: techno-raw-deep-hypnotic,       fine: techno-raw-deep }
+    - { id: 2,   slug: hard-techno,                    fine: hard-techno }
+    - { id: 94,  slug: electro-classic-detroit-modern, fine: electro }
+    - { id: 1,   slug: drum-bass,                      fine: drum-and-bass }
+    - { id: 9,   slug: breaks-breakbeat-uk-bass,       fine: [breaks-breakbeat, uk-bass] }   # one Beatport genre, no separating sub-genre; both tags on every row, as TuneFinder does (decision G)
+    - { id: 95,  slug: 140-deep-dubstep-grime,         fine: 140-deep-dubstep-grime }
+    - { id: 18,  slug: dubstep,                        fine: dubstep }
+    - { id: 85,  slug: bass-club,                      fine: bass-club }
+    - { id: 86,  slug: uk-garage-bassline,             fine: uk-garage-bassline }
+    - { id: 3,   slug: electronica,                    fine: electronica }
+    - { id: 63,  slug: downtempo,                      fine: downtempo }
+    - { id: 100, slug: ambient-experimental,           fine: ambient }
+    - { id: 105, slug: hip-hop,                        fine: hip-hop }
+    - { id: 108, slug: rb,                             fine: rnb }
+    - { id: 38,  slug: trap-future-bass,               fine: trap-future-bass }
+  sub_genres:
+    - { id: 177, slug: soulful,       parent: 5,   fine: soulful-house }
+    - { id: 5,   slug: liquid,        parent: 1,   fine: liquid }
+    - { id: 6,   slug: jump-up,       parent: 1,   fine: neurofunk-jump-up }
+    - { id: 66,  slug: jungle,        parent: 1,   fine: jungle }
+    - { id: 317, slug: 2-step,        parent: 86,  fine: 2-step-speed-garage }
+    - { id: 318, slug: speed-garage,  parent: 86,  fine: 2-step-speed-garage }
+    - { id: 339, slug: trip-hop,      parent: 63,  fine: trip-hop-chill-out }
+    - { id: 335, slug: chillout,      parent: 63,  fine: trip-hop-chill-out }
+    - { id: 308, slug: funk,          parent: 108, fine: funk-soul }
+    - { id: 309, slug: soul,          parent: 108, fine: funk-soul }
+    - { id: 210, slug: funk-soul,     parent: 50,  fine: funk-soul }
+  excluded:
+    - { id: 16,  slug: dj-tools-acapellas, why: "acapellas, battle tools and loops are not releases" }
+    - { id: 110, slug: dj-edits,           why: "edits of non-electronic catalogue; same rule" }
+
+volumo:
+  # GET /api/v1/albums with filter {genres:[id], curation: curated}; per track, keep only
+  # rows whose own genre_id is the queried id (compilations leak other genres).
+  genres:
+    - { id: 12, slug: house,                    fine: house }
+    - { id: 4,  slug: deep-house,               fine: deep-house }
+    - { id: 21, slug: tech-house,               fine: tech-house }
+    - { id: 16, slug: minimal-deep-tech,        fine: minimal-deep-tech }
+    - { id: 15, slug: melodic-house-techno,     fine: melodic-house-techno }
+    - { id: 19, slug: progressive-house,        fine: progressive-house }
+    - { id: 10, slug: funky-jackin-house,       fine: funky-jackin-house }
+    - { id: 20, slug: soulful-house,            fine: soulful-house }
+    - { id: 1,  slug: afro-house,               fine: afro-house }
+    - { id: 2,  slug: bass-house-future-house,  fine: bass-house }          # Future House bleed accepted (decision C)
+    - { id: 13, slug: indie-dance-dark-disco,   fine: indie-dance }
+    - { id: 17, slug: nudisco-soul-funk,        fine: nu-disco-disco }      # "Nu-Disco / Soul / Funk" (decision D)
+    - { id: 23, slug: techno-peak-time,         fine: techno-peak-time }
+    - { id: 22, slug: techno-raw-deep-dub,      fine: techno-raw-deep }
+    - { id: 11, slug: hard-techno,              fine: hard-techno }
+    - { id: 27, slug: electro-classic-detroit,  fine: electro }
+    - { id: 6,  slug: drum-and-bass,            fine: drum-and-bass }
+    - { id: 3,  slug: breaks-breakbeat,         fine: breaks-breakbeat }
+    - { id: 7,  slug: dubstep-bass-grime,       fine: dubstep }             # "Dubstep / Bass / Grime" (decision H)
+    - { id: 25, slug: uk-garage-2-step,         fine: uk-garage-bassline }
+    - { id: 8,  slug: electronica,              fine: electronica }
+    - { id: 18, slug: organic-house,            fine: downtempo }           # "Organic House / Downtempo" (decision B)
+    - { id: 14, slug: lounge-chill-out,         fine: trip-hop-chill-out }
+    - { id: 30, slug: leftfield,                fine: idm-leftfield }
+  unmapped:
+    - { id: 29, slug: soul-rnb-hip-hop, why: "spans three of ours with no true fit; TuneFinder dropped it for the same reason (decision J)" }
+    - { id: 26, slug: microhouse,       why: "Microhouse / Rominimal; the only candidate for Minimal Techno, which was dropped (decision E)" }
+    - { id: 5,  slug: dj-tools,         why: "not releases" }
+    # Dropped families, present on Volumo should they return: 24 trance, 32 psy-trance,
+    # 28 hardcore, 37 neo-rave-hard-house-hard-dance, 33 amapiano, 35 dance-pop,
+    # 9 electro-house-big-room.
+
+bandcamp:
+  # Tag pages, as TuneFinder fetches today. Tags marked "S5" are added for rows no store
+  # carries; the rest carry over unchanged. Every tag names a fine genre: the contract
+  # refuses an item with none (batch.schema.json, `family_mismatch`), so the three tags
+  # that were family-only carry the founder's nearest fine genre (ADR 0022 amendment of
+  # 2026-09-06, M1d open point 3): house -> house, electronic -> electronica,
+  # techno -> techno-raw-deep (Bandcamp and SoundCloud techno skews raw/deep; Beatport's
+  # peak-time chart feeds the other row).
+  tags:
+    - { tag: drum-and-bass, fine: drum-and-bass }
+    - { tag: jungle,        fine: jungle }                # S5
+    - { tag: breakbeat,     fine: breaks-breakbeat }
+    - { tag: uk-bass,       fine: uk-bass }
+    - { tag: uk-garage,     fine: uk-garage-bassline }
+    - { tag: future-garage, fine: future-garage }         # S5
+    - { tag: house,         fine: house }                 # M1d: was family-only
+    - { tag: techno,        fine: techno-raw-deep }       # M1d: was family-only
+    - { tag: electronic,    fine: electronica }           # M1d: was family-only
+    - { tag: electronica,   fine: electronica }
+    - { tag: downtempo,     fine: downtempo }
+    - { tag: ambient,       fine: ambient }               # S5
+    - { tag: lounge,        fine: trip-hop-chill-out }
+    - { tag: idm,           fine: idm-leftfield }         # S5
+    - { tag: funk,          fine: funk-soul }
+    - { tag: r-b-soul,      fine: rnb }
+    - { tag: hip-hop-rap,   fine: hip-hop }
+
+soundcloud:
+  # Official API search targets, folksonomy values; carried over from TuneFinder with two
+  # S5 additions. Comma-separated values are OR within one parameter.
+  targets:
+    - { fine: drum-and-bass,       genres: "drum & bass,drum and bass,dnb" }
+    - { fine: jungle,              genres: "jungle" }                          # S5
+    - { fine: breaks-breakbeat,    genres: "breakbeat,breaks" }
+    - { fine: uk-bass,             tags:   "uk bass,ukbass" }
+    - { fine: uk-garage-bassline,  genres: "uk garage,garage,ukg" }
+    - { fine: future-garage,       genres: "future garage" }                   # S5
+    - { fine: house,               genres: "house,deep house,tech house" }      # M1d: was family-only
+    - { fine: techno-raw-deep,     genres: "techno" }                          # M1d: was family-only
+    - { fine: electronica,         genres: "electronica" }
+    - { fine: downtempo,           genres: "downtempo" }
+    - { fine: hip-hop,             genres: "hip-hop & rap,hip hop,hip-hop" }
+    - { fine: funk-soul,           genres: "funk,soul,disco" }
+
+# Library import (CONTRACTS §5): free-text Rekordbox/Traktor/Serato genre tags are
+# case-folded, split on ; , / and looked up here after the alias table. Aliases the
+# founder's own library needed (S1a): Hardcore -> breaks-breakbeat, Rave -> jungle,
+# Drum n Bass -> drum-and-bass, Uk Garage -> uk-garage-bassline. Loop Samples is excluded.
+library_aliases:
+  hardcore:            breaks-breakbeat
+  rave:                jungle
+  "drum n bass":       drum-and-bass
+  "drum and bass":     drum-and-bass
+  dnb:                 drum-and-bass
+  "uk garage":         uk-garage-bassline
+  ukg:                 uk-garage-bassline
+  garage:              uk-garage-bassline
+  "hip-hop/rap":       hip-hop
+  "hip hop":           hip-hop
+  rap:                 hip-hop
+  "r&b":               rnb
+  soul:                funk-soul
+  funk:                funk-soul
+  disco:               nu-disco-disco
+  "nu disco":          nu-disco-disco
+  "trip hop":          trip-hop-chill-out
+  "chill out":         trip-hop-chill-out
+  "classic house":     house
+  "progressive":       progressive-house
+  electronic:          electronica
+  breaks:              breaks-breakbeat
+  breakbeat:           breaks-breakbeat
+library_excluded_tags: ["loop samples", "dj tools", "acapella", "acapellas"]
+
+# Contradictory pairs at family level, re-derived from TuneFinder's tag pairs
+# (electronica<->ukg, electronica<->dnb, ukg<->dnb, ukg<->techno, dnb<->house). Legitimate
+# overlap (electronica with downtempo, house with techno) is deliberately not listed.
+exclusions:
+  electronica-downtempo: [uk-garage, drum-and-bass]
+  uk-garage:             [electronica-downtempo, drum-and-bass, techno]
+  drum-and-bass:         [uk-garage, house, electronica-downtempo]
+  house:                 [drum-and-bass]
+  techno:                [uk-garage]

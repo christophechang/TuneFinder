@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-09-06T06:00:00Z-a3f9c1",
+  "batches": 1,
+  "started_at": "2026-09-06T06:00:00Z",
+  "completed_at": "2026-09-06T06:41:22Z",
+  "per_source": {
+    "beatport": {
+      "count": 1,
+      "error": null,
+      "enabled": true
+    },
+    "bandcamp": {
+      "count": 1,
+      "error": null,
+      "enabled": true
+    },
+    "volumo": {
+      "count": 1,
+      "error": null,
+      "enabled": true
+    },
+    "soundcloud": {
+      "count": 0,
+      "error": "token refresh failed after 3 attempts",
+      "enabled": true
+    },
+    "traxsource": {
+      "count": 0,
+      "error": null,
+      "enabled": false
+    },
+    "boomkat": {
+      "count": 0,
+      "error": null,
+      "enabled": false
+    },
+    "bleep": {
+      "count": 0,
+      "error": null,
+      "enabled": false
+    },
+    "resident_advisor": {
+      "count": 0,
+      "error": null,
+      "enabled": false
+    },
+    "mixupload": {
+      "count": 0,
+      "error": null,
+      "enabled": false
+    }
+  },
+  "publisher_version": "0.18.0"
+}
