@@ -1,4 +1,7 @@
 """Tests for cross-source deduplication and _merge_group backfill."""
+import json
+from pathlib import Path
+
 import pytest
 
 from src.models import Candidate, RecommendationRecord, SourceItem, Track
@@ -12,6 +15,12 @@ from src.pipeline.dedup import (
 )
 from src.pipeline.history import build_history_keys
 from src.pipeline.profile import build_known_track_keys
+
+# The 70 Rekordbox rows shared with the other runtimes (spike S1b); see
+# tests/test_publisher_identity.py.
+_IDENTITY_CASES = json.loads(
+    (Path(__file__).parent / "fixtures" / "identity" / "cases.json").read_text(encoding="utf-8")
+)["cases"]
 
 
 def _item(source, artist="Artist", title="Title", label=None, release_date=None, raw_metadata=None):
@@ -232,6 +241,50 @@ def test_flag_on_feat_and_remix_combined():
     # Un-parenthesised feat is stripped in both, remix still qualifies.
     assert (make_dedup_key("Sully", "Skyline feat. Jabu (Calibre Remix)", remix_aware=True)
             == "sully||skyline||rmx:calibre")
+
+
+# ---------------------------------------------------------------------------
+# Classifier fixes from spike S1a — remix-aware path only
+# ---------------------------------------------------------------------------
+
+def test_remix_aware_trailing_year_after_keyword():
+    # A year after the keyword used to defeat the named-remix regex, collapsing a
+    # remix into its original.
+    assert (make_dedup_key("Egyptian Empire", "The Horn Track (Blade Rework 2024)", remix_aware=True)
+            == "egyptian empire||the horn track||rmx:blade")
+    assert (make_dedup_key("vasilis smyrnios", "Billie Jean (Bushwacka Remix 2001)", remix_aware=True)
+            == "vasilis smyrnios||billie jean||rmx:bushwacka")
+
+
+def test_remix_aware_modifiers_stripped_anywhere():
+    # Modifiers used to be stripped only at the ends of the name.
+    assert (make_dedup_key("Radio Slave Ft Cagedbaby", "Amnesia (Lindstrom Extended Vocal Mix)", remix_aware=True)
+            == "radio slave||amnesia||rmx:lindstrom")
+    assert (make_dedup_key("Jon Cutler feat. E-Man", "It's Yours (Original Distant Music Mix)", remix_aware=True)
+            == "jon cutler||it's yours||rmx:distant music")
+    # Nothing but modifiers is not a name: merges with the original.
+    assert (make_dedup_key("Calibre", "New Dawn (Instrumental Mix)", remix_aware=True)
+            == "calibre||new dawn")
+
+
+@pytest.mark.parametrize("title", [
+    "New Dawn (Extended Remix)",
+    "New Dawn (Radio Mix)",
+    "New Dawn (Club Edit)",
+    "New Dawn (Original Version)",
+    "New Dawn (Vocal Edit)",
+    "New Dawn (Dub Mix)",
+])
+def test_remix_aware_extended_remix_still_generic(title):
+    # The wider modifier set must never turn a bare generic tag into a name.
+    assert make_dedup_key("Calibre", title, remix_aware=True) == "calibre||new dawn"
+
+
+@pytest.mark.parametrize("row", _IDENTITY_CASES, ids=[c["Name"] for c in _IDENTITY_CASES])
+def test_legacy_key_unchanged_by_classifier_change(row):
+    # The Sunday run is never adjusted: the flag-off key is byte-identical on every
+    # row of the shared fixture, including the rows the classifier fixes.
+    assert make_dedup_key(row["Artist"], row["Name"]) == row["key_v1"]
 
 
 # ---------------------------------------------------------------------------
