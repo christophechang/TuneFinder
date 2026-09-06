@@ -95,6 +95,11 @@ _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _CAMELOT_RE = re.compile(r"^(1[0-2]|[1-9])[AB]$")
 _URL_RE = re.compile(r"https?://\S+")
 _PATH_RE = re.compile(r"(?:/Users|/var)/\S+")
+# `requests`' own connection-pool exhaustion message names the host outright
+# (no scheme, so `_URL_RE` misses it) and the request path after "with url:"
+# (which is rarely under /Users or /var, so `_PATH_RE` misses it too).
+_HOST_POOL_RE = re.compile(r"HTTPS?ConnectionPool\(host='[^']*', port=\d+\)")
+_WITH_URL_RE = re.compile(r"with url: \S+")
 
 _MAX_KEY_LENGTH = 512
 _MAX_ERROR_LENGTH = 200
@@ -321,6 +326,8 @@ def summarise_error(text: str | None) -> str | None:
         return None
     summary = _URL_RE.sub("<url>", str(text))
     summary = _PATH_RE.sub("<path>", summary)
+    summary = _HOST_POOL_RE.sub("<host>", summary)
+    summary = _WITH_URL_RE.sub("with url: <url>", summary)
     summary = " ".join(summary.split())
     if not summary:
         return None

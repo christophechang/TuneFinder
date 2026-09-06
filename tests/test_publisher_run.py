@@ -517,6 +517,46 @@ def test_batch_failure_after_retries_skips_manifest_alerts_and_continues_to_next
     assert "dev" in alert.call_args[0][0]
 
 
+def test_unexpected_exception_in_post_phase_alerts_and_continues_to_next_target(
+    tmp_path, taxonomy
+):
+    """A `PoolApiError` is not the only way the post phase can fail — a bad
+    `resp.json()` or any other surprise must not blow up the whole run,
+    escape with no alert, and leave the other target unposted."""
+    settings = _settings(tmp_path, targets=("dev", "prod"))
+    clock = Clock()
+    alert = MagicMock()
+    dev_client = FakeClient("dev")
+
+    def _boom(payload):
+        raise RuntimeError("boom")
+
+    dev_client.post_batch = _boom
+    clients = {"dev": dev_client, "prod": FakeClient("prod")}
+    fetch = _fetch([_volumo_item()], health=_health(volumo=1))
+
+    outcome = _run(settings, clock, envs=("dev", "prod"), clients=clients, fetch=fetch,
+                   alert=alert, taxonomy=taxonomy)
+
+    dev, prod = outcome.targets
+    assert dev.env == "dev"
+    assert dev.error is not None
+    assert "RuntimeError" in dev.error
+    assert "boom" in dev.error
+
+    assert prod.error is None
+    assert prod.manifest is not None and prod.manifest["complete"] is True
+
+    assert outcome.ok is False
+    assert alert.call_count == 1
+    text = alert.call_args[0][0]
+    assert "dev" in text
+    assert "://" not in text
+
+    snapshot = load_snapshot(pool_dir(str(tmp_path)), outcome.run_id)
+    assert snapshot["targets"]["dev"]["error"] is not None
+
+
 def test_manifest_409_recorded_with_missing_batches(tmp_path, taxonomy):
     settings = _settings(tmp_path)
     clock = Clock()
@@ -791,6 +831,7 @@ def test_summary_line_shape():
         batches=7,
         fetch_seconds=45.6,
         total_seconds=61.0,
+        artist_payloads=57,
         targets=[
             TargetOutcome(
                 env="dev",
@@ -803,6 +844,7 @@ def test_summary_line_shape():
                 rejected=2,
                 request_charge=4321.0,
                 post_seconds=12.3,
+                artists_posted=55,
             )
         ],
     )
@@ -810,7 +852,7 @@ def test_summary_line_shape():
     assert outcome.summary_line() == (
         "publish-pool 2026-09-06T06:00:00Z-a3f9c1 — 1234 items in 7 batches; "
         "dev: upserted 100 updated 20 unchanged 1000 obsolete 4 rejected 2, "
-        "RU 4321.0 (3.50/item), post 12.3s; fetch 45.6s; total 61.0s"
+        "RU 4321.0 (3.50/item), post 12.3s, artists 55/57; fetch 45.6s; total 61.0s"
     )
 
 

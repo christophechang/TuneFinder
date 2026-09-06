@@ -121,6 +121,7 @@ class PublishOutcome:
     skipped_items: dict[str, int] = field(default_factory=dict)
     fetch_seconds: float = 0.0
     per_source: dict = field(default_factory=dict)
+    artist_payloads: int = 0
     targets: list[TargetOutcome] = field(default_factory=list)
     snapshot_path: str | None = None
     total_seconds: float = 0.0
@@ -142,7 +143,8 @@ class PublishOutcome:
                 f"{target.env}: upserted {target.upserted} updated {target.updated} "
                 f"unchanged {target.unchanged} obsolete {target.obsolete} "
                 f"rejected {target.rejected}, RU {target.request_charge:.1f} "
-                f"({per_item:.2f}/item), post {target.post_seconds:.1f}s"
+                f"({per_item:.2f}/item), post {target.post_seconds:.1f}s, "
+                f"artists {target.artists_posted}/{self.artist_payloads}"
             )
             if target.error:
                 segment += f", error: {target.error}"
@@ -545,6 +547,7 @@ def publish_pool(
     outcome.items = len(built)
     outcome.batches = len(chunks)
     outcome.per_source = per_source
+    outcome.artist_payloads = len(artist_payloads)
     if outcome.snapshot_path is None:
         outcome.snapshot_path = write_snapshot(pool_path, snapshot)
 
@@ -600,50 +603,60 @@ def publish_pool(
         report = per_source_by_env.get(env, per_source)
         post_started = clock()
 
-        for batch_no, chunk in enumerate(chunks, 1):
-            payload = batch_payload(run_id, batch_no, chunk, taxonomy.version)
-            try:
-                body = client.post_batch(payload)
-            except PoolApiError as exc:
-                target.error = f"batch {batch_no} failed: {exc}"
-                logger.error("%s %s %s", LOG, env, target.error)
-                raise_alert(
-                    f"publish-pool {run_id} {env}: batch {batch_no} of {len(chunks)} "
-                    f"failed — {exc}; manifest not posted"
-                )
-                break
-            _absorb_batch(target, body)
-            record_targets()
-        else:
-            for payload in artist_payloads:
+        try:
+            for batch_no, chunk in enumerate(chunks, 1):
+                payload = batch_payload(run_id, batch_no, chunk, taxonomy.version)
                 try:
-                    client.post_artists(payload)
-                    target.artists_posted += 1
+                    body = client.post_batch(payload)
                 except PoolApiError as exc:
-                    # Not fatal: the artist window is a ranking signal, and the
-                    # next run re-posts the same thirteen weeks.
-                    logger.error(
-                        "%s %s artists %s failed: %s", LOG, env, payload["family"], exc
-                    )
-
-            manifest = manifest_payload(
-                run_id, started_at_iso, _iso(clock()), len(chunks), report
-            )
-            validate("manifest", manifest)
-            try:
-                body = client.post_manifest(manifest)
-            except PoolApiError as exc:
-                target.error = _manifest_error(exc)
-                logger.error("%s %s %s", LOG, env, target.error)
-                raise_alert(f"publish-pool {run_id} {env}: {target.error}")
-            else:
-                target.manifest = body
-                target.latest_advanced = bool(body.get("latest_advanced"))
-                if body.get("complete") and not target.latest_advanced:
+                    target.error = f"batch {batch_no} failed: {exc}"
+                    logger.error("%s %s %s", LOG, env, target.error)
                     raise_alert(
-                        f"publish-pool {run_id} {env}: run complete, but pool freshness "
-                        "already belongs to a later run — informational, nothing to do"
+                        f"publish-pool {run_id} {env}: batch {batch_no} of {len(chunks)} "
+                        f"failed — {exc}; manifest not posted"
                     )
+                    break
+                _absorb_batch(target, body)
+                record_targets()
+            else:
+                for payload in artist_payloads:
+                    try:
+                        client.post_artists(payload)
+                        target.artists_posted += 1
+                    except PoolApiError as exc:
+                        # Not fatal: the artist window is a ranking signal, and
+                        # the next run re-posts the same thirteen weeks.
+                        logger.error(
+                            "%s %s artists %s failed: %s", LOG, env, payload["family"], exc
+                        )
+
+                manifest = manifest_payload(
+                    run_id, started_at_iso, _iso(clock()), len(chunks), report
+                )
+                validate("manifest", manifest)
+                try:
+                    body = client.post_manifest(manifest)
+                except PoolApiError as exc:
+                    target.error = _manifest_error(exc)
+                    logger.error("%s %s %s", LOG, env, target.error)
+                    raise_alert(f"publish-pool {run_id} {env}: {target.error}")
+                else:
+                    target.manifest = body
+                    target.latest_advanced = bool(body.get("latest_advanced"))
+                    if body.get("complete") and not target.latest_advanced:
+                        raise_alert(
+                            f"publish-pool {run_id} {env}: run complete, but pool "
+                            "freshness already belongs to a later run — "
+                            "informational, nothing to do"
+                        )
+        except Exception as exc:  # noqa: BLE001 — an unexpected failure must
+            # still alert and let the next target run, not blow up the CLI.
+            target.error = summarise_error(f"{type(exc).__name__}: {exc}")
+            logger.exception("%s %s post phase failed unexpectedly", LOG, env)
+            raise_alert(
+                f"publish-pool {run_id} {env}: unexpected error in post phase "
+                f"— {target.error}"
+            )
 
         target.post_seconds = round((clock() - post_started).total_seconds(), 1)
         record_targets()

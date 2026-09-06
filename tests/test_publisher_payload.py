@@ -792,6 +792,30 @@ def test_summarise_error_strips_urls_paths_and_truncates():
     assert len(long_error) == 200
 
 
+def test_summarise_error_neutralises_requests_transport_strings():
+    """`requests`' own connection-pool exhaustion message names the host and
+    the request path outright — neither may reach the public status page."""
+    https_error = (
+        "HTTPSConnectionPool(host='tunefinder-api-dev.setfolio.app', port=443): "
+        "Max retries exceeded with url: /api/ingest/batch (Caused by ...)"
+    )
+    summary = summarise_error(https_error)
+    assert "setfolio.app" not in summary
+    assert "/api/ingest/batch" not in summary
+    assert "<host>" in summary
+    assert "<url>" in summary
+
+    http_error = (
+        "HTTPConnectionPool(host='tunefinder-api-dev.setfolio.app', port=80): "
+        "Max retries exceeded with url: /api/ingest/manifest (Caused by ...)"
+    )
+    summary = summarise_error(http_error)
+    assert "setfolio.app" not in summary
+    assert "/api/ingest/manifest" not in summary
+    assert "<host>" in summary
+    assert "<url>" in summary
+
+
 def test_manifest_payload_validates():
     per_source = per_source_report(
         {"beatport": {"count": 1, "error": None}}, {}, {"beatport"}
