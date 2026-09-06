@@ -11,6 +11,7 @@ import socket
 from unittest.mock import MagicMock, call
 
 import pytest
+import requests
 
 from src.publisher import PUBLISHER_VERSION
 from src.publisher.client import PoolApiClient, PoolApiError, TokenProvider
@@ -141,6 +142,35 @@ def test_token_error_does_not_leak_secret_or_description():
     assert "AADSTS7000215" not in text
     assert "error_description" not in text
     assert repr(tokens).find("s3cret-value") == -1
+
+
+def test_token_transport_error_becomes_pool_api_error():
+    """A transport failure fetching the token must not escape `_call` as a bare
+    `requests` exception — it shares the call's own retry budget and comes out
+    as a `PoolApiError` like any other transport failure."""
+    token_session = MagicMock()
+    token_session.post.side_effect = requests.ConnectionError("boom")
+    tokens = _token_provider(session=token_session, clock=lambda: 1000.0)
+
+    session = MagicMock()  # the API session — must never be reached
+    sleep = MagicMock()
+    client = _make_client(session=session, tokens=tokens, sleep=sleep)
+
+    with pytest.raises(PoolApiError) as excinfo:
+        client.get_config()
+
+    err = excinfo.value
+    assert err.status is None
+    assert err.error == "transport"
+    text = str(err)
+    assert "boom" not in text
+    assert "://" not in text
+    assert "login.example" not in text
+
+    # Retried under the same backoff budget as any other transport failure.
+    assert sleep.call_args_list == [call(5), call(15), call(45)]
+    assert token_session.post.call_count == 4  # initial attempt + 3 retries
+    assert session.request.call_count == 0  # never got past the token
 
 
 # ---------------------------------------------------------------------------

@@ -203,13 +203,13 @@ class PoolApiClient:
         attempts = 0
         retried_401 = False
         while True:
-            headers = {
-                "Authorization": f"Bearer {self.tokens.token()}",
-                "Content-Type": "application/json",
-                "User-Agent": f"tunefinder-publisher/{PUBLISHER_VERSION}",
-            }
             start = time.time()
             try:
+                headers = {
+                    "Authorization": f"Bearer {self.tokens.token()}",
+                    "Content-Type": "application/json",
+                    "User-Agent": f"tunefinder-publisher/{PUBLISHER_VERSION}",
+                }
                 resp = self.session.request(
                     method, url, json=json_body, headers=headers, timeout=self.timeout
                 )

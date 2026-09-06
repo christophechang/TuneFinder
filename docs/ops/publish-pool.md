@@ -55,6 +55,11 @@ the tenant-GUID form, should the domain form be refused.
 ./venv/bin/python -m tunefinder check-config     # SET / MISSING per name
 ```
 
+After a deploy that changes `requirements.txt`, run
+`./venv/bin/pip install -r requirements.txt` on the mini — `publish-pool`
+needs `jsonschema` and no other command does, and the deploy runbook does not
+pip-install for you.
+
 ## 3. The pool settings file
 
 `config/settings.pool.yaml` is **generated, not edited**. It is the whole
@@ -183,7 +188,7 @@ publish-pool 2026-09-06T20:45:06Z-71bf51 — 9591 items in 48 batches; fetch 457
 A live run adds one segment per target, between the batch count and `fetch`:
 
 ```
-dev: upserted U updated V unchanged W obsolete X rejected Y, RU <total> (<RU/item>), post <s>s
+dev: upserted U updated V unchanged W obsolete X rejected Y, RU <total> (<RU/item>), post <s>s, artists <posted>/<families>
 ```
 
 ## 8. Alerts
