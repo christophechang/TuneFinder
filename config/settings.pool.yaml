@@ -207,13 +207,3 @@ sources:
       genres: hip-hop & rap,hip hop,hip-hop
     - tf_tag: funk-soul
       genres: funk,soul,disco
-  traxsource:
-    enabled: false
-  boomkat:
-    enabled: false
-  bleep:
-    enabled: false
-  resident_advisor:
-    enabled: false
-  mixupload:
-    enabled: false

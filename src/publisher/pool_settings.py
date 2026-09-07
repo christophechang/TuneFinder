@@ -50,11 +50,6 @@ _POOL_DEFAULTS = {
     "lock_wait_max_seconds": 7200,
 }
 
-# Sources TuneFinder carries but the pool does not fetch. Listed rather than
-# omitted so the generated file states the whole nine-source picture, and so
-# per_source reporting can call them configured-off rather than unknown.
-_DISABLED_SOURCES = ("traxsource", "boomkat", "bleep", "resident_advisor", "mixupload")
-
 
 def _base_source(base: dict, name: str) -> dict:
     return (base.get("sources") or {}).get(name) or {}
@@ -126,9 +121,12 @@ def generate_pool_settings(taxonomy: Taxonomy, base: dict) -> dict:
             "targets": soundcloud_targets,
         },
     }
-    for name in _DISABLED_SOURCES:
-        sources[name] = {"enabled": False}
-
+    # Four sources, not nine. TuneFinder still carries fetchers for traxsource,
+    # boomkat, bleep, resident_advisor and mixupload, switched off years ago as
+    # unreliable; the pool never fetched them and CONTRACTS §8 never promised
+    # them. Listing them here as `enabled: false` stated a nine-source picture
+    # the product does not have, so they are simply absent: an unlisted source
+    # is not fetched, and nothing downstream has to be told it is off.
     return {
         "taxonomy_version": taxonomy.version,
         "pool": dict(_POOL_DEFAULTS),

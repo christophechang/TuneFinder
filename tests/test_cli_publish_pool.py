@@ -132,7 +132,7 @@ def test_prints_per_source_and_skipped_item_tables(capsys):
         skipped_items={"no_fine_genre": 57, "no_source_ref": 3},
         per_source={
             "beatport": {"count": 1200, "error": None, "enabled": True},
-            "boomkat": {"count": 0, "error": None, "enabled": False},
+            "soundcloud": {"count": 0, "error": None, "enabled": False},
             "volumo": {"count": 0, "error": "connection reset", "enabled": True},
         },
     )
