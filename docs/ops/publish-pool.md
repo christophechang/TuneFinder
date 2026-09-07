@@ -142,6 +142,78 @@ The lock covers **the fetch only**. Posting touches neither the token caches nor
 TuneFinder's stores, and a 48-batch upload should not block a web-triggered run
 for minutes.
 
+### Forcing the overlap (S9's forced-overlap test)
+
+S9 requires the publisher to be started **while another consumer holds the lock**, in two
+cases: a weekly run holding it, and a web-triggered cut holding it. The two never collide
+on their own — the publisher fires at 06:00 and the Sunday run at about 09:02 — which is
+why the test is a *forced* one, driven through the web service's `POST /api/runs`.
+
+Two properties make this cheap and non-destructive, both worth knowing before you start:
+
+- **`dry_run` still takes the lock, on both sides.** `run_weekly` and `run_mix_prep` enter
+  `with run_lock(...)` after their "(DRY RUN)" log line, and the publisher's lock sits in
+  step 4, which `--dry-run` does not gate. So the whole test runs with nothing written to
+  a target and no Discord report posted.
+- **The publisher's first attempt is immediate.** It sleeps `lock_retry_seconds` only
+  *after* the first failure, so the yield shows up in the log at once rather than in five
+  minutes.
+
+The lock covers the fetch only (about three minutes), so start the publisher within
+roughly thirty seconds of the run being accepted. Do not do this near 06:00.
+
+Baselines first, in the checkout:
+
+```bash
+shasum -a 256 data/soundcloud_token.json data/beatport_token.json > /tmp/s9-tokens-before.txt
+find data/archive -type f | sort | shasum -a 256 > /tmp/s9-archive-before.txt
+```
+
+Then, in one terminal, hold the lock — `"mode":"weekly"` for the first case,
+`"mode":"mix-prep","genre":"dnb"` for the second:
+
+```bash
+curl -s -X POST http://localhost:8420/api/runs \
+  -H "Authorization: Bearer $TUNEFINDER_WEB_API_SECRET" \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"mix-prep","genre":"dnb","dry_run":true}'
+```
+
+and immediately, in another:
+
+```bash
+./venv/bin/python -m tunefinder publish-pool --dry-run 2>&1 | tee /tmp/s9-overlap.log
+```
+
+**The pass is this line**, which is the publisher declining to barge in:
+
+```
+run lock held — retrying in 300s (waited 0s)
+```
+
+Leave it running. When the other run releases, the next retry logs
+`<run_id> fetching under the run lock` and the publisher proceeds — S9's "waits" branch,
+in about six minutes. To see the "skips" branch instead, lower `lock_wait_max_seconds`
+in `config/settings.pool.yaml` temporarily and **restore the file afterwards** (it is
+generated, carries a do-not-edit header, and a drift test asserts it matches the
+generator); drop `--dry-run` for that one if you want the real Discord alert rather than a
+logged one.
+
+Evidence for the S9 record — both diffs must be empty:
+
+```bash
+shasum -a 256 data/soundcloud_token.json data/beatport_token.json | diff /tmp/s9-tokens-before.txt -
+find data/archive -type f | sort | shasum -a 256 | diff /tmp/s9-archive-before.txt -
+```
+
+The token diff is the direct proof of "never refreshes a token while another consumer
+runs": the publisher never reached the fetch, so it never touched either token cache.
+
+A caveat worth recording alongside the result: driving the weekly case through
+`POST /api/runs` calls the same `run_weekly` and takes the same lock as the scheduled
+Sunday trigger, so the lock behaviour is faithful — but it is not the scheduled invocation
+itself. Neither case needs the stale `com.openclaw.tune-finder` LaunchAgent fixed.
+
 ## 6. `data/pool/` and retention
 
 Snapshots are pruned by the `started_at` in their own file name (never mtime,
