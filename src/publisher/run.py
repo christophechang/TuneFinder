@@ -19,9 +19,12 @@ The shape of a run, in order:
   4. build the contract items, the artist payloads and the snapshot, and
      validate every payload against the vendored schemas — a failure here is a
      bug in the publisher and raises rather than posting;
-  5. post per target: batches 1..N in order, then the artist payloads, then the
-     manifest. Dev and prod acknowledge independently, so a target that fails
-     records its error and the next target still runs.
+  5. post per target: batches 1..N in order, then **one** repost of the copies
+     the store refused as `throttled` — under batch number 1, which the run has
+     already acknowledged, so the copies land and the run's arithmetic does not
+     move — then the artist payloads, then the manifest. Dev and prod
+     acknowledge independently, so a target that fails records its error and
+     the next target still runs.
 
 What this module deliberately does **not** do: it never calls
 `save_source_items`, `archive_source_items` or `append_run_health`, never posts
@@ -81,6 +84,11 @@ LOG = "[publish-pool]"
 _RUN_ID_SUFFIX_BYTES = 3
 _RUN_ID_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
+# The pause before the one repost of the copies Cosmos refused as `throttled`.
+# Long enough for the store's 429 window to have passed, short enough that it
+# costs the run nothing anybody would notice.
+RETRY_PAUSE_SECONDS = 5
+
 
 @dataclass
 class PublishOptions:
@@ -103,6 +111,13 @@ class TargetOutcome:
     rejected: int = 0
     rejected_reasons: dict[str, int] = field(default_factory=dict)
     request_charge: float = 0.0
+    # The end-of-run repost, kept apart from the first pass on purpose: the
+    # counts above are what the run's batches 1..N acknowledged, and they must
+    # stay comparable with the API's own record of the run.
+    retried: int = 0
+    retry_written: int = 0
+    retry_rejected: int = 0
+    retry_request_charge: float = 0.0
     artists_posted: int = 0
     manifest: dict | None = None
     latest_advanced: bool = False
@@ -146,6 +161,8 @@ class PublishOutcome:
                 f"({per_item:.2f}/item), post {target.post_seconds:.1f}s, "
                 f"artists {target.artists_posted}/{self.artist_payloads}"
             )
+            if target.retried:
+                segment += f", reposted {target.retried}"
             if target.error:
                 segment += f", error: {target.error}"
             parts.append(segment)
@@ -320,6 +337,10 @@ def _target_record(target: TargetOutcome) -> dict:
         "rejected": target.rejected,
         "rejected_reasons": dict(target.rejected_reasons),
         "request_charge": target.request_charge,
+        "retried": target.retried,
+        "retry_written": target.retry_written,
+        "retry_rejected": target.retry_rejected,
+        "retry_request_charge": target.retry_request_charge,
         "artists_posted": target.artists_posted,
         "complete": bool(target.manifest and target.manifest.get("complete")),
         "latest_advanced": target.latest_advanced,
@@ -342,6 +363,75 @@ def _absorb_batch(target: TargetOutcome, body: dict) -> None:
             "%s %s rejected %s %s %s",
             LOG, target.env, entry.get("key_v2"), entry.get("family"), reason,
         )
+
+
+def _throttled_keys(body: dict) -> list[str]:
+    """The `key_v2` of every copy this batch refused as `throttled`.
+
+    `throttled` is the store's verdict, not the item's — the copy was well
+    formed and Cosmos was busy — so the same bytes posted again a moment later
+    usually land. `conflict` and `store_error` are left where they are: a
+    repost changes nothing about either.
+    """
+    return [
+        entry["key_v2"]
+        for entry in body.get("rejected") or []
+        if (entry.get("reason") or "") == "throttled" and entry.get("key_v2")
+    ]
+
+
+def _repost_throttled(
+    client,
+    target: TargetOutcome,
+    keys: list[str],
+    items_by_key: dict[str, dict],
+    run_id: str,
+    taxonomy_version: int,
+    batch_size: int,
+    sleep,
+) -> None:
+    """One extra pass over the copies the store refused as `throttled`.
+
+    Posted under **batch number 1**, which this run has already acknowledged.
+    The API adds a batch number to a set and folds in its counts only when that
+    set grows, so a repeat writes the item copies and leaves the run's counts,
+    its completeness and its `batches_missing` exactly as they were — the same
+    property that makes a retry after a lost response free rather than double
+    counted. Without it a throttled copy waits for tomorrow's observation.
+
+    One pass, never two: a copy refused a second time is counted and left to
+    tomorrow. And nothing here may cost the run — a failed repost is logged
+    against the target and swallowed, because the artist payloads and the
+    manifest still have to be posted after it.
+    """
+    # A key the run did not build cannot be re-posted; in practice there are
+    # none, since the store only refuses what this run just sent it.
+    items = [items_by_key[key] for key in dict.fromkeys(keys) if key in items_by_key]
+    if not items:
+        return
+
+    logger.info(
+        "%s %s re-posting %d throttled copies after %ss",
+        LOG, target.env, len(items), RETRY_PAUSE_SECONDS,
+    )
+    sleep(RETRY_PAUSE_SECONDS)
+
+    for chunk in batches(items, batch_size):
+        payload = batch_payload(run_id, 1, chunk, taxonomy_version)
+        validate("batch", payload)
+        target.retried += len(chunk)
+        try:
+            body = client.post_batch(payload)
+        except Exception as exc:  # noqa: BLE001 — a repost may never fail a run
+            logger.error(
+                "%s %s repost of %d copies failed: %s",
+                LOG, target.env, len(chunk),
+                summarise_error(f"{type(exc).__name__}: {exc}"),
+            )
+            continue
+        target.retry_written += int(body.get("upserted") or 0) + int(body.get("updated") or 0)
+        target.retry_rejected += len(body.get("rejected") or [])
+        target.retry_request_charge += float(body.get("request_charge") or 0.0)
 
 
 def _manifest_error(exc: PoolApiError) -> str:
@@ -596,12 +686,16 @@ def publish_pool(
         )
         write_snapshot(pool_path, snapshot)
 
+    items_by_key = {item["key_v2"]: item for item in built}
+
     for env in options.envs:
         target = TargetOutcome(env=env, base_url=settings.pool_api_url(env))
         outcome.targets.append(target)
         client = client_for(env)
         report = per_source_by_env.get(env, per_source)
         post_started = clock()
+
+        throttled: list[str] = []
 
         try:
             for batch_no, chunk in enumerate(chunks, 1):
@@ -617,8 +711,15 @@ def publish_pool(
                     )
                     break
                 _absorb_batch(target, body)
+                throttled += _throttled_keys(body)
                 record_targets()
             else:
+                _repost_throttled(
+                    client, target, throttled, items_by_key, run_id,
+                    taxonomy.version, batch_size, sleep,
+                )
+                record_targets()
+
                 for payload in artist_payloads:
                     try:
                         client.post_artists(payload)
