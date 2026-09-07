@@ -44,16 +44,17 @@ from src.publisher.taxonomy import Taxonomy, families_for, fine_genres_for
 # overlap when it moves.
 SCHEMA_VERSION = 1
 
-# batch.schema.json's `source_name` enum, in its order. The manifest reports
-# every one of them, so the status page can say `disabled` rather than nothing.
+# The sources the pool fetches — CONTRACTS §8's "actual use per source", in
+# batch.schema.json's order. The manifest reports every one of them, so the
+# status page can say `disabled` rather than nothing.
+#
+# This is a *subset* of the schema's `source_name` enum until the multi-tenant
+# repository drops the other five from it. That order is deliberate: a manifest
+# naming fewer sources than the enum allows is valid, one naming more is refused
+# as `unknown_source`, so the publisher gives them up first and the API second.
 KNOWN_SOURCES = (
     "beatport",
     "bandcamp",
-    "traxsource",
-    "boomkat",
-    "bleep",
-    "resident_advisor",
-    "mixupload",
     "volumo",
     "soundcloud",
 )

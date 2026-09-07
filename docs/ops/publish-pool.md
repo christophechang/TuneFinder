@@ -116,11 +116,17 @@ is not the vendored taxonomy's.
    before a single POST. A row that cannot be published is dropped with a
    reason and counted in the skipped-items table; a payload that fails the
    schema is a publisher bug and raises.
-5. **Post**, per target: batches 1..N in order, then the artist payloads, then
-   the manifest. The manifest is the only thing that advances pool freshness,
-   and only once every batch is acknowledged. Dev and prod acknowledge
-   independently — a target that fails records its error, skips its manifest,
-   alerts, and the next target still runs.
+5. **Post**, per target: batches 1..N in order, then a single **repost** of the
+   copies the store refused as `throttled` — after a five-second pause, under
+   batch number 1, which the run has already acknowledged, so the copies land
+   and the run's counts, completeness and `batches_missing` do not move (§11);
+   then the artist payloads, then the manifest. The repost is one pass, and it
+   can never fail the run: a copy refused a second time is counted and left to
+   tomorrow, and a repost that errors is logged and skipped over. The manifest
+   is the only thing that advances pool freshness, and only once every batch is
+   acknowledged. Dev and prod acknowledge independently — a target that fails
+   records its error, skips its manifest, alerts, and the next target still
+   runs.
 
 ## 5. The lock, and the two-hour skip
 
@@ -373,5 +379,13 @@ the full record is `docs/spikes/S3-publish-path.md` in the multi-tenant reposito
 | refused | 165 of 9,666 copies (1.7 %) `throttled` — Cosmos 429s past the API's retry window |
 | replay of the same run | 32.0 s, 11,253 RU (1.17 RU/item): `unchanged 9501`, `upserted 165` (the throttled ones), `rejected 0`; the manifest completed without moving freshness |
 
-So a day costs about 80 k RU and seven minutes; the budget is not the constraint, the API's write rate is. A
-`throttled` copy is not lost: the next day's observation writes it, or `--replay <run_id>` writes it now.
+So a day costs about 80 k RU and seven minutes; the budget is not the constraint, the API's write rate is.
+
+A `throttled` copy is no longer carried a day. The run re-posts the refused copies itself, once, after the
+last batch and before the artist payloads — under batch number 1, a batch number it has already acknowledged,
+so the copies are written and the run's counts, its completeness and its `batches_missing` are untouched. In
+steady state about 3.5 % of copies are refused (~334 a day); at the replay's measured 1.17 RU per item that
+second pass costs roughly 400 RU and a few seconds. The snapshot and the summary line keep it separate from
+the first pass, as `retried`, `retry_written`, `retry_rejected` and `retry_request_charge` — the counts above
+them stay comparable with the API's own record of the run. A copy refused a second time is counted and left
+there: the next day's observation writes it, or `--replay <run_id>` writes it now.

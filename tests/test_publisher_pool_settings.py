@@ -118,9 +118,13 @@ def test_generated_soundcloud_targets(generated):
     assert soundcloud["enabled"] is True
 
 
-def test_disabled_sources_listed_disabled(generated):
+def test_only_the_four_live_sources_are_generated(generated):
+    # CONTRACTS §8 lists four. The five TuneFinder switched off years ago are
+    # absent rather than listed `enabled: false`: an unlisted source is not
+    # fetched, and the file no longer states a nine-source picture.
+    assert list(generated["sources"]) == ["beatport", "volumo", "bandcamp", "soundcloud"]
     for name in ("traxsource", "boomkat", "bleep", "resident_advisor", "mixupload"):
-        assert generated["sources"][name] == {"enabled": False}
+        assert name not in generated["sources"]
 
 
 def test_pool_block_and_taxonomy_version(generated):

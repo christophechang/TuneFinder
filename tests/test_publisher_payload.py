@@ -754,7 +754,7 @@ def test_per_source_report_lists_all_nine():
     report = per_source_report(health, fetch_switches, configured_enabled)
 
     assert set(report) == set(KNOWN_SOURCES)
-    assert len(report) == 9
+    assert len(report) == 4
     assert report["beatport"] == {"count": 120, "error": None, "enabled": True}
     assert report["volumo"] == {
         "count": 0,
@@ -762,8 +762,6 @@ def test_per_source_report_lists_all_nine():
         "enabled": True,
     }
     assert report["soundcloud"] == {"count": 0, "error": None, "enabled": False}
-    for name in ("traxsource", "boomkat", "bleep", "resident_advisor", "mixupload"):
-        assert report[name] == {"count": 0, "error": None, "enabled": False}
 
 
 def test_summarise_error_strips_urls_paths_and_truncates():

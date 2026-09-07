@@ -73,7 +73,17 @@ def _config(taxonomy_version=1, schema_versions=(1,), batch_size=200, sources=No
 
 
 class FakeClient:
-    """The four ingest calls, recording every request in order."""
+    """The four ingest calls, recording every request in order.
+
+    `rejected` is keyed by batch number. An entry is either a ready-made
+    rejection dict, or a `(index, reason)` pair naming an item of *that*
+    payload — which is how a test refuses a `key_v2` the run actually built,
+    and so the only kind of refusal the repost can act on.
+
+    A second post under a batch number already seen is the repost: it answers
+    with `retry_rejected` and raises `retry_error`, so a test can say what the
+    first pass refused and what the second pass made of it separately.
+    """
 
     def __init__(
         self,
@@ -86,6 +96,8 @@ class FakeClient:
         manifest_error=None,
         request_charge=12.5,
         rejected=None,
+        retry_rejected=None,
+        retry_error=None,
     ):
         self.env = env
         self.calls: list[tuple] = []
@@ -97,6 +109,9 @@ class FakeClient:
         self._manifest_error = manifest_error
         self._request_charge = request_charge
         self._rejected = rejected or {}
+        self._retry_rejected = retry_rejected or []
+        self._retry_error = retry_error
+        self._posted_batch_nos: set[int] = set()
 
     def get_config(self):
         self.calls.append(("config", None))
@@ -104,13 +119,34 @@ class FakeClient:
             raise self._config_error
         return self._config
 
+    @staticmethod
+    def _rejections(payload, spec):
+        entries = []
+        for entry in spec:
+            if isinstance(entry, dict):
+                entries.append(entry)
+                continue
+            index, reason = entry
+            item = payload["items"][index]
+            entries.append(
+                {"key_v2": item["key_v2"], "family": item["families"][0], "reason": reason}
+            )
+        return entries
+
     def post_batch(self, payload):
         batch_no = payload["batch_no"]
+        repost = batch_no in self._posted_batch_nos
+        self._posted_batch_nos.add(batch_no)
         self.calls.append(("batch", batch_no))
         self.payloads["batch"].append(payload)
-        if self._batch_error and batch_no == self._batch_error_on:
-            raise self._batch_error
-        rejected = self._rejected.get(batch_no, [])
+        if repost:
+            if self._retry_error:
+                raise self._retry_error
+            rejected = self._rejections(payload, self._retry_rejected)
+        else:
+            if self._batch_error and batch_no == self._batch_error_on:
+                raise self._batch_error
+            rejected = self._rejections(payload, self._rejected.get(batch_no, []))
         return {
             "run_id": payload["run_id"],
             "batch_no": batch_no,
@@ -485,6 +521,141 @@ def test_counts_summed_and_rejections_tallied(tmp_path, taxonomy):
     assert target.request_charge == 20.0
 
 
+# ---------------------------------------------------------------------------
+# The `throttled` repost
+# ---------------------------------------------------------------------------
+
+def test_throttled_copies_are_reposted_once_at_the_end_of_the_run(tmp_path, taxonomy):
+    settings = _settings(tmp_path, batch_size=2)
+    clock = Clock()
+    client = FakeClient("dev", rejected={1: [(0, "throttled")]})
+    fetch = _fetch([_volumo_item(n) for n in range(4)], health=_health(volumo=4))
+
+    outcome = _run(settings, clock, clients={"dev": client}, fetch=fetch, taxonomy=taxonomy)
+
+    kinds = [kind for kind, _ in client.calls]
+    assert kinds[0] == "config"
+    assert kinds[1:4] == ["batch", "batch", "batch"]
+    assert set(kinds[4:-1]) == {"artists"}
+    assert kinds[-1] == "manifest"
+
+    refused = client.payloads["batch"][0]["items"][0]["key_v2"]
+    repost = client.payloads["batch"][2]
+    assert [item["key_v2"] for item in repost["items"]] == [refused]
+    assert repost["batch_no"] == 1
+    assert outcome.targets[0].retried == 1
+    assert clock.sleeps == [5]
+
+
+def test_throttled_repost_does_not_double_count_the_run(tmp_path, taxonomy):
+    settings = _settings(tmp_path, batch_size=2)
+    clock = Clock()
+    client = FakeClient("dev", rejected={1: [(0, "throttled")]})
+    fetch = _fetch([_volumo_item(n) for n in range(4)], health=_health(volumo=4))
+
+    outcome = _run(settings, clock, clients={"dev": client}, fetch=fetch, taxonomy=taxonomy)
+
+    target = outcome.targets[0]
+    # Batch 1 (1 upserted of 2) and batch 2 (2 upserted), and nothing else.
+    assert target.batches_acked == 2
+    assert target.upserted == 3
+    assert target.updated == 2
+    assert target.unchanged == 4
+    assert target.obsolete == 6
+    assert target.request_charge == 25.0
+    # The refusal happened, so it is still counted as one.
+    assert target.rejected == 1
+    assert target.rejected_reasons == {"throttled": 1}
+    # The repost's own acknowledgement is kept apart.
+    assert target.retried == 1
+    assert target.retry_written == 2
+    assert target.retry_rejected == 0
+    assert target.retry_request_charge == 12.5
+
+
+def test_store_error_and_conflict_are_not_reposted(tmp_path, taxonomy):
+    settings = _settings(tmp_path, batch_size=4)
+    clock = Clock()
+    client = FakeClient(
+        "dev",
+        rejected={1: [(0, "throttled"), (1, "store_error"), (2, "conflict")]},
+    )
+    fetch = _fetch([_volumo_item(n) for n in range(4)], health=_health(volumo=4))
+
+    outcome = _run(settings, clock, clients={"dev": client}, fetch=fetch, taxonomy=taxonomy)
+
+    posted = client.payloads["batch"]
+    assert len(posted) == 2
+    throttled = posted[0]["items"][0]["key_v2"]
+    assert [item["key_v2"] for item in posted[1]["items"]] == [throttled]
+    assert outcome.targets[0].retried == 1
+
+
+def test_a_repost_that_is_throttled_again_is_not_retried_again(tmp_path, taxonomy):
+    settings = _settings(tmp_path, batch_size=2)
+    clock = Clock()
+    client = FakeClient(
+        "dev", rejected={1: [(0, "throttled")]}, retry_rejected=[(0, "throttled")]
+    )
+    fetch = _fetch([_volumo_item(n) for n in range(4)], health=_health(volumo=4))
+
+    outcome = _run(settings, clock, clients={"dev": client}, fetch=fetch, taxonomy=taxonomy)
+
+    assert len([kind for kind, _ in client.calls if kind == "batch"]) == 3
+    assert outcome.targets[0].retry_rejected == 1
+    assert outcome.ok is True
+
+
+def test_repost_failure_does_not_fail_the_run_or_skip_the_manifest(tmp_path, taxonomy):
+    settings = _settings(tmp_path, batch_size=2)
+    clock = Clock()
+    alert = MagicMock()
+    client = FakeClient(
+        "dev",
+        rejected={1: [(0, "throttled")]},
+        retry_error=PoolApiError(503, "transport", "503"),
+    )
+    fetch = _fetch([_volumo_item(n) for n in range(4)], health=_health(volumo=4))
+
+    outcome = _run(settings, clock, clients={"dev": client}, fetch=fetch,
+                   alert=alert, taxonomy=taxonomy)
+
+    target = outcome.targets[0]
+    assert len(client.payloads["manifest"]) == 1
+    assert client.calls[-1][0] == "manifest"
+    assert target.error is None
+    assert outcome.ok is True
+    alert.assert_not_called()
+
+
+def test_nothing_throttled_posts_no_retry_batch(tmp_path, taxonomy):
+    settings = _settings(tmp_path, batch_size=2)
+    clock = Clock()
+    client = FakeClient("dev")
+    fetch = _fetch([_volumo_item(n) for n in range(4)], health=_health(volumo=4))
+
+    outcome = _run(settings, clock, clients={"dev": client}, fetch=fetch, taxonomy=taxonomy)
+
+    assert [no for kind, no in client.calls if kind == "batch"] == [1, 2]
+    assert outcome.targets[0].retried == 0
+    assert clock.sleeps == []
+
+
+def test_snapshot_records_the_retry(tmp_path, taxonomy):
+    settings = _settings(tmp_path, batch_size=2)
+    clock = Clock()
+    client = FakeClient(
+        "dev", rejected={1: [(0, "throttled")]}, retry_rejected=[(0, "throttled")]
+    )
+    fetch = _fetch([_volumo_item(n) for n in range(4)], health=_health(volumo=4))
+
+    outcome = _run(settings, clock, clients={"dev": client}, fetch=fetch, taxonomy=taxonomy)
+
+    record = load_snapshot(pool_dir(str(tmp_path)), outcome.run_id)["targets"]["dev"]
+    assert record["retried"] == 1
+    assert record["retry_rejected"] == 1
+
+
 def test_batch_failure_after_retries_skips_manifest_alerts_and_continues_to_next_target(
     tmp_path, taxonomy
 ):
@@ -854,6 +1025,29 @@ def test_summary_line_shape():
         "dev: upserted 100 updated 20 unchanged 1000 obsolete 4 rejected 2, "
         "RU 4321.0 (3.50/item), post 12.3s, artists 55/57; fetch 45.6s; total 61.0s"
     )
+
+
+def test_summary_line_names_the_repost():
+    def line(retried):
+        return PublishOutcome(
+            run_id="2026-09-06T06:00:00Z-a3f9c1",
+            started_at="2026-09-06T06:00:00Z",
+            items=1234,
+            batches=7,
+            artist_payloads=57,
+            targets=[
+                TargetOutcome(
+                    env="dev",
+                    base_url="https://api-dev.example.test",
+                    batches_acked=7,
+                    artists_posted=55,
+                    retried=retried,
+                )
+            ],
+        ).summary_line()
+
+    assert "artists 55/57, reposted 1;" in line(1)
+    assert "reposted" not in line(0)
 
 
 def test_summary_line_says_why_a_run_was_skipped():
