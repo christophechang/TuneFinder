@@ -174,7 +174,7 @@ Then, in one terminal, hold the lock — `"mode":"weekly"` for the first case,
 
 ```bash
 curl -s -X POST http://localhost:8420/api/runs \
-  -H "Authorization: Bearer $TUNEFINDER_WEB_API_SECRET" \
+  -H "Authorization: Bearer $TUNEFINDER_API_SECRET" \
   -H 'Content-Type: application/json' \
   -d '{"mode":"mix-prep","genre":"dnb","dry_run":true}'
 ```
@@ -199,15 +199,45 @@ generated, carries a do-not-edit header, and a drift test asserts it matches the
 generator); drop `--dry-run` for that one if you want the real Discord alert rather than a
 logged one.
 
-Evidence for the S9 record — both diffs must be empty:
+Evidence for the S9 record. **The publisher's own log is the proof**, not the checksums —
+the point is that it never reached the fetch, so it wrote nothing and refreshed nothing:
 
 ```bash
-shasum -a 256 data/soundcloud_token.json data/beatport_token.json | diff /tmp/s9-tokens-before.txt -
-find data/archive -type f | sort | shasum -a 256 | diff /tmp/s9-archive-before.txt -
+grep -c "run lock held" /tmp/s9-overlap.log     # the yield
+ls -la data/pool/snapshots/                     # no new snapshot from the test run
 ```
 
-The token diff is the direct proof of "never refreshes a token while another consumer
-runs": the publisher never reached the fetch, so it never touched either token cache.
+Two checksum traps, both learned by running this:
+
+- **The token caches will change**, and that is correct. The consumer holding the lock —
+  a weekly run or a cut — refreshes Beatport and SoundCloud under it, exactly as designed.
+  A clean token diff only proves anything when the lock is held by a synthetic holder that
+  fetches nothing. Do not read a changed token cache as a publisher failure.
+- **`data/archive` gains a file in the weekly case.** `save_source_items` and
+  `archive_source_items` (`src/services/runs.py`, in the fetch step) sit *outside* every
+  `if not dry_run` guard, unlike learned weights, label affinity, run health and the
+  Discord posts. So a weekly `--dry-run` writes `data/source_items.json` and
+  `data/archive/source_items_<report_id>.json.gz` for the current week. Running this test
+  midweek therefore leaves a spurious archive entry that the real Sunday run later
+  overwrites under the same `report_id`. Either accept it, delete the file afterwards, or
+  use the mix-prep case, which does not archive.
+
+To rehearse the mechanism at zero API cost and with genuinely clean checksums, hold the
+lock synthetically instead of with a real run:
+
+```bash
+./venv/bin/python -c "
+import sys, time; sys.path.insert(0, '.')
+from src.pipeline.storage import run_lock
+with run_lock('data'):
+    print('holding', flush=True); time.sleep(100)
+" &
+./venv/bin/python -m tunefinder publish-pool --dry-run
+```
+
+The publisher mints its Entra token and reads `/api/ingest/config` *before* the lock, but
+touches the source token caches only *under* it — so a run that never acquires costs no
+source API calls at all.
 
 A caveat worth recording alongside the result: driving the weekly case through
 `POST /api/runs` calls the same `run_weekly` and takes the same lock as the scheduled
