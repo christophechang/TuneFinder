@@ -19,6 +19,7 @@ CLI style — tests patch them at their definition sites.
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -38,6 +39,8 @@ ProgressFn = Callable[[str, str], None]
 @dataclass
 class WeeklyRunOptions:
     dry_run: bool = False
+    # Golden-fixture capture (src/pipeline/bundle.py) — dry runs only.
+    capture_dir: Optional[str] = None
 
 
 @dataclass
@@ -155,7 +158,34 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
 
     Holds the data_dir run lock for the duration; raises
     storage.RunLockHeldError if another run is active.
+
+    With options.capture_dir set (dry runs only) the run also writes a
+    golden-fixture bundle there and writes nothing else — see
+    src/pipeline/bundle.py.
     """
+    if options.capture_dir is None:
+        return _run_weekly(settings, options, progress)
+
+    from src.pipeline.bundle import CaptureBundle, frozen_clock
+    if not options.dry_run:
+        raise ValueError("a capture bundle needs a dry run")
+    bundle = CaptureBundle(options.capture_dir)
+    with frozen_clock(bundle.clock):
+        outcome = _run_weekly(settings, options, progress, bundle)
+    bundle.finish(outcome)
+    return outcome
+
+
+def replay_weekly(bundle) -> RunOutcome:
+    """Replay a captured bundle (src/pipeline/bundle.ReplayBundle): the same
+    pipeline over the bundle alone, under the bundle's clock. Dry run, no
+    fetch, no run lock, no writes."""
+    from src.pipeline.bundle import frozen_clock
+    with frozen_clock(bundle.clock):
+        return _run_weekly(bundle.settings, WeeklyRunOptions(dry_run=True), None, bundle)
+
+
+def _run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressFn] = None, bundle=None) -> RunOutcome:
     from src.fetchers import fetch_all_sources, save_source_items, archive_source_items
     from src.pipeline.history import (
         load_history, build_history_keys, append_records, make_report_id,
@@ -187,7 +217,13 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
     remix_aware = settings.pipeline_remix_aware_identity
     logger.info(f"[run] Starting report run — {report_id}" + (" (DRY RUN)" if dry_run else ""))
 
-    with run_lock(settings.data_dir):
+    # A bundle run keeps the live settings for the lock and the fetch; the
+    # engine itself reads the bundle's settings and data dir.
+    live_settings = settings
+    with (nullcontext() if bundle is not None and bundle.replay else run_lock(live_settings.data_dir)):
+        if bundle is not None:
+            settings = bundle.begin(live_settings)
+
         # Create discord client early for alerts (same as anomaly-alert gating pattern)
         discord = make_discord_client(settings)
 
@@ -198,9 +234,14 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
             if not dry_run:
                 discord.post_alert(msg)
 
-        profiles, genre_affinity, known_keys, used_fallback = _load_profile_state(
-            settings, logger, dry_run, _post_profile_alert, remix_aware
-        )
+        if bundle is not None and bundle.replay:
+            profiles, genre_affinity, known_keys, used_fallback = bundle.load_profile_state(remix_aware)
+        else:
+            profiles, genre_affinity, known_keys, used_fallback = _load_profile_state(
+                settings, logger, dry_run, _post_profile_alert, remix_aware
+            )
+        if bundle is not None:
+            bundle.note(used_fallback=used_fallback, remix_aware=remix_aware)
         if used_fallback:
             logger.warning("[run] Proceeding with last-saved profile state (degraded mode)")
             emit("profile", "Degraded mode — using last-saved profile state")
@@ -239,6 +280,8 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
         if not dry_run:
             save_learned_weights(learned, settings.data_dir)
         multipliers = signal_multipliers(learned)
+        if bundle is not None:
+            bundle.record_learning(learned, multipliers, tune, adjustments)
         for line in adjustments:
             logger.info(f"[learning] {line}")
 
@@ -252,14 +295,21 @@ def run_weekly(settings, options: WeeklyRunOptions, progress: Optional[ProgressF
 
         # 3. Fetch external sources
         emit("sources", "Fetching enabled sources")
-        source_items, fetcher_health = fetch_all_sources(settings, seed_queries=seed_queries or None)
-        save_source_items(source_items, settings.data_dir)
-        archive_source_items(source_items, settings.data_dir, report_id)
+        if bundle is not None and bundle.replay:
+            source_items, fetcher_health = bundle.load_sources()
+        else:
+            source_items, fetcher_health = fetch_all_sources(live_settings, seed_queries=seed_queries or None)
+        if bundle is None:
+            save_source_items(source_items, settings.data_dir)
+            archive_source_items(source_items, settings.data_dir, report_id)
+        else:
+            bundle.note(seed_queries=seed_queries)
+            bundle.record_sources(source_items, fetcher_health)
         sources_fetched = len(source_items)
         emit("sources", f"Fetched {sources_fetched} items")
 
         # 3b. Anomaly detection — load prior health before appending current run
-        prior_health_runs = load_run_health(settings.data_dir)
+        prior_health_runs = load_run_health(live_settings.data_dir)
         anomalies = detect_anomalies(
             fetcher_health, prior_health_runs,
             settings.alerts_source_drop_threshold_pct,

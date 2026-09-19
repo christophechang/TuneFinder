@@ -155,10 +155,15 @@ def report_artifact_path(data_dir: str, report_id: str) -> str:
     return os.path.join(data_dir, "reports", f"report_{report_id}.json")
 
 
+def artifact_json(artifact: dict) -> str:
+    """The artifact's on-disk form — also what a bundle replay compares byte for byte."""
+    return json.dumps(artifact, indent=2, ensure_ascii=False)
+
+
 def write_report_artifact(artifact: dict, data_dir: str) -> str:
     """Persist the artifact atomically. Returns the written path."""
     path = report_artifact_path(data_dir, artifact["report_id"])
-    atomic_write_text(path, json.dumps(artifact, indent=2, ensure_ascii=False))
+    atomic_write_text(path, artifact_json(artifact))
     return path
 
 

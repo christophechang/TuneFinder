@@ -4,6 +4,18 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+### Added
+
+- **Capture bundles** — `run --dry-run --capture-bundle DIR` and `replay --bundle DIR` (operator guide: `docs/ops/capture-bundle.md`). A capture freezes one dry weekly run into `DIR`:
+  - every data-dir input as loaded, copied once the lock is held and then read back from `DIR`
+  - `settings.yaml` and `aliases.yaml`
+  - the fetched corpus and fetcher health
+  - learned weights as loaded and as updated, the multipliers the ranker was handed, and `tune_data`
+  - the frozen clock and the engine commit
+  - the report artifact
+
+  A capture writes nothing to the live data dir apart from the run lock and token refreshes. The five writes a plain `--dry-run` makes (`source_items`, the archive with its prune, and the three profile files) go to `DIR` or are skipped. `replay --bundle` runs the same `run_weekly` over the bundle alone and under its clock. It never fetches and writes only to `--out`. It exits 1 unless the artifact is reproduced byte for byte and the learning state matches. These bundles are the golden fixtures for the multi-tenant product's engine port. Without either flag, a run behaves exactly as before.
+
 ## v0.19.0 — 2026-09-06
 
 ### Added

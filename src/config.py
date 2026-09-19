@@ -48,8 +48,10 @@ _ALIASES_PATH = os.path.join(os.path.dirname(_CONFIG_PATH), "aliases.yaml")
 
 
 class Settings:
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, aliases_path: str | None = None):
         self._data = data
+        # A golden-fixture replay reads the bundle's aliases.yaml (src/pipeline/bundle.py).
+        self._aliases_path = aliases_path
 
     # --- Catalog API ---
 
@@ -360,10 +362,11 @@ class Settings:
         {} with no warning. A malformed file (not a mapping of str -> list)
         logs a warning and also returns {} — never raises.
         """
-        if not os.path.exists(_ALIASES_PATH):
+        path = self._aliases_path or _ALIASES_PATH
+        if not os.path.exists(path):
             return {}
         try:
-            with open(_ALIASES_PATH, "r") as f:
+            with open(path, "r") as f:
                 data = yaml.safe_load(f)
             if not data:
                 return {}
@@ -378,7 +381,7 @@ class Settings:
                     aliases[str(alias).lower().strip()] = str(canonical).lower().strip()
             return aliases
         except Exception as exc:
-            logger.warning(f"[config] Malformed aliases file {_ALIASES_PATH}: {exc}")
+            logger.warning(f"[config] Malformed aliases file {path}: {exc}")
             return {}
 
     # --- Validation ---
