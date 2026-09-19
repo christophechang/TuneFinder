@@ -4,6 +4,8 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.20.0 — 2026-09-19
+
 ### Added
 
 - **Capture bundles** — `run --dry-run --capture-bundle DIR` and `replay --bundle DIR` (operator guide: `docs/ops/capture-bundle.md`). A capture freezes one dry weekly run into `DIR`:
@@ -15,6 +17,15 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
   - the report artifact
 
   A capture writes nothing to the live data dir apart from the run lock and token refreshes. The five writes a plain `--dry-run` makes (`source_items`, the archive with its prune, and the three profile files) go to `DIR` or are skipped. `replay --bundle` runs the same `run_weekly` over the bundle alone and under its clock. It never fetches and writes only to `--out`. It exits 1 unless the artifact is reproduced byte for byte and the learning state matches. These bundles are the golden fixtures for the multi-tenant product's engine port. Without either flag, a run behaves exactly as before.
+
+### Changed
+
+- **The publisher publishes four sources, not nine.** `traxsource`, `boomkat`, `bleep`, `resident_advisor` and `mixupload` have been switched off for years, and the pool never fetched them. The generated `config/settings.pool.yaml` no longer lists them, and `KNOWN_SOURCES` no longer reports them, so every manifest now names only Beatport, Bandcamp, Volumo and SoundCloud. They stay in the contract's `source_name` enum and in the API's `KnownSources` until the API drops them second. That order is deliberate: the API would refuse a manifest naming a source it doesn't know, but not one naming fewer. The Python fetchers are untouched.
+- **Throttled copies are re-posted once, at the end of the run.** Copies the store refuses as `throttled` are sent again after the last batch and before the artist payloads and the manifest. That's about 1.7–3.5 % of a run, or ~400 RU a day. A copy refused again waits for tomorrow, and a failed re-post is logged and skipped, never alerted. The retry has its own counts (`retried`, `retry_written`, `retry_rejected`, `retry_request_charge`), so the first-pass counts stay comparable with the API's record.
+
+### Docs
+
+- `docs/ops/publish-pool.md`: the S3 numbers from the first dev run, and the S9 lock-overlap procedure, corrected against a real run on the mini.
 
 ## v0.19.0 — 2026-09-06
 
