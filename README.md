@@ -206,6 +206,15 @@ Two offline commands for evaluating scoring changes against real data — both w
 
 **What is as-of-week vs as-of-now.** The fetched corpus (the archive) and the release-date window's reference date are as-of-week: the reference date is the archived ISO week's Sunday (the live run's 09:00 slot), so a week replayed months later still evaluates its date window against that week rather than against today. Everything else — known-tracks, recommendation history, artist profiles, genre affinity, aliases, and label-affinity memory — is read from the current `data/` state (as-of-now, same caveat as `explain`); `fresh_release`/recency also use the current clock. The replayed week's own history records are excluded from the history filter (that week hadn't been recorded when it ran) so re-recommendation is possible and the diff is meaningful. The candidate **pool is not injected** — pool state is today's, not that week's — so replay covers the fresh corpus only. A banner at the top of the output restates these caveats.
 
+### Capture bundles — `run --dry-run --capture-bundle` and `replay --bundle`
+
+```bash
+./venv/bin/python -m tunefinder run --dry-run --capture-bundle ~/bundles/2026-W39
+./venv/bin/python -m tunefinder replay --bundle ~/bundles/2026-W39
+```
+
+A capture run freezes one dry weekly run into `DIR`: every input the engine consumed, the fetched corpus, the learning state as loaded / updated / handed to scoring, the clock, the engine commit and the report artifact. It writes nothing to the live data dir apart from the run lock and token refreshes. `replay --bundle` re-runs the engine over the bundle alone and exits 1 unless it reproduces the artifact byte for byte. These are the golden fixtures for the multi-tenant engine port. Operator guide: **`docs/ops/capture-bundle.md`**.
+
 ### `tune-report` — feedback-driven signal precision
 
 ```bash
@@ -403,6 +412,10 @@ TUNEFINDER_POOL_SCOPE=            # api://<api app id>/.default
 # Replay an archived week offline under current or overridden config (no Discord env vars needed)
 ./venv/bin/python -m tunefinder replay --week 2026-W23
 ./venv/bin/python -m tunefinder replay --week 2026-W23 --set scoring.w_known_artist=2.0 --set pipeline.section_min_score=1.5
+
+# Capture a golden-fixture bundle from a dry run, and prove it replays byte for byte
+./venv/bin/python -m tunefinder run --dry-run --capture-bundle ~/bundles/2026-W39
+./venv/bin/python -m tunefinder replay --bundle ~/bundles/2026-W39
 
 # Feedback-driven per-signal/source/genre positive-rate and lift report (no Discord env vars needed)
 ./venv/bin/python -m tunefinder tune-report

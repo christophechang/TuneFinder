@@ -116,15 +116,18 @@ def cmd_run(args):
     from src.services.runs import WeeklyRunOptions, run_weekly
 
     dry_run = getattr(args, "dry_run", False)
+    capture_dir = getattr(args, "capture_bundle", None)
     settings = load_settings()
     settings.validate()
 
     try:
-        outcome = run_weekly(settings, WeeklyRunOptions(dry_run=dry_run))
-    except RunLockHeldError as exc:
+        outcome = run_weekly(settings, WeeklyRunOptions(dry_run=dry_run, capture_dir=capture_dir))
+    except (RunLockHeldError, ValueError) as exc:
         print(f"Error: {exc}")
         raise SystemExit(1)
 
+    if capture_dir:
+        print(f"Capture bundle written: {capture_dir}")
     if outcome.no_candidates:
         return
     print(f"Run complete — {outcome.report_id} — {outcome.recommended_count} tracks recommended in {outcome.duration_seconds}s"
@@ -280,12 +283,29 @@ def cmd_explain(args):
 
 
 def cmd_replay(args):
+    if args.bundle:
+        _replay_bundle(args)
+        return
     from src.pipeline.replay import replay_week
 
     settings = load_settings()
     # No settings.validate() — offline reconstruction, no Discord/env needed.
     output = replay_week(args.week, getattr(args, "overrides", []) or [], settings)
     print(output)
+
+
+def _replay_bundle(args):
+    from src.pipeline.bundle import replay_bundle
+
+    # No load_settings() — a bundle replay reads the bundle and nothing else.
+    result = replay_bundle(args.bundle, out_path=args.out)
+    if result.match:
+        print(f"MATCH — {result.report_id} — artifact sha256 {result.artifact_sha256}")
+        return
+    print(f"MISMATCH — {result.report_id}")
+    for line in result.mismatches:
+        print(f"  {line}")
+    raise SystemExit(1)
 
 
 def cmd_tune_report(args):
@@ -525,6 +545,11 @@ def main():
         "--dry-run", action="store_true",
         help="Run the full pipeline, log the report preview, but skip Discord posts and history/pool writes",
     )
+    run_parser.add_argument(
+        "--capture-bundle", metavar="DIR",
+        help="With --dry-run: write a golden-fixture bundle (every input, the fetched corpus, "
+             "learning state, clock, report artifact) to the empty DIR and nothing anywhere else",
+    )
     mix_prep_parser = subparsers.add_parser(
         "mix-prep",
         help="Generate a genre-focused track list for mix preparation",
@@ -606,16 +631,27 @@ def main():
     )
     replay_parser = subparsers.add_parser(
         "replay",
-        help="Replay an archived week's fetch offline under current or overridden config",
+        help="Replay an archived week's fetch offline under current or overridden config, "
+             "or replay a capture bundle and check it reproduces its report artifact",
     )
-    replay_parser.add_argument(
-        "--week", required=True, metavar="YYYY-Www",
+    replay_source = replay_parser.add_mutually_exclusive_group(required=True)
+    replay_source.add_argument(
+        "--week", metavar="YYYY-Www",
         help="Archived ISO week to replay, e.g. 2026-W23",
+    )
+    replay_source.add_argument(
+        "--bundle", metavar="DIR",
+        help="Capture bundle (run --dry-run --capture-bundle) to replay; exits 1 unless the "
+             "report artifact is reproduced byte for byte",
     )
     replay_parser.add_argument(
         "--set", action="append", default=[], dest="overrides", metavar="path=value",
         help="Override a config value for this replay only, e.g. "
-             "--set scoring.w_known_artist=2.0 (repeatable; never writes settings.yaml)",
+             "--set scoring.w_known_artist=2.0 (repeatable; never writes settings.yaml; --week only)",
+    )
+    replay_parser.add_argument(
+        "--out", metavar="PATH",
+        help="With --bundle: also write the replayed report artifact to PATH",
     )
     subparsers.add_parser(
         "tune-report",
@@ -650,6 +686,12 @@ def main():
     serve_parser.add_argument("--port", type=int, default=8420, help="Port (default 8420)")
 
     args = parser.parse_args()
+    if args.command == "run" and args.capture_bundle and not args.dry_run:
+        run_parser.error("--capture-bundle requires --dry-run")
+    if args.command == "replay" and args.bundle and args.overrides:
+        replay_parser.error("--set applies to --week only; a bundle replays as captured")
+    if args.command == "replay" and args.out and not args.bundle:
+        replay_parser.error("--out applies to --bundle only")
 
     setup_logging(log_dir="logs")
     logger = get_logger(__name__)
