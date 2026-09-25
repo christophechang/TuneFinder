@@ -198,9 +198,10 @@ def preview_for(
     signature so every builder here takes the same pair; the preview is the
     group's, not the winner's.
 
-    `eligible` is always true in M1d: nothing fetches the ref to check it (open
-    point 6). Volumo's ref is the prelisten endpoint — the SPA appends its own
-    `c` token, which is not ours to mint.
+    `eligible` starts true here, because this module does no IO. For a Volumo
+    prelisten the run then checks it (`previews.py`, M1d open point 6), and a
+    Beatport sample is never checked. Volumo's ref is the prelisten endpoint
+    without the `c` token: the web adapter appends its own.
     """
     for member in members:
         if member.source == "beatport":

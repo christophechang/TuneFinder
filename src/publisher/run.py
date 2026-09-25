@@ -16,9 +16,11 @@ The shape of a run, in order:
      is held for the fetch and released before any POST: it exists to keep the
      fetchers' token caches and TuneFinder's JSON stores mutually exclusive
      with the Sunday run, and posting touches neither;
-  4. build the contract items, the artist payloads and the snapshot, and
-     validate every payload against the vendored schemas — a failure here is a
-     bug in the publisher and raises rather than posting;
+  4. build the contract items, `HEAD` each Volumo preview to set its
+     `eligible` (`previews.py`; never on a replay, which re-posts the snapshot
+     as it stands), build the artist payloads and the snapshot, and validate
+     every payload against the vendored schemas — a failure here is a bug in
+     the publisher and raises rather than posting;
   5. post per target: batches 1..N in order, then **one** repost of the copies
      the store refused as `throttled` — under batch number 1, which the run has
      already acknowledged, so the copies land and the run's arithmetic does not
@@ -38,7 +40,7 @@ public status page's `error` strings pass through.
 import secrets
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 
 from src.config import Settings
@@ -65,6 +67,13 @@ from src.publisher.payload import (
     manifest_payload,
     per_source_report,
     summarise_error,
+)
+from src.publisher.previews import (
+    check_volumo_previews,
+    default_head,
+    load_preview_cache,
+    prune_preview_cache,
+    save_preview_cache,
 )
 from src.publisher.snapshots import (
     append_health,
@@ -137,6 +146,7 @@ class PublishOutcome:
     fetch_seconds: float = 0.0
     per_source: dict = field(default_factory=dict)
     artist_payloads: int = 0
+    preview_check: dict | None = None
     targets: list[TargetOutcome] = field(default_factory=list)
     snapshot_path: str | None = None
     total_seconds: float = 0.0
@@ -434,6 +444,38 @@ def _repost_throttled(
         target.retry_request_charge += float(body.get("request_charge") or 0.0)
 
 
+def _check_previews(pool_path, built, head, clock, sleep, now):
+    """The Volumo preview check, which may never cost the run: a broken cache
+    starts empty, a failed check leaves the verdicts it reached, and the cache
+    is saved whatever happened (so an interrupted check keeps its work)."""
+    try:
+        cache = prune_preview_cache(load_preview_cache(pool_path), now)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("%s volumo preview cache not loaded: %s", LOG, type(exc).__name__)
+        cache = {}
+    try:
+        return check_volumo_previews(built, cache, head=head, clock=clock, sleep=sleep)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("%s volumo preview check failed: %s", LOG, type(exc).__name__)
+        return None
+    finally:
+        try:
+            save_preview_cache(pool_path, cache)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("%s volumo preview cache not saved: %s", LOG, type(exc).__name__)
+
+
+def _log_preview_check(check) -> None:
+    """The per-family table the founder records (M3b precondition P)."""
+    logger.info("%s %s; by status %s", LOG, check.summary(), check.by_status)
+    for family, counts in check.by_family.items():
+        logger.info(
+            "%s volumo previews %s: eligible %d ineligible %d error %d unchecked %d",
+            LOG, family, counts["eligible"], counts["ineligible"], counts["error"],
+            counts["unchecked"],
+        )
+
+
 def _manifest_error(exc: PoolApiError) -> str:
     if exc.status == 409 and exc.error == "batches_missing":
         return (
@@ -457,6 +499,7 @@ def publish_pool(
     client_factory=None,
     alert=None,
     taxonomy=None,
+    head=default_head,
 ) -> PublishOutcome:
     clock = clock or _utc_now
     client_factory = client_factory or default_client_factory
@@ -590,6 +633,18 @@ def publish_pool(
         outcome.skipped_items = _counted(corpus.skipped)
         chunks = batches(built, batch_size)
 
+        preview_check = _check_previews(pool_path, built, head, clock, sleep, run_started)
+        if preview_check is not None:
+            outcome.preview_check = asdict(preview_check)
+            _log_preview_check(preview_check)
+            if preview_check.token_rejected:
+                raise_alert(
+                    f"publish-pool {run_id}: Volumo refused the prelisten token — "
+                    f"{preview_check.stopped}; the check stopped and unchecked "
+                    "previews were posted eligible. If Volumo rotated `c`, update "
+                    "VOLUMO_PREVIEW_TOKEN here and in the web app"
+                )
+
         configured_enabled = {name for name in KNOWN_SOURCES if settings.source_enabled(name)}
         per_source = per_source_report(
             _health_for(health, union_switches), union_switches, configured_enabled
@@ -624,6 +679,7 @@ def publish_pool(
             "skipped": [list(pair) for pair in corpus.skipped],
             "per_source": per_source,
             "per_source_by_env": per_source_by_env,
+            "preview_check": outcome.preview_check,
             "targets": {},
         }
         outcome.snapshot_path = write_snapshot(pool_path, snapshot)

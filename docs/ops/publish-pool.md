@@ -16,6 +16,7 @@ Writes, all of them under `data/pool/`:
 | `data/pool/snapshots/<run_id>.json.gz` | the run's built corpus plus every acknowledgement, rewritten after each batch |
 | `data/pool/health.json` | per-source counts and errors, newest 26 runs |
 | `data/pool/artist_index.json` | the thirteen-week artist tally the `artists` payloads are cut from |
+| `data/pool/volumo_previews.json` | the Volumo preview verdicts, by track id (§4a) |
 
 It never calls `save_source_items`, `archive_source_items` or
 `append_run_health`, never writes `data/recommendation_history.json`,
@@ -115,7 +116,8 @@ is not the vendored taxonomy's.
    snapshot, and **validate every payload** against the vendored JSON Schemas
    before a single POST. A row that cannot be published is dropped with a
    reason and counted in the skipped-items table; a payload that fails the
-   schema is a publisher bug and raises.
+   schema is a publisher bug and raises. Between the build and the snapshot,
+   every Volumo preview is **checked** (§4a).
 5. **Post**, per target: batches 1..N in order, then a single **repost** of the
    copies the store refused as `throttled` — after a five-second pause, under
    batch number 1, which the run has already acknowledged, so the copies land
@@ -127,6 +129,51 @@ is not the vendored taxonomy's.
    acknowledged. Dev and prod acknowledge independently — a target that fails
    records its error, skips its manifest, alerts, and the next target still
    runs.
+
+## 4a. The Volumo preview check
+
+Volumo answers 402 for the prelisten of many new releases: about half of drum &
+bass and a tenth of house. A dead preview in the booth's deck costs a load
+timeout and a hold, so the run checks each one (`src/publisher/previews.py`,
+M1d open point 6).
+
+- **What is checked:** only items whose chosen preview is `volumo_prelisten`,
+  with one `HEAD` of the prelisten url plus `?c=<VOLUMO_PREVIEW_TOKEN>`. A
+  Beatport sample is never checked. The ref posted to the API has no token.
+- **Verdicts:** 2xx means eligible, and a 4xx means not eligible. That includes
+  a single 400: S6 found that a few tracks in each genre answer 400 even with a
+  valid token. Some answers are *provisional*: a network error, a 5xx, a 403,
+  405, 408 or 429. A provisional answer means not eligible for this run, and
+  the track goes to the front of the queue on the next run. `checked_at` is the
+  time of the check.
+- **Stops:** the check stops after five provisional answers in a row. It also
+  stops when 20 minutes of wall clock have passed. **Five 400s in a row** mean
+  Volumo is refusing the token itself: the check stops, those five verdicts
+  stay provisional, and the run alerts.
+- **Politeness:** requests go one at a time over one connection, with 0.25 s
+  between them, and at most 1,500 go out per run. That takes about ten minutes.
+- **The cache:** verdicts are kept in `data/pool/volumo_previews.json` and
+  checked again after seven days, less twelve hours of slack. Entries are
+  dropped 45 days after their last check, which is the pool's own expiry. A
+  malformed entry is dropped on load. The file is saved even when the check
+  fails partway. Each run checks never-seen tracks first, then provisional
+  verdicts, then the stalest. A track over the cap is counted as `cached` and
+  keeps its definitive cached verdict. If it has none, or only a provisional
+  one, it stays eligible and is counted as `unchecked`. A run carries
+  about 6,500 Volumo previews, of which about 150 are new on a normal day and
+  about 1,500 on the weekly chart refresh. A cold cache therefore takes about
+  five runs to cover everything, and after that about 1,100 checks a day keep
+  it current.
+- **The log:** one line of totals and status codes, then one line per family:
+  `volumo previews <family>: eligible N ineligible N error N unchecked N`.
+  `error` is the provisional answers. The totals count tracks. The family lines
+  count items, and an item in two families is counted in both. The snapshot
+  stores the same figures as `preview_check`.
+- **Nothing here fails a run.** A cache that can't be read starts empty. A check
+  or a save that raises is logged by exception type, and the run posts whatever
+  verdicts it reached.
+- A **replay** re-posts the snapshot's verdicts and never checks again. A
+  **dry run** does check, and it saves the cache.
 
 ## 5. The lock, and the two-hour skip
 
@@ -310,6 +357,7 @@ pass through — so no url, path, token or payload ever reaches a message:
 - there was nothing to publish (with the failing sources named);
 - a target failed a batch, so its manifest was not posted;
 - a target's manifest was refused;
+- Volumo refused the prelisten token (five 400s in a row), so the preview check stopped;
 - a target completed but pool freshness already belonged to a later run
   (informational — a late run that did not win the total order).
 

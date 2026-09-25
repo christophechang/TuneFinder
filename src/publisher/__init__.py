@@ -8,4 +8,6 @@ command with its own settings file and its own snapshots.
 # produced a document. Bumped by hand when the publisher's wire behaviour changes
 # (TuneFinder has no version constant in code — the release number lives in
 # CHANGELOG.md — and the wire version is not the release version anyway).
-PUBLISHER_VERSION = "1"
+# "2": preview.eligible reflects a HEAD of the Volumo prelisten (previews.py),
+# where "1" always sent true.
+PUBLISHER_VERSION = "2"
