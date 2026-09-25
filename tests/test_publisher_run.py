@@ -21,6 +21,7 @@ from src.config import Settings
 from src.models import SourceItem
 from src.pipeline.storage import RunLockHeldError, run_lock
 from src.publisher.client import PoolApiError
+from src.publisher.previews import CHECK_DELAY_SECONDS
 from src.publisher.contract import validator
 from src.publisher.run import (
     PublishOptions,
@@ -272,8 +273,17 @@ def _fetch(items, health=None, clock=None, seconds=0):
     return fetch
 
 
+def _head_200(url):
+    return 200
+
+
+def _repost_sleeps(clock):
+    """The run's sleeps without the preview check's pauses between HEADs."""
+    return [seconds for seconds in clock.sleeps if seconds != CHECK_DELAY_SECONDS]
+
+
 def _run(settings, clock, *, envs=("dev",), clients=None, fetch=None, alert=None,
-         dry_run=False, replay=None, taxonomy=None):
+         dry_run=False, replay=None, taxonomy=None, head=_head_200):
     clients = clients if clients is not None else {"dev": FakeClient("dev")}
     return publish_pool(
         settings,
@@ -284,6 +294,7 @@ def _run(settings, clock, *, envs=("dev",), clients=None, fetch=None, alert=None
         client_factory=_factory(clients),
         alert=alert if alert is not None else MagicMock(),
         taxonomy=taxonomy,
+        head=head,
     )
 
 
@@ -544,7 +555,7 @@ def test_throttled_copies_are_reposted_once_at_the_end_of_the_run(tmp_path, taxo
     assert [item["key_v2"] for item in repost["items"]] == [refused]
     assert repost["batch_no"] == 1
     assert outcome.targets[0].retried == 1
-    assert clock.sleeps == [5]
+    assert _repost_sleeps(clock) == [5]
 
 
 def test_throttled_repost_does_not_double_count_the_run(tmp_path, taxonomy):
@@ -638,7 +649,7 @@ def test_nothing_throttled_posts_no_retry_batch(tmp_path, taxonomy):
 
     assert [no for kind, no in client.calls if kind == "batch"] == [1, 2]
     assert outcome.targets[0].retried == 0
-    assert clock.sleeps == []
+    assert _repost_sleeps(clock) == []
 
 
 def test_snapshot_records_the_retry(tmp_path, taxonomy):
@@ -871,6 +882,131 @@ def test_replay_does_not_rewrite_the_snapshot_items(tmp_path, taxonomy):
     after = load_snapshot(pool_dir(str(tmp_path)), first.run_id)
     assert after["items"] == before
     assert after["targets"]["dev"]["batches_acked"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The Volumo preview check
+# ---------------------------------------------------------------------------
+
+def _recording_head(status):
+    def head(url):
+        head.urls.append(url)
+        return status
+
+    head.urls = []
+    return head
+
+
+def test_a_volumo_preview_that_answers_402_is_posted_not_eligible(tmp_path, taxonomy):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    client = FakeClient("dev")
+    head = _recording_head(402)
+
+    outcome = _run(settings, clock, clients={"dev": client}, head=head, taxonomy=taxonomy)
+
+    assert len(head.urls) == 1 and "?c=" in head.urls[0]
+    preview = client.payloads["batch"][0]["items"][0]["preview"]
+    assert preview["kind"] == "volumo_prelisten"
+    assert preview["eligible"] is False
+    assert "?c=" not in preview["ref"]
+    assert outcome.preview_check["by_family"] == {
+        "house": {"eligible": 0, "ineligible": 1, "error": 0, "unchecked": 0}
+    }
+    snapshot = load_snapshot(pool_dir(str(tmp_path)), outcome.run_id)
+    assert snapshot["preview_check"]["by_status"] == {"402": 1}
+    assert os.path.exists(os.path.join(pool_dir(str(tmp_path)), "volumo_previews.json"))
+
+
+def test_a_beatport_sample_is_not_checked_by_the_run(tmp_path, taxonomy):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    client = FakeClient("dev")
+    head = _recording_head(402)
+
+    item = _beatport_item()
+    item.raw_metadata["sample_url"] = "https://geo-samples.beatport.com/track/1.LOFI.mp3"
+
+    _run(settings, clock, clients={"dev": client}, head=head, taxonomy=taxonomy,
+         fetch=_fetch([item], health=_health(beatport=1)))
+
+    assert head.urls == []
+    preview = client.payloads["batch"][0]["items"][0]["preview"]
+    assert preview["kind"] == "beatport_sample"
+    assert preview["eligible"] is True
+
+
+def test_a_rejected_token_alerts_without_a_url(tmp_path, taxonomy):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    alert = MagicMock()
+    fetch = _fetch([_volumo_item(n) for n in range(6)], health=_health(volumo=6))
+
+    _run(settings, clock, alert=alert, fetch=fetch, head=_recording_head(400),
+         taxonomy=taxonomy)
+
+    texts = [call.args[0] for call in alert.call_args_list]
+    token_alerts = [text for text in texts if "prelisten token" in text]
+    assert len(token_alerts) == 1
+    assert "http" not in token_alerts[0]
+
+
+def test_a_single_400_does_not_alert(tmp_path, taxonomy):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    alert = MagicMock()
+
+    _run(settings, clock, alert=alert, head=_recording_head(400), taxonomy=taxonomy)
+
+    assert not [c for c in alert.call_args_list if "prelisten token" in c.args[0]]
+
+
+def test_a_corrupt_preview_cache_does_not_fail_the_run(tmp_path, taxonomy):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    with open(os.path.join(pool_dir(str(tmp_path)), "volumo_previews.json"), "w") as f:
+        f.write('{"c7f0a1e0": "402", "x": {"eligible": 1}}')
+
+    outcome = _run(settings, clock, head=_recording_head(402), taxonomy=taxonomy)
+
+    assert outcome.ok is True
+    assert outcome.preview_check["checked"] == 1
+
+
+def test_a_failed_cache_save_does_not_fail_the_run(tmp_path, taxonomy, monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("src.publisher.run.save_preview_cache", boom)
+    client = FakeClient("dev")
+
+    outcome = _run(_settings(tmp_path), Clock(), clients={"dev": client},
+                   head=_recording_head(402), taxonomy=taxonomy)
+
+    assert outcome.ok is True
+    assert client.payloads["batch"][0]["items"][0]["preview"]["eligible"] is False
+
+
+def test_a_dry_run_checks_previews(tmp_path, taxonomy):
+    head = _recording_head(402)
+    outcome = _run(_settings(tmp_path), Clock(), dry_run=True, head=head, taxonomy=taxonomy)
+    assert len(head.urls) == 1
+    snapshot = load_snapshot(pool_dir(str(tmp_path)), outcome.run_id)
+    assert snapshot["items"][0]["preview"]["eligible"] is False
+
+
+def test_replay_does_not_check_previews_again(tmp_path, taxonomy):
+    settings = _settings(tmp_path)
+    clock = Clock()
+    first = _run(settings, clock, dry_run=True, head=_recording_head(402), taxonomy=taxonomy)
+
+    replay_head = _recording_head(200)
+    client = FakeClient("dev")
+    _run(settings, clock, clients={"dev": client}, replay=first.run_id,
+         head=replay_head, taxonomy=taxonomy)
+
+    assert replay_head.urls == []
+    assert client.payloads["batch"][0]["items"][0]["preview"]["eligible"] is False
 
 
 # ---------------------------------------------------------------------------

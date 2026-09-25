@@ -235,4 +235,4 @@ def test_identity_version_is_2():
 
 
 def test_publisher_version_constant():
-    assert PUBLISHER_VERSION == "1"
+    assert PUBLISHER_VERSION == "2"
