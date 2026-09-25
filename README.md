@@ -489,7 +489,7 @@ The pool publisher is a **second, separate** job: `com.openclaw.tunefinder-publi
 
 ## Pool publisher
 
-`tunefinder publish-pool` fetches the day's releases under the multi-tenant taxonomy — the whole taxonomy, not one DJ's genre list — and posts them to TuneFinder's multi-tenant API, which writes them into the shared candidate pool other people's crates are built from. It is a second consumer of the fetchers, not a second Sunday run: it writes only under `data/pool/`, posts no Discord report, and touches none of the history, pool, learning or label stores.
+`tunefinder publish-pool` fetches the day's releases under the multi-tenant taxonomy — the whole taxonomy, not one DJ's genre list — and posts them to TuneFinder's multi-tenant API, which writes them into the shared candidate pool other people's crates are built from. It is a second consumer of the fetchers, not a second Sunday run: it writes only under `data/pool/`, posts no Discord report, and touches none of the history, pool, learning or label stores. Before posting, it checks each Volumo preview with one `HEAD` so the booth never gets a dead one (at most 1,500 a run, cached for a week — `docs/ops/publish-pool.md` §4a).
 
 It takes TuneFinder's **existing** run lock for the fetch only (retrying every five minutes for up to two hours, then skipping the day with an alert), so its Beatport and SoundCloud token refreshes can never interleave with a weekly run, a mix-prep run or a web-triggered one.
 

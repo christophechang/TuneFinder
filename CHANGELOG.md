@@ -4,6 +4,8 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.21.0 — 2026-09-25
+
 ### Added
 
 - **The publisher checks Volumo previews.** For each item whose preview is a Volumo prelisten, the run sends one `HEAD` with the pinned `c` token and sets `preview.eligible` from the answer: 2xx means eligible and a 4xx means not. A network error, a 5xx, or a 403, 405, 408 or 429 means not eligible for this run, and the track is checked again first next run. Beatport samples are not checked. Requests go one at a time over one connection, with 0.25 s between them, at most 1,500 per run and at most 20 minutes in all. Checking stops after five such failures in a row. Verdicts are cached in `data/pool/volumo_previews.json` and checked again after seven days. Five 400s in a row mean Volumo has rejected the token: the check stops and the run alerts. Nothing in the check can fail a run. The log and the snapshot give eligible, ineligible and unchecked counts per family. `PUBLISHER_VERSION` is now `"2"`. The ingest contract is unchanged. (M1d open point 6, and tunefinder-multi-tenant M3b precondition P.)
