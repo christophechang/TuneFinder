@@ -4,6 +4,10 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+### Changed
+
+- **The publisher publishes to prod as well as dev.** `pool.targets` is now `[dev, prod]` in the generated `config/settings.pool.yaml`, so each daily run posts the same batches, artists and manifest to `TUNEFINDER_POOL_API_PROD` after dev. S9's two-week dev burn-in was accepted on 2026-09-19, and the founder waived its forced-overlap test on 2026-09-26 (tunefinder-multi-tenant #100). The ingest contract and the token are unchanged: one API registration serves both environments.
+
 ## v0.21.0 — 2026-09-25
 
 ### Added

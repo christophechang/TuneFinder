@@ -72,7 +72,7 @@ publisher's own `pool:` knobs:
 ```yaml
 pool:
   batch_size: 200                # capped further by the API's own config
-  targets: [dev]                 # what `publish-pool` posts to with no --env
+  targets: [dev, prod]           # what `publish-pool` posts to with no --env (prod since 2026-09-26)
   snapshot_retention_days: 14
   artist_weeks: 13
   lock_retry_seconds: 300

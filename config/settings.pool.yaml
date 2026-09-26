@@ -4,6 +4,7 @@ pool:
   batch_size: 200
   targets:
   - dev
+  - prod
   snapshot_retention_days: 14
   artist_weeks: 13
   lock_retry_seconds: 300
