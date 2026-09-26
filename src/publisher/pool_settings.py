@@ -43,7 +43,9 @@ _HEADER = (
 # the same values as defaults for a settings.yaml that has no `pool:` block.
 _POOL_DEFAULTS = {
     "batch_size": 200,
-    "targets": ["dev"],
+    # Prod since 2026-09-26: S9's burn-in was accepted on 2026-09-19 and the
+    # forced-overlap test waived by the founder (tunefinder-multi-tenant #100).
+    "targets": ["dev", "prod"],
     "snapshot_retention_days": 14,
     "artist_weeks": 13,
     "lock_retry_seconds": 300,

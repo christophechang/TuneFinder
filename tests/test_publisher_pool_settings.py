@@ -131,7 +131,7 @@ def test_pool_block_and_taxonomy_version(generated):
     assert generated["taxonomy_version"] == load_taxonomy().version
     assert generated["pool"] == {
         "batch_size": 200,
-        "targets": ["dev"],
+        "targets": ["dev", "prod"],
         "snapshot_retention_days": 14,
         "artist_weeks": 13,
         "lock_retry_seconds": 300,
@@ -168,5 +168,5 @@ def test_load_pool_settings_overlays_sources_only(tmp_path, monkeypatch):
     assert settings.data_dir == str(tmp_path / "data")
     # And the pool block / taxonomy version come from the generated file.
     assert settings.pool_batch_size == 200
-    assert settings.pool_targets == ["dev"]
+    assert settings.pool_targets == ["dev", "prod"]
     assert settings.pool_taxonomy_version == load_taxonomy().version
