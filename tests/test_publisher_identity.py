@@ -236,3 +236,61 @@ def test_identity_version_is_2():
 
 def test_publisher_version_constant():
     assert PUBLISHER_VERSION == "2"
+
+
+# ---------------------------------------------------------------------------
+# Unicode normalisation (multi-tenant #107) — keys are computed from NFC text, a
+# correction under identity_version 2 (no bump). An NFD Rekordbox export written
+# on macOS must key the same as an NFC catalogue item; NFC input is unchanged.
+# The NFC/NFD pairs mirror the cases added to the shared fixture.
+# ---------------------------------------------------------------------------
+
+import unicodedata  # noqa: E402
+
+_NFC_NFD_PAIRS = [
+    # (artist, title, version) — each written precomposed (NFC)
+    ("Beyoncé", "Cuff It", None),
+    ("Beyoncé", "Cuff It (Wetter Remix)", None),
+    ("Röyksopp", "Eple", None),
+    ("Mø", "Lean On (Dïrty Remix)", None),
+    ("Calibre", "Mönster", "Ölaf Remix"),
+]
+
+
+def _nfd(text):
+    return unicodedata.normalize("NFD", text) if text is not None else None
+
+
+@pytest.mark.parametrize("artist,title,version", _NFC_NFD_PAIRS)
+@pytest.mark.parametrize("catalogue", [True, False])
+def test_nfd_input_keys_the_same_as_nfc(artist, title, version, catalogue):
+    assert _nfd(artist) != artist or _nfd(title) != title  # the pair really differs
+    nfc_keys = identity_keys(artist, title, version, version_is_catalogue=catalogue)
+    nfd_keys = identity_keys(_nfd(artist), _nfd(title), _nfd(version),
+                             version_is_catalogue=catalogue)
+    assert nfd_keys == nfc_keys
+    assert all(unicodedata.is_normalized("NFC", k) for k in nfd_keys)
+
+
+def test_nfd_remixer_field_keys_the_same_as_nfc():
+    # Rekordbox's hand-typed Remixer, used as the guarded fallback.
+    nfc = identity_keys("Calibre", "Mönster", "Ölaf", version_is_catalogue=False)
+    nfd = identity_keys("Calibre", "Mönster", _nfd("Ölaf"), version_is_catalogue=False)
+    assert nfd == nfc
+    assert nfc[1].endswith("||rmx:ölaf")
+
+
+def test_nfd_item_identity_keys_the_same_as_nfc():
+    nfc = item_identity(_item("beatport", artist="Beyoncé", title="Cuff It",
+                              raw_metadata={"mix_name": "Wetter Remix"}))
+    nfd = item_identity(_item("beatport", artist=_nfd("Beyoncé"), title="Cuff It",
+                              raw_metadata={"mix_name": "Wetter Remix"}))
+    assert nfd[:2] == nfc[:2]
+
+
+def test_nfc_input_keys_are_unchanged():
+    # Pinned before the NFC correction; already-NFC text must stay byte-identical.
+    assert identity_keys("Beyoncé", "Cuff It (Wetter Remix)", None,
+                         version_is_catalogue=False) == (
+        "beyoncé||cuff it", "beyoncé||cuff it||rmx:wetter")
+    assert identity_keys("Röyksopp", "Eple") == ("röyksopp||eple", "röyksopp||eple")

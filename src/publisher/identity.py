@@ -26,6 +26,7 @@ The cross-runtime oracle for this module is `tests/fixtures/identity/cases.json`
 keys from the same 70 rows.
 """
 import re
+import unicodedata
 
 from src.models import SourceItem
 from src.pipeline.dedup import (
@@ -45,7 +46,9 @@ from src.pipeline.dedup import (
 #   1 — TuneFinder v0.18.0's title-only `make_dedup_key(..., remix_aware=True)`.
 #   2 — CONTRACTS §1 as implemented here: per-source version fields, the guarded
 #       Remixer fallback, and the S1a classifier fixes (trailing year, modifiers
-#       stripped anywhere).
+#       stripped anywhere). Keys are computed from NFC text (multi-tenant #107): a
+#       correction under version 2, not a bump, because it changes no key whose
+#       input was already NFC.
 IDENTITY_VERSION = 2
 
 # Sources whose own catalogue supplies the version, and the raw_metadata field it
@@ -132,6 +135,14 @@ def _hand_typed_qualifier(value: str) -> str | None:
     return f"rmx:{name}" if name else None
 
 
+def _nfc(text: str) -> str:
+    """`text` in Unicode NFC. A Rekordbox export written on macOS can carry NFD
+    ("o" + U+0308) where the catalogues publish NFC ("ö"); the shared normalisers in
+    `src.pipeline.dedup` do not normalise, and the personal tool must not change, so
+    the publisher does it here. A no-op on text that is already NFC."""
+    return unicodedata.normalize("NFC", text)
+
+
 def identity_keys(
     artist: str,
     title: str,
@@ -152,7 +163,14 @@ def identity_keys(
 
     Both paths build `key_v2` on the same base (`_remix_aware_key_parts`), so a track
     keys identically whichever source it came from. `key_v1` is the legacy key.
+
+    Every text input is NFC-normalised before the shared normalisers run, and the
+    keys are NFC-normalised again on the way out in case a normaliser's output is
+    not NFC. Both steps are no-ops for NFC input, so existing keys do not move.
     """
+    artist = _nfc(artist)
+    title = _nfc(title)
+    version = _nfc(version) if version else version
     artist_key = normalise_artist(artist)
     key_v1 = f"{artist_key}||{normalise_title(title)}"
     field = version.strip() if version else ""
@@ -170,7 +188,7 @@ def identity_keys(
     key_v2 = f"{artist_key}||{base}"
     if qualifier:
         key_v2 += f"||{qualifier}"
-    return key_v1, key_v2
+    return _nfc(key_v1), _nfc(key_v2)
 
 
 def item_identity(item: SourceItem) -> tuple[str, str, str | None, str]:
