@@ -94,12 +94,31 @@ def _parse_track(raw: dict, fallback_tags: list[str], chart_position: int | None
             "genre_id": (raw.get("genre") or {}).get("id"),
             "sub_genre_slug": (raw.get("sub_genre") or {}).get("slug"),
             "sample_url": raw.get("sample_url"),
-            "artwork_url": (raw.get("image") or {}).get("uri"),
+            # The cover is the *release's* image: a chart row's own `image` is
+            # the 1500×250 banner render (verified live 2026-10-12 — the same
+            # image id resized square comes back 500×83), which the booth's
+            # round label cannot use.
+            "artwork_url": _release_artwork(release),
             # Beatport carries the catalogue number on the release; a chart row
             # that inlines it at track level wins.
             "catalog_number": raw.get("catalog_number") or release.get("catalog_number"),
         },
     )
+
+
+def _release_artwork(release: dict) -> str | None:
+    """The release's cover at 500×500, or None.
+
+    Beatport's image objects are `{id, uri, dynamic_uri}`: `uri` is one fixed
+    render (1400×1400 on a release) and `dynamic_uri` carries `{w}x{h}` for the
+    CDN to render on demand. 500×500 is what a label on a phone needs; the fixed
+    render is the fallback when the template is missing.
+    """
+    image = (release or {}).get("image") or {}
+    dynamic = image.get("dynamic_uri")
+    if isinstance(dynamic, str) and "{w}" in dynamic and "{h}" in dynamic:
+        return dynamic.replace("{w}", "500").replace("{h}", "500")
+    return image.get("uri") or None
 
 
 def _fetch_genre_top(session: requests.Session, genre_id) -> list[dict]:

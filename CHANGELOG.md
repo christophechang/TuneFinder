@@ -4,6 +4,10 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+### Changed
+
+- **The publisher captures Beatport's cover from the release, not the chart row.** A chart row's own `image` is Beatport's 1500×250 banner render — the same image id resized square comes back 500×83 (verified live, 2026-10-12) — so every Beatport `artwork_url` in the pool was a strip no round label could use. `artwork_url` is now the release's image at 500×500 (its `dynamic_uri` with `{w}x{h}` filled in; the fixed render when the template is missing; `None` when the release has no image). The ingest contract is unchanged; `artwork_url` is in `_MERGE_BACKFILL_KEYS`, so the next run replaces the banners. (tunefinder-multi-tenant: the booth's platter prints the cover on the record's label.)
+
 ## v0.21.1 — 2026-09-26
 
 ### Changed
