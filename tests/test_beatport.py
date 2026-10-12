@@ -221,18 +221,28 @@ def test_seeded_never_runs_for_genre_targeted_fetch(tmp_path):
 
 def _pool_track():
     """A chart row carrying every field the publisher reads. Shapes taken from
-    the v4 track object: `genre`/`sub_genre` are {id, slug, name}, `image` is
-    {id, uri, dynamic_uri}, the catalogue number sits on `release`."""
+    the v4 track object: `genre`/`sub_genre` are {id, slug, name}, every image
+    is {id, uri, dynamic_uri} — the track's own is the 1500×250 banner render,
+    the release's the square cover — and the catalogue number sits on `release`."""
     return {
         **_track(),
         "genre": {"id": 9, "slug": "breaks-breakbeat-uk-bass"},
         "sub_genre": {"id": 66, "slug": "jungle"},
         "sample_url": "https://geo-samples.beatport.com/track/abc.LOFI.mp3",
-        "image": {"id": 1, "uri": "https://geo-media.beatport.com/image_size/500x500/19283746.jpg"},
+        "image": {
+            "id": 1,
+            "uri": "https://geo-media.beatport.com/image_size/1500x250/19283746.png",
+            "dynamic_uri": "https://geo-media.beatport.com/image_size/{w}x{h}/19283746.png",
+        },
         "release": {
             "name": "Lock It (Primate Remix)",
             "label": {"name": "Wobbles & Waffles"},
             "catalog_number": "WAFFLE001",
+            "image": {
+                "id": 2,
+                "uri": "https://geo-media.beatport.com/image_size/1400x1400/a404f8cc.jpg",
+                "dynamic_uri": "https://geo-media.beatport.com/image_size/{w}x{h}/a404f8cc.jpg",
+            },
         },
     }
 
@@ -246,8 +256,27 @@ def test_raw_metadata_carries_genre_sub_genre_sample_and_artwork():
     assert md["genre_id"] == 9
     assert md["sub_genre_slug"] == "jungle"
     assert md["sample_url"] == "https://geo-samples.beatport.com/track/abc.LOFI.mp3"
-    assert md["artwork_url"] == "https://geo-media.beatport.com/image_size/500x500/19283746.jpg"
+    # The release's cover at 500×500 — never the track's banner (image id 1).
+    assert md["artwork_url"] == "https://geo-media.beatport.com/image_size/500x500/a404f8cc.jpg"
     assert md["catalog_number"] == "WAFFLE001"
+
+
+def test_artwork_falls_back_to_the_release_images_fixed_render():
+    row = _pool_track()
+    del row["release"]["image"]["dynamic_uri"]
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", return_value=_page([row])):
+        items = beatport.fetch(_settings())
+    assert items[0].raw_metadata["artwork_url"] == "https://geo-media.beatport.com/image_size/1400x1400/a404f8cc.jpg"
+
+
+def test_artwork_none_without_a_release_image_even_when_the_track_has_a_banner():
+    row = _pool_track()
+    del row["release"]["image"]
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", return_value=_page([row])):
+        items = beatport.fetch(_settings())
+    assert items[0].raw_metadata["artwork_url"] is None
 
 
 def test_raw_metadata_pool_keys_none_when_fields_missing():
