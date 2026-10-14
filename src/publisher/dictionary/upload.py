@@ -11,6 +11,10 @@ A commit refused with 409 is read, not just reported (CONTRACTS §2):
 answer was lost, so it counts as committed; `incomplete_version` (a shard write
 not yet visible) and `commit_conflict` (another commit won the manifest race)
 are retried once after a short pause, then fail.
+
+Before any shard, the target's `GET /api/ingest/config` must name the vendored
+taxonomy's version — the family bits in every entry are that taxonomy's — the
+same gate publish-pool runs; a mismatch uploads nothing.
 """
 import json
 import os
@@ -19,6 +23,7 @@ from dataclasses import dataclass
 
 from src.logger import get_logger
 from src.publisher.client import PoolApiError
+from src.publisher.contract import ContractError
 from src.publisher.dictionary import LOG
 from src.publisher.dictionary.export import COMMIT_FILE, shard_file
 
@@ -73,8 +78,28 @@ def _commit(client, commit: dict, env: str, sleep) -> None:
             raise
 
 
-def upload(client, export_dir: str, env: str, sleep=time.sleep) -> UploadOutcome:
+def _taxonomy_gate(client, env: str, taxonomy_version: int) -> str | None:
+    """The reason not to upload to `env`, or None when its taxonomy matches."""
+    try:
+        config = client.get_config()
+    except (PoolApiError, ContractError) as exc:
+        return f"{env} ingest config unreadable: {exc}"
+    if config.get("taxonomy_version") != taxonomy_version:
+        return (f"{env} runs taxonomy v{config.get('taxonomy_version')}, the publisher "
+                f"v{taxonomy_version}; not uploading")
+    return None
+
+
+def upload(client, export_dir: str, env: str, sleep=time.sleep,
+           taxonomy_version: int | None = None) -> UploadOutcome:
+    """Post the shards then the commit. With `taxonomy_version`, the target's
+    ingest config must name it first."""
     outcome = UploadOutcome(env=env)
+    if taxonomy_version is not None:
+        outcome.error = _taxonomy_gate(client, env, taxonomy_version)
+        if outcome.error:
+            logger.error("%s upload %s refused: %s", LOG, env, outcome.error)
+            return outcome
     try:
         commit = _read(os.path.join(export_dir, COMMIT_FILE))
         outcome.version, outcome.total = commit["version"], commit["total"]
@@ -96,12 +121,18 @@ def upload(client, export_dir: str, env: str, sleep=time.sleep) -> UploadOutcome
     return outcome
 
 
-def upload_to_env(settings, env: str, export_dir: str, client_factory=None) -> UploadOutcome:
-    """Upload to `env` ("dev" / "prod") using the publisher's per-env settings."""
+def upload_to_env(settings, env: str, export_dir: str, client_factory=None,
+                  taxonomy=None) -> UploadOutcome:
+    """Upload to `env` ("dev" / "prod") using the publisher's per-env settings,
+    once its ingest config names the vendored taxonomy's version."""
     if not settings.pool_api_url(env):
         outcome = UploadOutcome(env=env, error=f"no API url configured for {env}")
         logger.error("%s %s", LOG, outcome.error)
         return outcome
     if client_factory is None:
         from src.publisher.run import default_client_factory as client_factory
-    return upload(client_factory(settings, env), export_dir, env)
+    if taxonomy is None:
+        from src.publisher.taxonomy import load_taxonomy
+
+        taxonomy = load_taxonomy()
+    return upload(client_factory(settings, env), export_dir, env, taxonomy_version=taxonomy.version)

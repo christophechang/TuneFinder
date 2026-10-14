@@ -16,6 +16,7 @@ import pytest
 from src.publisher.client import PoolApiClient, PoolApiError
 from src.publisher.dictionary import __main__ as entry
 from src.publisher.dictionary import crawl, export, upload
+from src.publisher.taxonomy import load_taxonomy
 
 
 @pytest.fixture(autouse=True)
@@ -49,6 +50,7 @@ def _api():
     api.post_dictionary_shard.side_effect = lambda payload: {
         "slot": "b", "index": payload["index"], "stored": len(payload["entries"])}
     api.post_dictionary_commit.return_value = {"version": "2026-10-14T05:40Z"}
+    api.get_config.return_value = {"taxonomy_version": load_taxonomy().version}
     return api
 
 
@@ -341,3 +343,51 @@ def test_upload_retries_the_commit_once(tmp_path, error):
     outcome = upload.upload(api, out, "dev", sleep=MagicMock())
     assert not outcome.ok and api.post_dictionary_commit.call_count == 2
     assert outcome.error == f"status=409 error={error} detail=x"
+
+
+# ---------------------------------------------------------------------------
+# The taxonomy gate
+# ---------------------------------------------------------------------------
+
+def _settings_for_dev(monkeypatch):
+    monkeypatch.setenv("TUNEFINDER_POOL_API_DEV", "https://dev.example")
+    from src.config import load_settings
+
+    return load_settings()
+
+
+def test_upload_to_env_checks_the_taxonomy_before_any_shard(tmp_path, monkeypatch):
+    out, _ = _export_dir(tmp_path, shards=2)
+    settings = _settings_for_dev(monkeypatch)
+    api = _api()
+    api.get_config.return_value = {"taxonomy_version": load_taxonomy().version + 1}
+
+    outcome = upload.upload_to_env(settings, "dev", out, client_factory=MagicMock(return_value=api))
+
+    api.get_config.assert_called_once_with()
+    api.post_dictionary_shard.assert_not_called()
+    api.post_dictionary_commit.assert_not_called()
+    assert not outcome.ok and "runs taxonomy v" in outcome.error
+
+
+def test_upload_to_env_refuses_when_the_config_is_unreadable(tmp_path, monkeypatch):
+    out, _ = _export_dir(tmp_path, shards=1)
+    settings = _settings_for_dev(monkeypatch)
+    api = _api()
+    api.get_config.side_effect = PoolApiError(None, "transport", "ConnectionError")
+
+    outcome = upload.upload_to_env(settings, "dev", out, client_factory=MagicMock(return_value=api))
+
+    api.post_dictionary_shard.assert_not_called()
+    assert not outcome.ok and "ingest config unreadable" in outcome.error
+
+
+def test_upload_to_env_uploads_when_the_taxonomy_matches(tmp_path, monkeypatch):
+    out, _ = _export_dir(tmp_path, shards=1)
+    settings = _settings_for_dev(monkeypatch)
+    api = _api()
+
+    outcome = upload.upload_to_env(settings, "dev", out, client_factory=MagicMock(return_value=api))
+
+    assert outcome.ok
+    assert [c[0] for c in api.mock_calls] == ["get_config", "post_dictionary_shard", "post_dictionary_commit"]
