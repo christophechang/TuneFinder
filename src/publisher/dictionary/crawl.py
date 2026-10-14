@@ -187,9 +187,10 @@ class SliceFailed(Exception):
 
 class Client:
     def __init__(self, interval, max_requests, token_fn=beatport_token,
-                 session=None, sleep=time.sleep, clock=time.time):
+                 session=None, sleep=time.sleep, clock=time.time, deadline=None):
         self.s = session or requests.Session()
         self.interval, self.max = interval, max_requests
+        self.deadline = deadline  # epoch seconds on `clock`; no wait ever runs past it
         self.requests, self.streak, self.last = 0, 0, 0.0
         self.token_fn, self.sleep, self.clock = token_fn, sleep, clock
         self.auth()
@@ -199,6 +200,17 @@ class Client:
         self.s.headers.update({"Authorization": f"Bearer {tok}", "User-Agent": ua,
                                "Accept": "application/json"})
 
+    def pause(self, seconds):
+        """Sleep, but never across the deadline: a wait that would reach it sleeps
+        only the time left and ends the run cleanly."""
+        if self.deadline is not None:
+            left = self.deadline - self.clock()
+            if seconds >= left:
+                if left > 0:
+                    self.sleep(left)
+                raise Stop("deadline")
+        self.sleep(seconds)
+
     def get(self, params):
         last_5xx = None
         for attempt in range(6):
@@ -206,7 +218,7 @@ class Client:
                 raise Stop("max requests")
             wait = self.last + self.interval - self.clock()
             if wait > 0:
-                self.sleep(wait)
+                self.pause(wait)
             self.last = self.clock()
             self.requests += 1
             try:
@@ -214,7 +226,7 @@ class Client:
             except Exception as exc:
                 last_5xx = None
                 logger.warning("%s network error %s; backing off", LOG, type(exc).__name__)
-                self.sleep(30 * (attempt + 1))
+                self.pause(30 * (attempt + 1))
                 continue
             if r.status_code == 200:
                 self.streak = 0
@@ -231,7 +243,7 @@ class Client:
                                LOG, self.streak, ra, self.interval)
                 if self.streak >= 3:
                     raise Stop("three 429s in a row")
-                self.sleep(pause)
+                self.pause(pause)
                 continue
             if r.status_code == 401:
                 logger.info("%s 401; refreshing token", LOG)
@@ -240,7 +252,7 @@ class Client:
             if r.status_code >= 500:
                 last_5xx = r.status_code
                 logger.warning("%s %d; backing off", LOG, r.status_code)
-                self.sleep(30 * (attempt + 1))
+                self.pause(30 * (attempt + 1))
                 continue
             raise PageError(r.status_code, r.text[:200])
         if last_5xx is not None:

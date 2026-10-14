@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Nightly artist dictionary — crawl Beatport into crawl.db until 05:30 (backfill,
+<!-- Nightly artist dictionary — crawl Beatport into crawl.db until 05:15 (backfill,
      then a top-up of the current and previous month), export the shards, upload them
      to the multi-tenant API. See src/publisher/dictionary/__init__.py.
      Update all paths below to match your actual deployment checkout location.
      Replaces com.openclaw.artist-crawl (unload that first); the database stays at
-     ~/OpenClaw/Automations/artist-crawl/crawl.db, the default for --db.
+     ~/OpenClaw/Automations/artist-crawl/crawl.db, the default database path.
      Add a second "env" pair (prod) only once prod serves the dictionary routes.
      Loading this job does not change com.openclaw.tune-finder or the publisher. -->
 <plist version="1.0">
@@ -21,7 +21,7 @@
     <string>src.publisher.dictionary</string>
     <string>nightly</string>
     <string>--until</string>
-    <string>05:30</string>
+    <string>05:15</string>
     <string>--env</string>
     <string>dev</string>
   </array>

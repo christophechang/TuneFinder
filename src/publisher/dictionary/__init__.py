@@ -11,7 +11,7 @@ Three phases, each its own module, one entry point:
   export.py  — aggregate per artist, fold-sort, shard, write the shard files;
   upload.py  — post the shards then the commit through PoolApiClient.
 
-  python -m src.publisher.dictionary nightly --until 05:30 --env dev
+  python -m src.publisher.dictionary nightly --until 05:15 --env dev
 
 runs all three (from the checkout, so .env and data/ resolve as they do for
 publish-pool). `crawl`, `status`, `export` and `upload` run one phase each.

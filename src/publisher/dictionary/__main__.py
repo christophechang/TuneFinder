@@ -1,6 +1,6 @@
 """`python -m src.publisher.dictionary <command>`, run from the TuneFinder checkout.
 
-  nightly --env dev [--env prod] [--until 05:30]
+  nightly --env dev [--env prod] [--until 05:15]
                      crawl (backfill, then top-up), export, upload; one summary
                      line per phase; exit 1 if the crawl errored, the export
                      failed or any upload did not commit
@@ -26,7 +26,8 @@ def _crawl(args, db, top_up: bool) -> crawl_mod.CrawlOutcome:
     deadline = crawl_mod.deadline_for(args.until, dt.datetime.now())
     outcome = crawl_mod.run_crawl(
         db,
-        lambda: crawl_mod.Client(args.interval, args.max_requests),
+        lambda: crawl_mod.Client(args.interval, args.max_requests,
+                                 deadline=deadline.timestamp() if deadline else None),
         deadline=deadline,
         top_up_when_done=top_up,
     )

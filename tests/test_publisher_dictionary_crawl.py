@@ -399,3 +399,54 @@ def test_crawl_top_up_runs_despite_failed_slices():
     assert [p["publish_date"] for p in client.params] == [
         "2016-11-01:2016-11-30", "2026-10-01:2026-10-14", "2026-09-01:2026-09-30"]
     assert _state(db, "2016-11-01")[0] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# The deadline caps every wait
+# ---------------------------------------------------------------------------
+
+def _deadline_client(response=None, error=None, left=100.0):
+    session = MagicMock()
+    session.headers = {}
+    if error is not None:
+        session.get.side_effect = error
+    else:
+        session.get.return_value = response
+    sleeps = []
+    client = crawl.Client(2.0, 0, token_fn=lambda: ("tok", "ua"), session=session,
+                          sleep=sleeps.append, clock=lambda: 1000.0, deadline=1000.0 + left)
+    return client, sleeps
+
+
+def test_crawl_retry_after_never_sleeps_past_the_deadline():
+    client, sleeps = _deadline_client(MagicMock(status_code=429, headers={"Retry-After": "300"}))
+
+    with pytest.raises(crawl.Stop, match="deadline"):
+        client.get({"genre_id": 5})
+    assert sleeps == [100.0]
+
+
+def test_crawl_network_backoff_never_sleeps_past_the_deadline():
+    client, sleeps = _deadline_client(error=ConnectionError("down"), left=10.0)
+
+    with pytest.raises(crawl.Stop, match="deadline"):
+        client.get({"genre_id": 5})
+    assert sleeps == [10.0]
+
+
+def test_crawl_wait_past_the_deadline_stops_without_sleeping():
+    client, sleeps = _deadline_client(MagicMock(status_code=503, headers={}), left=0.0)
+
+    with pytest.raises(crawl.Stop, match="deadline"):
+        client.get({"genre_id": 5})
+    assert sleeps == []
+
+
+def test_crawl_plist_stops_the_crawl_at_05_15():
+    import os
+    import plistlib
+
+    path = os.path.join(os.path.dirname(__file__), "..", "com.openclaw.tunefinder-dictionary.plist")
+    with open(path, "rb") as f:
+        args = plistlib.load(f)["ProgramArguments"]
+    assert args[args.index("--until") + 1] == "05:15"
