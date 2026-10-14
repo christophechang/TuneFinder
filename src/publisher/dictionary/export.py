@@ -151,14 +151,14 @@ def shard(entries: list[list], version: str) -> list[dict]:
 
 def crawled_through(db, today: dt.date) -> str:
     """The oldest month the crawl covers without a gap, counting back from the
-    newest: months with no `todo` slice left, stopping at the first one that
-    still has work. The top-up window is always being re-walked, so its months
+    newest: months with no `todo` or `failed` slice left, stopping at the first
+    one that still has work. The top-up window is always being re-walked, so its months
     never stop the count. Falls back to the current month before any month is
     complete."""
     window = {start.strftime("%Y-%m") for start, _ in top_up_window(today)}
     oldest = None
     for month, todo in db.execute(
-        "SELECT substr(start, 1, 7) AS month, SUM(state = 'todo') FROM slices "
+        "SELECT substr(start, 1, 7) AS month, SUM(state IN ('todo', 'failed')) FROM slices "
         "GROUP BY month ORDER BY month DESC"
     ):
         if todo:

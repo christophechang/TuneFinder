@@ -12,6 +12,11 @@ mini (night 1: 10,862 requests, 0 x 429). What it keeps:
 - **Polite.** One request every `interval` seconds; a 429 honours Retry-After
   and doubles the interval for the rest of the run; three 429s in a row end the
   run until the next night. Network errors and 5xx back off and retry.
+- **Never stalls on one slice.** A page Beatport will not serve (a status that
+  is not retried, a 5xx that outlasts its retries, a body that is not a page)
+  marks its slice `failed` with the reason and the walk moves on; a failed
+  slice gets one more try per later night. A 404 past page 1 ends a slice, and
+  a single malformed record is skipped and counted.
 - **TuneFinder's token, under TuneFinder's lock**, so a refresh never races the
   publisher's or the Sunday run's.
 
@@ -24,7 +29,7 @@ import datetime as dt
 import os
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import requests
 
@@ -48,8 +53,9 @@ LOCK_PAUSE_S = 10
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS slices (
   genre_id INTEGER, start TEXT, end TEXT,
-  state TEXT DEFAULT 'todo',            -- todo | split | done
+  state TEXT DEFAULT 'todo',            -- todo | split | done | failed
   count INTEGER, next_page INTEGER DEFAULT 1,
+  error TEXT, failed_night TEXT,        -- why and when a slice last failed
   PRIMARY KEY (genre_id, start, end));
 CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY, genre_id INTEGER, publish_date TEXT);
 CREATE TABLE IF NOT EXISTS credits (track_id INTEGER, artist_id INTEGER, role TEXT,
@@ -83,6 +89,10 @@ def _columns(db, table: str) -> set[str]:
 def _migrate(db) -> None:
     """Bring a database from the standalone crawler up to this schema."""
     with db:
+        slice_columns = _columns(db, "slices")
+        for column in ("error", "failed_night"):
+            if column not in slice_columns:
+                db.execute(f"ALTER TABLE slices ADD COLUMN {column} TEXT")
         if "seen" not in _columns(db, "artists"):
             db.execute("ALTER TABLE artists ADD COLUMN seen TEXT")
             # The newest credit already stored, so the backfill walking older
@@ -161,6 +171,20 @@ class Stop(Exception):
     """A clean end to the run: deadline, request budget, or Beatport asking us to stop."""
 
 
+class PageError(RuntimeError):
+    """A page Beatport will not serve: a status that is never retried, a 5xx that
+    outlasted every retry, or a 200 whose body is not JSON. The slice's problem,
+    not the run's — unlike a network that stays down, which ends the run."""
+
+    def __init__(self, status: int, reason: str):
+        self.status = status
+        super().__init__(f"HTTP {status}: {reason}")
+
+
+class SliceFailed(Exception):
+    """This slice cannot be walked tonight: the crawl marks it `failed` and moves on."""
+
+
 class Client:
     def __init__(self, interval, max_requests, token_fn=beatport_token,
                  session=None, sleep=time.sleep, clock=time.time):
@@ -176,6 +200,7 @@ class Client:
                                "Accept": "application/json"})
 
     def get(self, params):
+        last_5xx = None
         for attempt in range(6):
             if self.max and self.requests >= self.max:
                 raise Stop("max requests")
@@ -187,12 +212,16 @@ class Client:
             try:
                 r = self.s.get(API, params=params, timeout=60)
             except Exception as exc:
+                last_5xx = None
                 logger.warning("%s network error %s; backing off", LOG, type(exc).__name__)
                 self.sleep(30 * (attempt + 1))
                 continue
             if r.status_code == 200:
                 self.streak = 0
-                return r.json()
+                try:
+                    return r.json()
+                except ValueError:
+                    raise PageError(200, "body is not JSON") from None
             if r.status_code == 429:
                 self.streak += 1
                 ra = r.headers.get("Retry-After")
@@ -209,10 +238,13 @@ class Client:
                 self.auth()
                 continue
             if r.status_code >= 500:
+                last_5xx = r.status_code
                 logger.warning("%s %d; backing off", LOG, r.status_code)
                 self.sleep(30 * (attempt + 1))
                 continue
-            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+            raise PageError(r.status_code, r.text[:200])
+        if last_5xx is not None:
+            raise PageError(last_5xx, "still failing after six attempts")
         raise RuntimeError("gave up after six attempts")
 
 
@@ -239,30 +271,105 @@ def split(db, g, start, end) -> bool:
     return True
 
 
-def crawl_slice(db, c, g, start, end, page, deadline, now=dt.datetime.now):
+def _parse_track(t):
+    """(track id, publish date, [(artist id, name, slug, role)]) — or None when the
+    record is not the shape the crawl stores, so one bad row costs one row."""
+    if not isinstance(t, dict) or type(t.get("id")) is not int:
+        return None
+    date = t.get("publish_date")
+    if date is not None and not isinstance(date, str):
+        return None
+    credits = []
+    for role in ("artists", "remixers"):
+        people = t.get(role) or []
+        if not isinstance(people, list):
+            return None
+        for a in people:
+            if not isinstance(a, dict) or type(a.get("id")) is not int or not isinstance(a.get("name"), str):
+                return None
+            slug = a.get("slug")
+            credits.append((a["id"], a["name"], slug if isinstance(slug, str) else None, role[:-1]))
+    return t["id"], date, credits
+
+
+def crawl_slice(db, c, g, start, end, page, deadline, now=dt.datetime.now, stats=None):
+    """Walk one slice from `page` until it is done, split or the deadline passes.
+
+    A page past the first that answers 404 ends the slice (Beatport ran out of
+    pages before `next` said so). Any other page Beatport will not serve, or a
+    page that is not the expected shape, raises SliceFailed. A single malformed
+    track is skipped and counted in `stats["skipped"]`; every committed page
+    counts in `stats["pages"]`."""
+    stats = stats if stats is not None else {}
+    where = (g, start, end)
     while True:
         if deadline and now() >= deadline:
             raise Stop("deadline")
         # Default order is id-descending and pages cleanly; order_by does not.
-        d = c.get({"genre_id": g, "publish_date": f"{start}:{end}", "per_page": PER_PAGE,
-                   "page": page})
-        count = d.get("count") or 0
+        try:
+            d = c.get({"genre_id": g, "publish_date": f"{start}:{end}", "per_page": PER_PAGE,
+                       "page": page})
+        except PageError as exc:
+            if exc.status == 404 and page > 1:
+                logger.info("%s genre %s %s:%s page %d is 404; the slice is done", LOG, g, start, end, page)
+                with db:
+                    db.execute("UPDATE slices SET next_page=?, state='done' "
+                               "WHERE genre_id=? AND start=? AND end=?", (page, *where))
+                return
+            raise SliceFailed(f"page {page}: {exc}") from exc
+        count = d.get("count") if isinstance(d, dict) else None
+        results = d.get("results") if isinstance(d, dict) else None
+        if type(count or 0) is not int or not isinstance(results or [], list):
+            raise SliceFailed(f"page {page}: not a page of tracks")
+        count, results = count or 0, results or []
         if page == 1 and count >= CAP and split(db, g, start, end):
             return
-        results = d.get("results") or []
+        tracks = [_parse_track(t) for t in results]
+        skipped = tracks.count(None)
+        if skipped:
+            stats["skipped"] = stats.get("skipped", 0) + skipped
+            logger.warning("%s genre %s %s:%s page %d: skipped %d malformed records",
+                           LOG, g, start, end, page, skipped)
         with db:
-            for t in results:
-                db.execute("INSERT OR IGNORE INTO tracks VALUES (?,?,?)", (t["id"], g, t.get("publish_date")))
-                for role in ("artists", "remixers"):
-                    for a in t.get(role) or []:
-                        db.execute(UPSERT_ARTIST, (a["id"], a["name"], a.get("slug"), t.get("publish_date")))
-                        db.execute("INSERT OR IGNORE INTO credits VALUES (?,?,?)", (t["id"], a["id"], role[:-1]))
+            for track in tracks:
+                if track is None:
+                    continue
+                track_id, date, credits = track
+                db.execute("INSERT OR IGNORE INTO tracks VALUES (?,?,?)", (track_id, g, date))
+                for artist_id, name, slug, role in credits:
+                    db.execute(UPSERT_ARTIST, (artist_id, name, slug, date))
+                    db.execute("INSERT OR IGNORE INTO credits VALUES (?,?,?)", (track_id, artist_id, role))
             more = bool(d.get("next")) and results and page * PER_PAGE < min(count, CAP)
             db.execute("UPDATE slices SET count=?, next_page=?, state=? WHERE genre_id=? AND start=? AND end=?",
-                       (count, page + 1, "todo" if more else "done", g, start, end))
+                       (count, page + 1, "todo" if more else "done", *where))
+        stats["pages"] = stats.get("pages", 0) + 1
         if not more:
             return
         page += 1
+
+
+def night_of(moment: dt.datetime) -> str:
+    """The night a local moment belongs to, named by its evening's date: noon to
+    noon, so 21:30 and the 05:15 after it are one night."""
+    return (moment - dt.timedelta(hours=12)).date().isoformat()
+
+
+def mark_failed(db, g, start, end, reason: str, night: str) -> None:
+    with db:
+        db.execute("UPDATE slices SET state='failed', error=?, failed_night=? "
+                   "WHERE genre_id=? AND start=? AND end=?", (reason[:500], night, g, start, end))
+    logger.error("%s genre %s %s:%s failed: %s", LOG, g, start, end, reason)
+
+
+def retry_failed(db, night: str) -> int:
+    """Put the slices that failed on an earlier night back in the queue — each
+    failed slice gets one more try per night, never two."""
+    with db:
+        n = db.execute("UPDATE slices SET state='todo' WHERE state='failed' "
+                       "AND (failed_night IS NULL OR failed_night < ?)", (night,)).rowcount
+    if n:
+        logger.info("%s retrying %d slices that failed on an earlier night", LOG, n)
+    return n
 
 
 def counts(db) -> dict:
@@ -270,6 +377,7 @@ def counts(db) -> dict:
     return {
         "slices_done": q("SELECT COUNT(*) FROM slices WHERE state='done'"),
         "slices_todo": q("SELECT COUNT(*) FROM slices WHERE state='todo'"),
+        "slices_failed": q("SELECT COUNT(*) FROM slices WHERE state='failed'"),
         "tracks": q("SELECT COUNT(*) FROM tracks"),
         "artists": q("SELECT COUNT(*) FROM artists"),
     }
@@ -281,8 +389,11 @@ def status(db) -> None:
         "SELECT COUNT(*) FROM (SELECT artist_id FROM credits GROUP BY artist_id "
         "HAVING COUNT(DISTINCT track_id) >= 2)"
     ).fetchone()[0]
-    print(f"slices done {c['slices_done']}, todo {c['slices_todo']}; tracks {c['tracks']}; "
-          f"artists {c['artists']}; artists with 2+ tracks {two_plus}")
+    print(f"slices done {c['slices_done']}, todo {c['slices_todo']}, failed {c['slices_failed']}; "
+          f"tracks {c['tracks']}; artists {c['artists']}; artists with 2+ tracks {two_plus}")
+    for r in db.execute("SELECT genre_id, start, end, failed_night, error FROM slices "
+                        "WHERE state='failed' ORDER BY start DESC, genre_id LIMIT 20"):
+        print(" failed", r)
     for r in db.execute("SELECT * FROM runs ORDER BY started DESC LIMIT 5"):
         print(" run", r)
 
@@ -304,23 +415,34 @@ class CrawlOutcome:
     note: str
     topped_up: bool
     error: bool
+    pages: int = 0                                    # pages committed this run
+    skipped: int = 0                                  # malformed records skipped
+    failed: list[str] = field(default_factory=list)   # slices that failed this run, with why
+    retried: int = 0                                  # failed slices given another try
 
     def summary_line(self, db) -> str:
         c = counts(db)
         return (f"crawl: {self.note} after {self.requests} requests"
-                f"{' (top-up)' if self.topped_up else ''}; slices done {c['slices_done']}, "
-                f"todo {c['slices_todo']}; tracks {c['tracks']}; artists {c['artists']}")
+                f"{' (top-up)' if self.topped_up else ''}; {self.pages} pages; slices done {c['slices_done']}, "
+                f"todo {c['slices_todo']}, failed {c['slices_failed']} ({len(self.failed)} tonight, "
+                f"{self.retried} retried); skipped records {self.skipped}; "
+                f"tracks {c['tracks']}; artists {c['artists']}")
 
 
 def run_crawl(db, make_client, genres=None, deadline=None, top_up_when_done=False,
               today=None, now=dt.datetime.now) -> CrawlOutcome:
     """Walk `todo` slices newest first until none is left, the deadline passes or
-    Beatport asks us to stop. With `top_up_when_done`, the first time no slice is
-    left the top-up window is reset and walked too — once per run."""
+    Beatport asks us to stop. A slice that fails is marked `failed` and the walk
+    moves on; slices that failed on an earlier night get one more try first.
+    With `top_up_when_done`, the first time no `todo` slice is left — failed ones
+    never hold it back — the top-up window is reset and walked too, once per run."""
     genres = genre_ids() if genres is None else genres
     today = today or dt.date.today()
     seed(db, genres, today)
     started, note, c, topped, error = now().isoformat(timespec="seconds"), "finished", None, False, False
+    night = night_of(now())
+    retried = retry_failed(db, night)
+    stats, failed = {"pages": 0, "skipped": 0}, []
     try:
         c = make_client()
         while True:
@@ -333,7 +455,11 @@ def run_crawl(db, make_client, genres=None, deadline=None, top_up_when_done=Fals
                     continue
                 logger.info("%s every slice done", LOG)
                 break
-            crawl_slice(db, c, *row, deadline, now=now)
+            try:
+                crawl_slice(db, c, *row, deadline, now=now, stats=stats)
+            except SliceFailed as exc:
+                mark_failed(db, *row[:3], str(exc), night)
+                failed.append(f"genre {row[0]} {row[1]}:{row[2]} {exc}")
     except Stop as stop:
         note = str(stop)
     except Exception as exc:
@@ -345,4 +471,5 @@ def run_crawl(db, make_client, genres=None, deadline=None, top_up_when_done=Fals
                    (started, now().isoformat(timespec="seconds"), n, note))
         db.commit()
         logger.info("%s run ended (%s) after %d requests", LOG, note, n)
-    return CrawlOutcome(requests=n, note=note, topped_up=topped, error=error)
+    return CrawlOutcome(requests=n, note=note, topped_up=topped, error=error, pages=stats["pages"],
+                        skipped=stats["skipped"], failed=failed, retried=retried)

@@ -270,3 +270,132 @@ def test_crawl_connect_migrates_a_standalone_database(tmp_path):
     crawl.crawl_slice(db, _one_page(_named(3, "2026-08-10", 7, "DJ Older")),
                       5, "2026-08-01", "2026-08-31", 1, None)
     assert db.execute("SELECT name FROM artists").fetchall() == [("DJ Old",)]
+
+
+# ---------------------------------------------------------------------------
+# Failing slices never stall the crawl
+# ---------------------------------------------------------------------------
+
+class ScriptedClient:
+    """Answers per (publish_date, page) from a script: a dict is the page, an
+    exception is raised; anything unscripted is an empty last page."""
+
+    def __init__(self, script):
+        self.script, self.params, self.requests = script, [], 0
+
+    def get(self, params):
+        self.params.append(dict(params))
+        self.requests += 1
+        answer = self.script.get((params["publish_date"], params["page"]),
+                                 {"count": 0, "results": [], "next": None})
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+def _state(db, start):
+    return db.execute("SELECT state, error, failed_night FROM slices WHERE start=?", (start,)).fetchone()
+
+
+def test_crawl_page_past_the_first_answering_404_finishes_the_slice():
+    db = _db()
+    _insert(db, [(5, "2026-09-01", "2026-09-30", "todo", None, 1)])
+    client = ScriptedClient({
+        ("2026-09-01:2026-09-30", 1): {"count": 500, "next": "p2", "results": [_track(1, "2026-09-02", [10])]},
+        ("2026-09-01:2026-09-30", 2): crawl.PageError(404, "not found"),
+    })
+
+    outcome = crawl.run_crawl(db, lambda: client, genres=[5], today=TODAY)
+
+    assert _slices(db) == [(5, "2026-09-01", "2026-09-30", "done", 2)]
+    assert outcome.failed == [] and outcome.error is False and outcome.pages == 1
+
+
+def test_crawl_failing_slice_is_marked_and_the_crawl_moves_on():
+    db = _db()
+    _insert(db, [(5, "2026-10-01", "2026-10-14", "todo", None, 1),     # newest: Beatport refuses it
+                 (5, "2026-09-01", "2026-09-30", "todo", None, 1),     # page 1 is not a page
+                 (5, "2026-08-01", "2026-08-31", "todo", None, 1)])
+    client = ScriptedClient({
+        ("2026-10-01:2026-10-14", 1): crawl.PageError(400, "bad request"),
+        ("2026-09-01:2026-09-30", 1): {"count": "lots", "results": None},
+    })
+    night = dt.datetime(2026, 10, 14, 22, 0)
+
+    outcome = crawl.run_crawl(db, lambda: client, genres=[5], today=TODAY, now=lambda: night)
+
+    assert _state(db, "2026-10-01") == ("failed", "page 1: HTTP 400: bad request", "2026-10-14")
+    assert _state(db, "2026-09-01")[:2] == ("failed", "page 1: not a page of tracks")
+    assert _state(db, "2026-08-01")[0] == "done"                         # walked past the failures
+    assert outcome.error is False and outcome.note == "finished"
+    assert len(outcome.failed) == 2 and "HTTP 400" in outcome.failed[0]
+    assert "failed 2 (2 tonight" in outcome.summary_line(db)
+
+
+def test_crawl_5xx_that_outlasts_its_retries_fails_only_its_slice():
+    session = MagicMock()
+    session.headers = {}
+    session.get.return_value = MagicMock(status_code=503, headers={}, text="unavailable")
+    client = crawl.Client(0, 0, token_fn=lambda: ("tok", "ua"), session=session,
+                          sleep=lambda s: None, clock=lambda: 1000.0)
+    db = _db()
+    _insert(db, [(5, "2026-09-01", "2026-09-30", "todo", None, 1)])
+
+    outcome = crawl.run_crawl(db, lambda: client, genres=[5], today=TODAY)
+
+    assert session.get.call_count == 6
+    assert _state(db, "2026-09-01")[:2] == ("failed", "page 1: HTTP 503: still failing after six attempts")
+    assert outcome.error is False
+
+
+def test_crawl_malformed_records_are_skipped_and_counted():
+    db = _db()
+    _insert(db, [(5, "2026-09-01", "2026-09-30", "todo", None, 1)])
+    good = _track(1, "2026-09-02", [10])
+    client = ScriptedClient({("2026-09-01:2026-09-30", 1): {"count": 4, "next": None, "results": [
+        good,
+        {"id": "two", "artists": []},                                    # id not a number
+        {"id": 3, "publish_date": "2026-09-03", "artists": [{"name": "No Id"}]},
+        "not a record",
+    ]}})
+
+    outcome = crawl.run_crawl(db, lambda: client, genres=[5], today=TODAY)
+
+    assert outcome.skipped == 3 and outcome.failed == []
+    assert db.execute("SELECT id FROM tracks").fetchall() == [(1,)]
+    assert _state(db, "2026-09-01")[0] == "done"
+
+
+def test_crawl_failed_slice_is_retried_once_per_later_night():
+    db = _db()
+    _insert(db, [(5, "2026-09-01", "2026-09-30", "todo", None, 1)])
+    refuse = ScriptedClient({("2026-09-01:2026-09-30", 1): crawl.PageError(400, "bad request")})
+    evening, morning = dt.datetime(2026, 10, 14, 22, 0), dt.datetime(2026, 10, 15, 4, 0)
+
+    crawl.run_crawl(db, lambda: refuse, genres=[5], today=TODAY, now=lambda: evening)
+    again = crawl.run_crawl(db, lambda: refuse, genres=[5], today=TODAY, now=lambda: morning)
+    assert refuse.requests == 1 and again.retried == 0           # same night: not retried
+
+    next_night = dt.datetime(2026, 10, 15, 22, 0)
+    retried = crawl.run_crawl(db, lambda: refuse, genres=[5], today=TODAY, now=lambda: next_night)
+    assert refuse.requests == 2 and retried.retried == 1         # one more try, still failing
+    assert _state(db, "2026-09-01") == ("failed", "page 1: HTTP 400: bad request", "2026-10-15")
+
+    fine = ScriptedClient({})
+    crawl.run_crawl(db, lambda: fine, genres=[5], today=TODAY, now=lambda: dt.datetime(2026, 10, 16, 22, 0))
+    assert _state(db, "2026-09-01")[0] == "done"
+
+
+def test_crawl_top_up_runs_despite_failed_slices():
+    db = _db()
+    _insert(db, [(5, "2016-11-01", "2016-11-30", "todo", None, 1),
+                 (5, "2026-09-01", "2026-09-30", "done", 900, 6),
+                 (5, "2026-10-01", "2026-10-09", "done", 400, 3)])
+    client = ScriptedClient({("2016-11-01:2016-11-30", 1): crawl.PageError(403, "forbidden")})
+
+    outcome = crawl.run_crawl(db, lambda: client, genres=[5], top_up_when_done=True, today=TODAY)
+
+    assert outcome.topped_up is True
+    assert [p["publish_date"] for p in client.params] == [
+        "2016-11-01:2016-11-30", "2026-10-01:2026-10-14", "2026-09-01:2026-09-30"]
+    assert _state(db, "2016-11-01")[0] == "failed"

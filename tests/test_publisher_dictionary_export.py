@@ -215,3 +215,16 @@ def test_export_write_refuses_a_file_where_the_directory_goes(tmp_path):
     with pytest.raises(export.ExportError):
         export.write_export(built, str(tmp_path / "export"))
     assert (tmp_path / "export").read_text() == "not a directory"
+
+
+def test_export_crawled_through_stops_at_a_failed_slice():
+    db = crawl.connect(":memory:")
+    db.executemany("INSERT INTO slices (genre_id, start, end, state) VALUES (?,?,?,?)", [
+        (5, "2026-10-01", "2026-10-14", "done"),
+        (5, "2026-09-01", "2026-09-30", "done"),
+        (5, "2026-08-01", "2026-08-31", "done"),
+        (12, "2026-08-01", "2026-08-31", "failed"),
+        (5, "2026-07-01", "2026-07-31", "done"),
+    ])
+
+    assert export.crawled_through(db, dt.date(2026, 10, 14)) == "2026-09"
