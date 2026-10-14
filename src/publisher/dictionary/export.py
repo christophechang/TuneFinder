@@ -22,6 +22,7 @@ shards. The version is the UTC minute of the export.
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import unicodedata
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ MAX_NAME_LENGTH = 100
 VERSION_FORMAT = "%Y-%m-%dT%H:%MZ"
 
 COMMIT_FILE = "commit.json"
+_EXPORT_FILE = re.compile(r"shard-\d{3}\.json|commit\.json")
 
 
 class ExportError(RuntimeError):
@@ -202,10 +204,30 @@ def shard_file(index: int) -> str:
     return f"shard-{index:03d}.json"
 
 
+def _check_clearable(path: str) -> None:
+    """Refuse to delete `path` unless it holds nothing but an export's own files —
+    a mistyped --export-dir must never cost anyone a directory."""
+    if not os.path.lexists(path):
+        return
+    if os.path.islink(path) or not os.path.isdir(path):
+        raise ExportError(f"{path} is not an export directory; not replacing it")
+    strangers = [name for name in os.listdir(path)
+                 if not _EXPORT_FILE.fullmatch(name)
+                 or os.path.islink(os.path.join(path, name))
+                 or not os.path.isfile(os.path.join(path, name))]
+    if strangers:
+        raise ExportError(f"{path} holds files that are not an export's "
+                          f"({', '.join(sorted(strangers)[:5])}); not replacing it")
+
+
 def write_export(export: Export, out_dir: str) -> None:
     """Replace `out_dir` with this export's shard files and commit.json, written
-    beside it first so a crash never leaves a mixed export behind."""
+    beside it first so a crash never leaves a mixed export behind. Either
+    directory is cleared only when it holds nothing but shard-NNN.json and
+    commit.json files."""
     tmp = out_dir.rstrip(os.sep) + ".tmp"
+    _check_clearable(out_dir)
+    _check_clearable(tmp)
     shutil.rmtree(tmp, ignore_errors=True)
     os.makedirs(tmp)
     for payload in export.shards:

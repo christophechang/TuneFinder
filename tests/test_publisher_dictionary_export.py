@@ -190,3 +190,28 @@ def test_export_build_and_write(tmp_path):
 def test_export_refuses_an_empty_crawl():
     with pytest.raises(export.ExportError):
         export.build_export(crawl.connect(":memory:"), now=NOW)
+
+
+@pytest.mark.parametrize("where", ["export", "export.tmp"])
+def test_export_write_refuses_to_clear_a_directory_with_other_files(tmp_path, where):
+    db = _db(artists=[(1, "Burial")], tracks=[(100, 9, "2024-06-01")], credits=[(100, 1, "artist")])
+    built = export.build_export(db, now=NOW)
+    target = tmp_path / where
+    target.mkdir()
+    (target / "shard-000.json").write_text("{}")
+    (target / "notes.txt").write_text("keep me")
+
+    with pytest.raises(export.ExportError, match="notes.txt"):
+        export.write_export(built, str(tmp_path / "export"))
+
+    assert (target / "notes.txt").read_text() == "keep me"
+
+
+def test_export_write_refuses_a_file_where_the_directory_goes(tmp_path):
+    db = _db(artists=[(1, "Burial")], tracks=[(100, 9, "2024-06-01")], credits=[(100, 1, "artist")])
+    built = export.build_export(db, now=NOW)
+    (tmp_path / "export").write_text("not a directory")
+
+    with pytest.raises(export.ExportError):
+        export.write_export(built, str(tmp_path / "export"))
+    assert (tmp_path / "export").read_text() == "not a directory"
