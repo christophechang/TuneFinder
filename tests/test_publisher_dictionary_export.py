@@ -34,7 +34,7 @@ NOW = dt.datetime(2026, 10, 14, 5, 40, 12, tzinfo=dt.timezone.utc)
 
 def _db(artists, tracks, credits):
     db = crawl.connect(":memory:")
-    db.executemany("INSERT INTO artists VALUES (?,?,?)", [(i, n, None) for i, n in artists])
+    db.executemany("INSERT INTO artists (id, name, slug) VALUES (?,?,?)", [(i, n, None) for i, n in artists])
     db.executemany("INSERT INTO tracks VALUES (?,?,?)", tracks)
     db.executemany("INSERT INTO credits VALUES (?,?,?)", credits)
     db.commit()

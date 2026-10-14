@@ -177,7 +177,7 @@ def nightly_env(tmp_path, monkeypatch):
     """A database with one crawled credit; the crawl itself and the upload faked."""
     db_path = str(tmp_path / "crawl.db")
     db = crawl.connect(db_path)
-    db.execute("INSERT INTO artists VALUES (1, 'Burial', 'burial')")
+    db.execute("INSERT INTO artists (id, name, slug) VALUES (1, 'Burial', 'burial')")
     db.execute("INSERT INTO tracks VALUES (100, 9, '2024-06-01')")
     db.execute("INSERT INTO credits VALUES (100, 1, 'artist')")
     db.commit()

@@ -43,7 +43,8 @@ YEARS_BACK = 10
 LOCK_TRIES = 60
 LOCK_PAUSE_S = 10
 
-# The standalone crawler's schema, unchanged — the database on the mini carries on.
+# The standalone crawler's schema — the database on the mini carries on. Columns
+# added since are created here for a new file and by `_migrate` for an old one.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS slices (
   genre_id INTEGER, start TEXT, end TEXT,
@@ -53,7 +54,8 @@ CREATE TABLE IF NOT EXISTS slices (
 CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY, genre_id INTEGER, publish_date TEXT);
 CREATE TABLE IF NOT EXISTS credits (track_id INTEGER, artist_id INTEGER, role TEXT,
   PRIMARY KEY (track_id, artist_id, role)) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS artists (id INTEGER PRIMARY KEY, name TEXT, slug TEXT);
+CREATE TABLE IF NOT EXISTS artists (id INTEGER PRIMARY KEY, name TEXT, slug TEXT,
+  seen TEXT);                           -- publish date of the credit the name came from
 CREATE TABLE IF NOT EXISTS runs (started TEXT, ended TEXT, requests INTEGER, note TEXT);
 """
 
@@ -70,7 +72,27 @@ def connect(db_path: str) -> sqlite3.Connection:
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     db = sqlite3.connect(db_path)
     db.executescript(SCHEMA)
+    _migrate(db)
     return db
+
+
+def _columns(db, table: str) -> set[str]:
+    return {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+
+
+def _migrate(db) -> None:
+    """Bring a database from the standalone crawler up to this schema."""
+    with db:
+        if "seen" not in _columns(db, "artists"):
+            db.execute("ALTER TABLE artists ADD COLUMN seen TEXT")
+            # The newest credit already stored, so the backfill walking older
+            # months never puts an artist's old spelling back.
+            db.execute(
+                "UPDATE artists SET seen = m.seen FROM ("
+                "  SELECT c.artist_id AS id, MAX(t.publish_date) AS seen FROM credits c "
+                "  JOIN tracks t ON t.id = c.track_id GROUP BY c.artist_id) AS m "
+                "WHERE m.id = artists.id"
+            )
 
 
 def months(today: dt.date):
@@ -194,6 +216,16 @@ class Client:
         raise RuntimeError("gave up after six attempts")
 
 
+# An artist seen again keeps the spelling from its newest credit: Beatport renames
+# artists, and the backfill walks months newest first, so "last written" is not
+# "newest". A credit with no date never overwrites a dated one.
+UPSERT_ARTIST = (
+    "INSERT INTO artists (id, name, slug, seen) VALUES (?,?,?,?) "
+    "ON CONFLICT(id) DO UPDATE SET name = excluded.name, slug = excluded.slug, seen = excluded.seen "
+    "WHERE artists.seen IS NULL OR excluded.seen >= artists.seen"
+)
+
+
 def split(db, g, start, end) -> bool:
     s, e = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
     if s >= e:
@@ -223,7 +255,7 @@ def crawl_slice(db, c, g, start, end, page, deadline, now=dt.datetime.now):
                 db.execute("INSERT OR IGNORE INTO tracks VALUES (?,?,?)", (t["id"], g, t.get("publish_date")))
                 for role in ("artists", "remixers"):
                     for a in t.get(role) or []:
-                        db.execute("INSERT OR IGNORE INTO artists VALUES (?,?,?)", (a["id"], a["name"], a.get("slug")))
+                        db.execute(UPSERT_ARTIST, (a["id"], a["name"], a.get("slug"), t.get("publish_date")))
                         db.execute("INSERT OR IGNORE INTO credits VALUES (?,?,?)", (t["id"], a["id"], role[:-1]))
             more = bool(d.get("next")) and results and page * PER_PAGE < min(count, CAP)
             db.execute("UPDATE slices SET count=?, next_page=?, state=? WHERE genre_id=? AND start=? AND end=?",

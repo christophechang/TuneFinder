@@ -214,3 +214,59 @@ def test_crawl_deadline_stops_the_run_cleanly():
 
     assert outcome.note == "deadline" and outcome.error is False
     assert client.params == []
+
+
+def _named(track_id, date, artist_id, name):
+    return {"id": track_id, "publish_date": date,
+            "artists": [{"id": artist_id, "name": name, "slug": name.lower().replace(" ", "-")}]}
+
+
+def _one_page(*tracks):
+    client = MagicMock()
+    client.get.return_value = {"count": len(tracks), "next": None, "results": list(tracks)}
+    return client
+
+
+def test_crawl_artist_seen_again_takes_the_newest_spelling():
+    db = _db()
+    _insert(db, [(5, "2026-09-01", "2026-09-30", "todo", None, 1),
+                 (5, "2026-08-01", "2026-08-31", "todo", None, 1),
+                 (5, "2026-10-01", "2026-10-14", "todo", None, 1)])
+
+    crawl.crawl_slice(db, _one_page(_named(1, "2026-09-10", 7, "DJ Old")),
+                      5, "2026-09-01", "2026-09-30", 1, None)
+    # the backfill reaching an older month never puts an older spelling back
+    crawl.crawl_slice(db, _one_page(_named(2, "2026-08-10", 7, "DJ Older")),
+                      5, "2026-08-01", "2026-08-31", 1, None)
+    assert db.execute("SELECT name, slug FROM artists").fetchall() == [("DJ Old", "dj-old")]
+
+    # a newer credit renames the artist
+    crawl.crawl_slice(db, _one_page(_named(3, "2026-10-02", 7, "DJ New")),
+                      5, "2026-10-01", "2026-10-14", 1, None)
+    assert db.execute("SELECT name, slug, seen FROM artists").fetchall() == [
+        ("DJ New", "dj-new", "2026-10-02")]
+
+
+def test_crawl_connect_migrates_a_standalone_database(tmp_path):
+    import sqlite3
+
+    path = str(tmp_path / "crawl.db")
+    old = sqlite3.connect(path)
+    old.executescript(
+        "CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT, slug TEXT);"
+        "CREATE TABLE tracks (id INTEGER PRIMARY KEY, genre_id INTEGER, publish_date TEXT);"
+        "CREATE TABLE credits (track_id INTEGER, artist_id INTEGER, role TEXT,"
+        "  PRIMARY KEY (track_id, artist_id, role)) WITHOUT ROWID;"
+        "INSERT INTO artists VALUES (7, 'DJ Old', 'dj-old');"
+        "INSERT INTO tracks VALUES (1, 5, '2026-09-10'), (2, 5, '2026-07-01');"
+        "INSERT INTO credits VALUES (1, 7, 'artist'), (2, 7, 'remixer');"
+    )
+    old.commit()
+    old.close()
+
+    db = crawl.connect(path)
+    assert db.execute("SELECT name, seen FROM artists").fetchall() == [("DJ Old", "2026-09-10")]
+    db.execute("INSERT INTO slices (genre_id, start, end) VALUES (5, '2026-08-01', '2026-08-31')")
+    crawl.crawl_slice(db, _one_page(_named(3, "2026-08-10", 7, "DJ Older")),
+                      5, "2026-08-01", "2026-08-31", 1, None)
+    assert db.execute("SELECT name FROM artists").fetchall() == [("DJ Old",)]
