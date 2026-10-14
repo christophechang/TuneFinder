@@ -508,3 +508,17 @@ def test_crawl_top_up_cut_short_finishes_on_a_later_night_and_failures_hold_it_o
                     now=lambda: dt.datetime(2026, 10, 15, 22, 0))
     assert _state(db, "2026-08-01")[0] == "done"                   # retried on the next night
     assert crawl.get_meta(db, "top_up_finished") == "2026-10-14"   # the top-up's own day
+
+
+def test_crawl_plist_install_notes_create_the_log_directory():
+    import os
+    import plistlib
+    import re
+
+    path = os.path.join(os.path.dirname(__file__), "..", "com.openclaw.tunefinder-dictionary.plist")
+    with open(path, "rb") as f:
+        raw = f.read()
+    plist = plistlib.loads(raw)
+    log_dirs = {os.path.dirname(plist["StandardOutPath"]), os.path.dirname(plist["StandardErrorPath"])}
+    made = set(re.findall(r"mkdir -p (\S+)", raw.decode()))
+    assert log_dirs <= made

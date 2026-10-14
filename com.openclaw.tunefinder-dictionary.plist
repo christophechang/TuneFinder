@@ -8,7 +8,13 @@
      Replaces com.openclaw.artist-crawl (unload that first); the database stays at
      ~/OpenClaw/Automations/artist-crawl/crawl.db, the default database path.
      Add a second "env" pair (prod) only once prod serves the dictionary routes.
-     Loading this job does not change com.openclaw.tune-finder or the publisher. -->
+     Loading this job does not change com.openclaw.tune-finder or the publisher.
+
+     Install (launchd does not create the log directory; without it the job
+     never starts and says nothing):
+       mkdir -p /Users/YOUR_ADMIN_USER/Documents/Development/TuneFinder/logs
+       cp com.openclaw.tunefinder-dictionary.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.openclaw.tunefinder-dictionary.plist -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
