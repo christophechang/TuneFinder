@@ -391,3 +391,101 @@ def test_upload_to_env_uploads_when_the_taxonomy_matches(tmp_path, monkeypatch):
 
     assert outcome.ok
     assert [c[0] for c in api.mock_calls] == ["get_config", "post_dictionary_shard", "post_dictionary_commit"]
+
+
+# ---------------------------------------------------------------------------
+# Alerts
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def sent(monkeypatch):
+    messages = []
+    monkeypatch.setattr(entry, "_make_poster", lambda: messages.append)
+    return messages
+
+
+def _crawl_returns(monkeypatch, phases, **fields):
+    def fake_run_crawl(db, make_client, deadline=None, top_up_when_done=False, **_):
+        phases.append(("crawl", top_up_when_done))
+        return crawl.CrawlOutcome(**{"requests": 10, "note": "finished", "topped_up": False,
+                                     "error": False, "pages": 5, **fields})
+
+    monkeypatch.setattr(crawl, "run_crawl", fake_run_crawl)
+
+
+def test_nightly_alerts_an_upload_failure_once_per_night(nightly_env, sent, monkeypatch):
+    db_path, phases, set_upload = nightly_env
+    set_upload(ok=False)
+    args = ["--db", db_path, "nightly", "--env", "dev", "--env", "prod"]
+
+    assert entry.main(args) == 1
+    assert entry.main(args) == 1                                   # same night, run again
+    assert sent == ["artist dictionary: upload failed — dev: status=503 error=transport detail=503; "
+                    "prod: status=503 error=transport detail=503"]
+
+    monkeypatch.setattr(entry, "_now", lambda: dt.datetime(2026, 10, 15, 21, 30))
+    assert entry.main(args) == 1
+    assert len(sent) == 2                                          # the next night alerts again
+
+
+def test_nightly_alerts_crawl_errors_and_failed_slices_in_one_message(nightly_env, sent, monkeypatch):
+    db_path, phases, set_upload = nightly_env
+    set_upload(ok=True)
+    _crawl_returns(monkeypatch, phases, error=True, note="error: RuntimeError('gave up')",
+                   failed=["genre 5 2026-09-01:2026-09-30 page 1: HTTP 400: bad"])
+
+    assert entry.main(["--db", db_path, "nightly", "--env", "dev"]) == 1
+
+    assert len(sent) == 1
+    assert sent[0].startswith("artist dictionary: crawl error: RuntimeError")
+    assert "1 slices failed: genre 5 2026-09-01:2026-09-30 page 1: HTTP 400: bad" in sent[0]
+
+
+def test_nightly_alerts_a_night_without_progress_while_slices_remain(nightly_env, sent, monkeypatch):
+    db_path, phases, set_upload = nightly_env
+    set_upload(ok=True)
+    db = crawl.connect(db_path)
+    db.execute("INSERT INTO slices (genre_id, start, end) VALUES (5, '2016-11-01', '2016-11-30')")
+    db.commit()
+    db.close()
+    _crawl_returns(monkeypatch, phases, pages=0, note="three 429s in a row")
+
+    assert entry.main(["--db", db_path, "nightly", "--env", "dev"]) == 0
+
+    assert sent == ["artist dictionary: no crawl progress (three 429s in a row) with 1 slices todo "
+                    "and 0 failed"]
+
+
+def test_nightly_stays_quiet_on_a_good_night(nightly_env, sent):
+    db_path, phases, set_upload = nightly_env
+    set_upload(ok=True)
+
+    assert entry.main(["--db", db_path, "nightly", "--env", "dev"]) == 0
+    assert sent == []
+
+
+def test_export_failure_alerts(nightly_env, sent, monkeypatch):
+    db_path, phases, set_upload = nightly_env
+    set_upload(ok=True)
+
+    def broken(db, taxonomy=None, now=None):
+        raise export.ExportError("crawl.db holds no dated artist credits")
+
+    monkeypatch.setattr(export, "build_export", broken)
+
+    assert entry.main(["--db", db_path, "nightly", "--env", "dev"]) == 1
+    assert sent == ["artist dictionary: export failed: ExportError: crawl.db holds no dated artist credits"]
+    assert ("upload", "dev") not in phases
+
+
+def test_an_alert_that_cannot_be_sent_never_loses_the_run(nightly_env, monkeypatch):
+    db_path, phases, set_upload = nightly_env
+    set_upload(ok=False)
+
+    def no_settings():
+        raise RuntimeError("no discord token")
+
+    monkeypatch.setattr(entry, "_make_poster", no_settings)
+
+    assert entry.main(["--db", db_path, "nightly", "--env", "dev"]) == 1
+    assert phases[-1] == ("upload", "dev")

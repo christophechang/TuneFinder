@@ -5,6 +5,10 @@
                      line per phase; exit 1 if the crawl errored, the export
                      failed or any upload did not commit
 
+Crawl errors and failed slices, a night with no crawl progress while slices
+remain, an export failure and an upload failure each raise one Discord alert
+(publish-pool's alerter) at most once per night.
+
 Every command but `status` holds `<crawl.db>.lock` for its whole run; a second
 one exits 3. An --until more than nine hours away is refused (exit 2).
   crawl [--until HH:MM] [--top-up]
@@ -56,7 +60,37 @@ def single_run(db_path: str):
         os.close(fd)  # closing the fd releases the flock
 
 
-def _crawl(args, db, top_up: bool) -> crawl_mod.CrawlOutcome:
+def _make_poster():
+    """publish-pool's Discord alerter: `summarise_error` on the text, and an
+    undelivered alert logged rather than raised."""
+    from src.config import load_settings
+    from src.publisher.run import _alerter
+
+    return _alerter(load_settings(), None, dry_run=False)
+
+
+class Alerts:
+    """Discord alerts, at most one per kind per night. The night is remembered in
+    crawl.db, so a manual run later the same night does not repeat one."""
+
+    def __init__(self, db, night: str):
+        self.db, self.night, self._poster = db, night, None
+
+    def send(self, kind: str, message: str) -> None:
+        key = f"alert:{kind}"
+        if crawl_mod.get_meta(self.db, key) == self.night:
+            logger.info("%s %s alert already sent tonight; not repeating: %s", LOG, kind, message)
+            return
+        try:
+            if self._poster is None:
+                self._poster = _make_poster()
+            self._poster(f"artist dictionary: {message}")
+            crawl_mod.set_meta(self.db, key, self.night)
+        except Exception as exc:  # an alert that cannot go must not lose the run
+            logger.warning("%s %s alert not sent: %s", LOG, kind, exc)
+
+
+def _crawl(args, db, top_up: bool, alerts: Alerts) -> crawl_mod.CrawlOutcome:
     deadline = args.deadline
     outcome = crawl_mod.run_crawl(
         db,
@@ -66,36 +100,54 @@ def _crawl(args, db, top_up: bool) -> crawl_mod.CrawlOutcome:
         top_up_when_done=top_up,
     )
     logger.info("%s %s", LOG, outcome.summary_line(db))
+    problems = []
+    if outcome.error:
+        problems.append(f"crawl {outcome.note}")
+    if outcome.failed:
+        shown = "; ".join(outcome.failed[:3])
+        more = f" (+{len(outcome.failed) - 3} more)" if len(outcome.failed) > 3 else ""
+        problems.append(f"{len(outcome.failed)} slices failed: {shown}{more}")
+    if problems:
+        alerts.send("crawl", "; ".join(problems))
+    left = crawl_mod.counts(db)
+    if outcome.pages == 0 and left["slices_todo"] + left["slices_failed"]:
+        alerts.send("stalled", f"no crawl progress ({outcome.note}) with {left['slices_todo']} slices "
+                               f"todo and {left['slices_failed']} failed")
     return outcome
 
 
-def _export(db, export_dir: str) -> export_mod.Export:
-    export = export_mod.build_export(db)
-    export_mod.write_export(export, export_dir)
+def _export(db, export_dir: str, alerts: Alerts) -> export_mod.Export | None:
+    try:
+        export = export_mod.build_export(db)
+        export_mod.write_export(export, export_dir)
+    except Exception as exc:
+        logger.error("%s export failed: %s: %s", LOG, type(exc).__name__, exc)
+        alerts.send("export", f"export failed: {type(exc).__name__}: {exc}")
+        return None
     logger.info("%s %s", LOG, export.summary_line())
     return export
 
 
-def _upload(envs: list[str], export_dir: str) -> bool:
+def _upload(envs: list[str], export_dir: str, alerts: Alerts) -> bool:
     from src.config import load_settings
 
     settings = load_settings()
-    ok = True
+    failed = []
     for env in envs:
         outcome = upload_mod.upload_to_env(settings, env, export_dir)
         logger.info("%s %s", LOG, outcome.summary_line())
-        ok = ok and outcome.ok
-    return ok
+        if not outcome.ok:
+            failed.append(f"{env}: {outcome.error or 'not committed'}")
+    if failed:
+        alerts.send("upload", "upload failed — " + "; ".join(failed))
+    return not failed
 
 
-def nightly(args, db, export_dir: str) -> int:
-    crawled = _crawl(args, db, top_up=True)
-    try:
-        _export(db, export_dir)
-    except Exception as exc:
-        logger.error("%s export failed: %s: %s", LOG, type(exc).__name__, exc)
+def nightly(args, db, export_dir: str, alerts: Alerts) -> int:
+    crawled = _crawl(args, db, top_up=True, alerts=alerts)
+    if _export(db, export_dir, alerts) is None:
         return 1
-    uploaded = _upload(args.env, export_dir)
+    uploaded = _upload(args.env, export_dir, alerts)
     return 0 if uploaded and not crawled.error else 1
 
 
@@ -158,16 +210,16 @@ def main(argv=None) -> int:
 def _run(args) -> int:
     db = crawl_mod.connect(args.db)
     export_dir = args.export_dir or default_export_dir(args.db)
+    alerts = Alerts(db, crawl_mod.night_of(_now()))
     try:
         if args.command == "nightly":
-            return nightly(args, db, export_dir)
+            return nightly(args, db, export_dir, alerts)
         if args.command == "crawl":
-            return 1 if _crawl(args, db, top_up=args.top_up).error else 0
+            return 1 if _crawl(args, db, top_up=args.top_up, alerts=alerts).error else 0
         if args.command == "export":
-            _export(db, export_dir)
-            return 0
+            return 0 if _export(db, export_dir, alerts) else 1
         if args.command == "upload":
-            return 0 if _upload(args.env, export_dir) else 1
+            return 0 if _upload(args.env, export_dir, alerts) else 1
     finally:
         db.close()
     return 2
