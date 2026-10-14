@@ -291,3 +291,53 @@ def test_second_dictionary_run_exits_while_the_first_holds_the_lock(nightly_env,
     assert code == 3 and phases == []
     assert "another dictionary run holds" in capsys.readouterr().err
     assert entry.main(["--db", db_path, *command]) == 0      # free again once released
+
+
+# ---------------------------------------------------------------------------
+# 409s on the commit
+# ---------------------------------------------------------------------------
+
+def test_upload_stale_version_naming_our_version_is_committed(tmp_path):
+    out, _ = _export_dir(tmp_path, shards=1)
+    api = _api()
+    api.post_dictionary_commit.side_effect = PoolApiError(
+        409, "stale_version", "active version is 2026-10-14T05:40Z")
+    sleep = MagicMock()
+
+    outcome = upload.upload(api, out, "dev", sleep=sleep)
+
+    assert outcome.ok and outcome.committed
+    assert api.post_dictionary_commit.call_count == 1
+    sleep.assert_not_called()
+
+
+def test_upload_stale_version_naming_another_version_fails(tmp_path):
+    out, _ = _export_dir(tmp_path, shards=1)
+    api = _api()
+    api.post_dictionary_commit.side_effect = PoolApiError(
+        409, "stale_version", "active version is 2026-10-15T05:40Z")
+
+    outcome = upload.upload(api, out, "dev", sleep=MagicMock())
+
+    assert not outcome.ok and not outcome.committed
+    assert api.post_dictionary_commit.call_count == 1
+
+
+@pytest.mark.parametrize("error", ["incomplete_version", "commit_conflict"])
+def test_upload_retries_the_commit_once(tmp_path, error):
+    out, built = _export_dir(tmp_path, shards=1)
+    api = _api()
+    api.post_dictionary_commit.side_effect = [PoolApiError(409, error, "x"), {"version": built.version}]
+    sleep = MagicMock()
+
+    outcome = upload.upload(api, out, "dev", sleep=sleep)
+
+    assert outcome.ok and api.post_dictionary_commit.call_count == 2
+    sleep.assert_called_once_with(upload.COMMIT_RETRY_PAUSE_S)
+    assert api.post_dictionary_shard.call_count == 1          # shards are not re-posted
+
+    api = _api()
+    api.post_dictionary_commit.side_effect = PoolApiError(409, error, "x")
+    outcome = upload.upload(api, out, "dev", sleep=MagicMock())
+    assert not outcome.ok and api.post_dictionary_commit.call_count == 2
+    assert outcome.error == f"status=409 error={error} detail=x"

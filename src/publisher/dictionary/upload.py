@@ -5,9 +5,16 @@ Shards 0..total-1 in order, then the commit — and the commit only when every
 shard was acknowledged. The API writes shards to its inactive slot and flips
 only on a commit that counts them all, so a failure anywhere before the commit
 leaves the live dictionary as it was.
+
+A commit refused with 409 is read, not just reported (CONTRACTS §2):
+`stale_version` naming our own version means the commit already landed and its
+answer was lost, so it counts as committed; `incomplete_version` (a shard write
+not yet visible) and `commit_conflict` (another commit won the manifest race)
+are retried once after a short pause, then fail.
 """
 import json
 import os
+import time
 from dataclasses import dataclass
 
 from src.logger import get_logger
@@ -16,6 +23,9 @@ from src.publisher.dictionary import LOG
 from src.publisher.dictionary.export import COMMIT_FILE, shard_file
 
 logger = get_logger(__name__)
+
+COMMIT_RETRY_PAUSE_S = 5
+_COMMIT_RETRIED = ("incomplete_version", "commit_conflict")
 
 
 @dataclass
@@ -43,7 +53,27 @@ def _read(path: str) -> dict:
         return json.load(f)
 
 
-def upload(client, export_dir: str, env: str) -> UploadOutcome:
+def _commit(client, commit: dict, env: str, sleep) -> None:
+    for attempt in range(2):
+        try:
+            client.post_dictionary_commit(commit)
+            return
+        except PoolApiError as exc:
+            if exc.status != 409:
+                raise
+            if exc.error == "stale_version" and commit["version"] in (exc.detail or ""):
+                logger.info("%s upload %s: version %s is already active; the commit had landed",
+                            LOG, env, commit["version"])
+                return
+            if exc.error in _COMMIT_RETRIED and attempt == 0:
+                logger.warning("%s upload %s: commit refused (%s); retrying once in %ss",
+                               LOG, env, exc.error, COMMIT_RETRY_PAUSE_S)
+                sleep(COMMIT_RETRY_PAUSE_S)
+                continue
+            raise
+
+
+def upload(client, export_dir: str, env: str, sleep=time.sleep) -> UploadOutcome:
     outcome = UploadOutcome(env=env)
     try:
         commit = _read(os.path.join(export_dir, COMMIT_FILE))
@@ -55,7 +85,7 @@ def upload(client, export_dir: str, env: str) -> UploadOutcome:
             body = client.post_dictionary_shard(payload)
             outcome.shards_posted += 1
             outcome.stored += int(body.get("stored") or 0)
-        client.post_dictionary_commit(commit)
+        _commit(client, commit, env, sleep)
         outcome.committed = True
     except PoolApiError as exc:
         outcome.error = str(exc)
