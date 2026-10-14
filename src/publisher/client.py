@@ -37,6 +37,9 @@ _ROUTES = {
 # 429/502/503/504 and a connection error or timeout share one retry budget:
 # sleep backoff[i] then retry, three retries maximum (four attempts total).
 _RETRYABLE_STATUSES = (429, 502, 503, 504)
+# The dictionary routes also retry a 500 on the same budget: re-posting a shard
+# or a commit is safe (a commit that had landed answers 409 stale_version).
+_RETRY_500_ROUTES = ("dictionary_shard", "dictionary_commit")
 # Refused immediately, with the parsed IngestError body — never retried.
 _IMMEDIATE_ERROR_STATUSES = (400, 403, 404, 409)
 
@@ -248,7 +251,7 @@ class PoolApiClient:
             if status == 200:
                 return resp.json()
 
-            if status in _RETRYABLE_STATUSES:
+            if status in _RETRYABLE_STATUSES or (status == 500 and route in _RETRY_500_ROUTES):
                 if attempts < len(self.backoff):
                     self.sleep(self.backoff[attempts])
                     attempts += 1

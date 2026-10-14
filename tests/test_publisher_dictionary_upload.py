@@ -235,3 +235,25 @@ def test_nightly_exits_nonzero_on_upload_failure(nightly_env):
 
     assert code == 1
     assert phases[-1] == ("upload", "dev")
+
+
+def test_client_retries_a_500_on_the_dictionary_routes_only():
+    tokens = MagicMock()
+    tokens.token.return_value = "tok-1"
+    session = MagicMock()
+    session.request.side_effect = [_resp(500), _resp(200, {"stored": 1}),
+                                   _resp(500), _resp(500), _resp(500), _resp(500)]
+    sleep = MagicMock()
+    client = PoolApiClient("https://api.example", tokens, session=session, sleep=sleep)
+
+    assert client.post_dictionary_shard({"index": 0}) == {"stored": 1}
+    with pytest.raises(PoolApiError) as raised:              # bounded: four attempts
+        client.post_dictionary_commit({"version": "v"})
+    assert (raised.value.status, raised.value.error) == (500, "transport")
+    assert session.request.call_count == 6
+    assert [c.args[0] for c in sleep.call_args_list] == [5, 5, 15, 45]
+
+    session.request.side_effect = [_resp(500)]
+    with pytest.raises(PoolApiError) as raised:              # the pool's routes: unchanged
+        client.post_manifest({})
+    assert (raised.value.status, raised.value.error) == (500, "unexpected_status")
