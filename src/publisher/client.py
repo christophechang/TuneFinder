@@ -30,6 +30,8 @@ _ROUTES = {
     "batch": "/api/ingest/batch",
     "manifest": "/api/ingest/manifest",
     "artists": "/api/ingest/artists",
+    "dictionary_shard": "/api/ingest/dictionary/shard",
+    "dictionary_commit": "/api/ingest/dictionary/commit",
 }
 
 # 429/502/503/504 and a connection error or timeout share one retry budget:
@@ -149,7 +151,8 @@ def _error_code(resp) -> str | None:
 
 
 class PoolApiClient:
-    """The four ingest calls (README "The live endpoints"), each carrying a
+    """The ingest calls (README "The live endpoints", plus the artist
+    dictionary's shard and commit), each carrying a
     bearer token and retrying transient failures the same way.
     """
 
@@ -196,6 +199,19 @@ class PoolApiClient:
 
     def post_artists(self, payload: dict) -> dict:
         return self._call("POST", "artists", json_body=payload)
+
+    def post_dictionary_shard(self, payload: dict) -> dict:
+        """One artist-dictionary shard, into the API's inactive slot."""
+        body = self._call("POST", "dictionary_shard", json_body=payload)
+        logger.info(
+            "[publisher] dictionary shard index=%s slot=%s stored=%s",
+            body.get("index"), body.get("slot"), body.get("stored"),
+        )
+        return body
+
+    def post_dictionary_commit(self, payload: dict) -> dict:
+        """Flip the dictionary to the version whose shards were just posted."""
+        return self._call("POST", "dictionary_commit", json_body=payload)
 
     def _call(self, method: str, route: str, json_body: dict | None = None) -> dict:
         path = _ROUTES[route]
