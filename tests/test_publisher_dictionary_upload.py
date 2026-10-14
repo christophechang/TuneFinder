@@ -195,6 +195,7 @@ def nightly_env(tmp_path, monkeypatch):
 
     real_build_export = export.build_export
     monkeypatch.setattr(entry, "setup_logging", lambda: None)
+    monkeypatch.setattr(entry, "_now", lambda: dt.datetime(2026, 10, 14, 21, 30))
     monkeypatch.setattr(crawl, "run_crawl", fake_run_crawl)
     monkeypatch.setattr(export, "build_export", fake_build_export)
 
@@ -218,7 +219,7 @@ def test_nightly_runs_crawl_export_upload_in_order(nightly_env, caplog):
     set_upload(ok=True)
 
     with caplog.at_level(logging.INFO):
-        code = entry.main(["--db", db_path, "nightly", "--env", "dev", "--until", "05:30"])
+        code = entry.main(["--db", db_path, "nightly", "--env", "dev", "--until", "05:15"])
 
     assert code == 0
     assert phases == [("crawl", True), ("export",), ("upload", "dev")]
@@ -257,3 +258,36 @@ def test_client_retries_a_500_on_the_dictionary_routes_only():
     with pytest.raises(PoolApiError) as raised:              # the pool's routes: unchanged
         client.post_manifest({})
     assert (raised.value.status, raised.value.error) == (500, "unexpected_status")
+
+
+def test_nightly_refuses_a_deadline_more_than_nine_hours_away(nightly_env, monkeypatch):
+    db_path, phases, set_upload = nightly_env
+    set_upload(ok=True)
+    monkeypatch.setattr(entry, "_now", lambda: dt.datetime(2026, 10, 14, 14, 0))
+
+    assert entry.main(["--db", db_path, "nightly", "--env", "dev", "--until", "05:15"]) == 2
+    assert phases == []                                     # nothing ran
+    assert entry.main(["--db", db_path, "crawl", "--until", "22:30"]) == 0   # 8.5 h: fine
+
+
+def test_crawl_deadline_for_refuses_more_than_nine_hours():
+    evening = dt.datetime(2026, 10, 14, 21, 30)
+    assert crawl.deadline_for("05:15", evening) == dt.datetime(2026, 10, 15, 5, 15)
+    with pytest.raises(crawl.DeadlineError, match="15.2 h away"):
+        crawl.deadline_for("05:15", dt.datetime(2026, 10, 14, 14, 0))
+    with pytest.raises(crawl.DeadlineError, match="not HH:MM"):
+        crawl.deadline_for("5pm", evening)
+
+
+@pytest.mark.parametrize("command", [["nightly", "--env", "dev"], ["crawl"], ["export"],
+                                     ["upload", "--env", "dev"]])
+def test_second_dictionary_run_exits_while_the_first_holds_the_lock(nightly_env, command, capsys):
+    db_path, phases, set_upload = nightly_env
+    set_upload(ok=True)
+
+    with entry.single_run(db_path):
+        code = entry.main(["--db", db_path, *command])
+
+    assert code == 3 and phases == []
+    assert "another dictionary run holds" in capsys.readouterr().err
+    assert entry.main(["--db", db_path, *command]) == 0      # free again once released

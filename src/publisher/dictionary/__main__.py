@@ -4,6 +4,9 @@
                      crawl (backfill, then top-up), export, upload; one summary
                      line per phase; exit 1 if the crawl errored, the export
                      failed or any upload did not commit
+
+Every command but `status` holds `<crawl.db>.lock` for its whole run; a second
+one exits 3. An --until more than nine hours away is refused (exit 2).
   crawl [--until HH:MM] [--top-up]
   status
   export
@@ -11,7 +14,10 @@
 """
 import argparse
 import datetime as dt
+import fcntl
+import os
 import sys
+from contextlib import contextmanager
 
 from src.logger import get_logger, setup_logging
 from src.publisher.dictionary import DEFAULT_DB_PATH, LOG, default_export_dir
@@ -21,9 +27,37 @@ from src.publisher.dictionary import upload as upload_mod
 
 logger = get_logger(__name__)
 
+_now = dt.datetime.now  # the wall clock --until is read against; tests replace it
+
+
+class AlreadyRunning(RuntimeError):
+    """Another dictionary command holds the lock beside crawl.db."""
+
+
+@contextmanager
+def single_run(db_path: str):
+    """Hold `<crawl.db>.lock` exclusively for the whole command: two crawls, or a
+    crawl and an export, never share the database or the export directory."""
+    path = os.path.abspath(db_path) + ".lock"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise AlreadyRunning(f"another dictionary run holds {path}; not starting") from None
+        try:
+            os.truncate(fd, 0)
+            os.write(fd, f"pid={os.getpid()}\n".encode())
+        except OSError:
+            pass  # diagnostics only
+        yield
+    finally:
+        os.close(fd)  # closing the fd releases the flock
+
 
 def _crawl(args, db, top_up: bool) -> crawl_mod.CrawlOutcome:
-    deadline = crawl_mod.deadline_for(args.until, dt.datetime.now())
+    deadline = args.deadline
     outcome = crawl_mod.run_crawl(
         db,
         lambda: crawl_mod.Client(args.interval, args.max_requests,
@@ -97,6 +131,31 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     setup_logging()
+    args.deadline = None
+    if args.command in ("nightly", "crawl"):
+        try:
+            args.deadline = crawl_mod.deadline_for(args.until, _now())
+        except crawl_mod.DeadlineError as exc:
+            logger.error("%s %s", LOG, exc)
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    if args.command == "status":
+        db = crawl_mod.connect(args.db)
+        try:
+            crawl_mod.status(db)
+        finally:
+            db.close()
+        return 0
+    try:
+        with single_run(args.db):
+            return _run(args)
+    except AlreadyRunning as exc:
+        logger.error("%s %s", LOG, exc)
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
+
+def _run(args) -> int:
     db = crawl_mod.connect(args.db)
     export_dir = args.export_dir or default_export_dir(args.db)
     try:
@@ -104,9 +163,6 @@ def main(argv=None) -> int:
             return nightly(args, db, export_dir)
         if args.command == "crawl":
             return 1 if _crawl(args, db, top_up=args.top_up).error else 0
-        if args.command == "status":
-            crawl_mod.status(db)
-            return 0
         if args.command == "export":
             _export(db, export_dir)
             return 0

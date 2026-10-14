@@ -463,14 +463,32 @@ def status(db) -> None:
         print(" run", r)
 
 
+# The nightly window is 21:30 to 05:15; a deadline further off than this is a
+# daytime run that would crawl all day.
+MAX_DEADLINE_AHEAD = dt.timedelta(hours=9)
+
+
+class DeadlineError(ValueError):
+    """--until is malformed or further away than MAX_DEADLINE_AHEAD."""
+
+
 def deadline_for(until: str | None, now: dt.datetime) -> dt.datetime | None:
-    """`HH:MM` local time as the next such moment after `now`."""
+    """`HH:MM` local time as the next such moment after `now` — refused when that
+    is more than nine hours away, so a manual daytime run must name its own
+    --until within nine hours rather than inherit the nightly 05:15."""
     if not until:
         return None
-    h, m = map(int, until.split(":"))
-    deadline = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    try:
+        h, m = map(int, until.split(":"))
+        deadline = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    except ValueError:
+        raise DeadlineError(f"--until {until!r} is not HH:MM") from None
     if deadline <= now:
         deadline += dt.timedelta(days=1)
+    if deadline - now > MAX_DEADLINE_AHEAD:
+        hours = (deadline - now).total_seconds() / 3600
+        raise DeadlineError(f"--until {until} is {hours:.1f} h away; give an --until within "
+                            f"{MAX_DEADLINE_AHEAD.total_seconds() / 3600:.0f} h of now")
     return deadline
 
 
