@@ -22,8 +22,9 @@ mini (night 1: 10,862 requests, 0 x 429). What it keeps:
 
 What is new: the genre ids come from the vendored taxonomy (the same 29 the
 standalone crawler hardcoded), the database path is a parameter, and
-`top_up=True` re-walks the current and previous month once the backfill has no
-slice left, so the nightly run picks up new releases for good.
+`top_up=True` re-walks the current and previous month — and every month since
+the last top-up that finished, so downtime leaves no gap — once the backfill has
+no slice left, so the nightly run picks up new releases for good.
 """
 import datetime as dt
 import os
@@ -63,7 +64,19 @@ CREATE TABLE IF NOT EXISTS credits (track_id INTEGER, artist_id INTEGER, role TE
 CREATE TABLE IF NOT EXISTS artists (id INTEGER PRIMARY KEY, name TEXT, slug TEXT,
   seen TEXT);                           -- publish date of the credit the name came from
 CREATE TABLE IF NOT EXISTS runs (started TEXT, ended TEXT, requests INTEGER, note TEXT);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
+
+
+def get_meta(db, key: str) -> str | None:
+    row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_meta(db, key: str, value: str) -> None:
+    with db:
+        db.execute("INSERT INTO meta (key, value) VALUES (?,?) "
+                   "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
 
 def genre_ids() -> list[int]:
@@ -126,28 +139,68 @@ def seed(db, genres, today: dt.date) -> None:
     logger.info("%s seeded %d slices", LOG, len(rows))
 
 
-def top_up_window(today: dt.date) -> list[tuple[dt.date, dt.date]]:
-    """The previous month, whole, and the current month up to today."""
+def top_up_window(today: dt.date, since: dt.date | None = None) -> list[tuple[dt.date, dt.date]]:
+    """Whole months from the previous one — or from `since`'s month when that is
+    older — through the current month up to today."""
     current = today.replace(day=1)
-    previous_end = current - dt.timedelta(days=1)
-    return [(previous_end.replace(day=1), previous_end), (current, today)]
+    first = (current - dt.timedelta(days=1)).replace(day=1)
+    if since is not None:
+        first = min(first, since.replace(day=1))
+    window, month = [], first
+    while month <= current:
+        following = (month.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+        window.append((month, min(following - dt.timedelta(days=1), today)))
+        month = following
+    return window
+
+
+def top_up_since(db) -> dt.date | None:
+    """The day the crawl last covered completely: the last top-up that finished,
+    else (no top-up has yet) the newest day any slice reaches — the seed's today."""
+    finished = get_meta(db, "top_up_finished")
+    if finished:
+        return dt.date.fromisoformat(finished)
+    newest = db.execute("SELECT MAX(end) FROM slices").fetchone()[0]
+    return dt.date.fromisoformat(newest) if newest else None
 
 
 def top_up(db, genres, today: dt.date) -> int:
     """Reset the top-up window to one fresh `todo` slice per genre and month.
 
-    Every slice starting in the window goes — done, split or a child of a split,
-    and the current month's old slice that ended on an earlier "today" — and the
-    month slices come back from page 1. Tracks and credits stay: the tables
-    dedupe on track id, so re-walking only adds what is new.
+    The window runs from the month of the last finished top-up (`top_up_since`),
+    never less than the previous month, so nights the job did not run are
+    walked too. Every slice starting in the window goes — done, split, failed or
+    a child of a split, and the current month's old slice that ended on an
+    earlier "today" — and the month slices come back from page 1. Tracks and
+    credits stay: the tables dedupe on track id, so re-walking only adds what is
+    new.
     """
-    window = top_up_window(today)
+    window = top_up_window(today, top_up_since(db))
     rows = [(g, s.isoformat(), e.isoformat()) for s, e in window for g in genres]
     with db:
         db.execute("DELETE FROM slices WHERE start >= ?", (window[0][0].isoformat(),))
         db.executemany("INSERT INTO slices (genre_id, start, end) VALUES (?,?,?)", rows)
+    set_meta(db, "top_up_from", window[0][0].isoformat())
+    set_meta(db, "top_up_to", today.isoformat())
     logger.info("%s top-up: %d slices from %s to %s", LOG, len(rows), window[0][0], today)
     return len(rows)
+
+
+def finish_top_up(db) -> bool:
+    """Once no `todo` slice is left, record the last top-up's day as finished — on
+    whichever night its walk ended — unless a slice in its window failed, so the
+    next window still reaches back over it."""
+    since, through = get_meta(db, "top_up_from"), get_meta(db, "top_up_to")
+    if since is None or through is None:
+        return False
+    failed = db.execute("SELECT COUNT(*) FROM slices WHERE state='failed' AND start >= ?",
+                        (since,)).fetchone()[0]
+    if failed:
+        logger.warning("%s top-up left %d failed slices; the next one starts from %s again",
+                       LOG, failed, since)
+        return False
+    set_meta(db, "top_up_finished", through)
+    return True
 
 
 def beatport_token() -> tuple[str, str]:
@@ -461,6 +514,7 @@ def run_crawl(db, make_client, genres=None, deadline=None, top_up_when_done=Fals
             row = db.execute("SELECT genre_id, start, end, next_page FROM slices WHERE state='todo' "
                              "ORDER BY start DESC, genre_id LIMIT 1").fetchone()
             if row is None:
+                finish_top_up(db)
                 if top_up_when_done and not topped:
                     top_up(db, genres, today)
                     topped = True

@@ -450,3 +450,61 @@ def test_crawl_plist_stops_the_crawl_at_05_15():
     with open(path, "rb") as f:
         args = plistlib.load(f)["ProgramArguments"]
     assert args[args.index("--until") + 1] == "05:15"
+
+
+# ---------------------------------------------------------------------------
+# Top-up after downtime
+# ---------------------------------------------------------------------------
+
+def test_crawl_top_up_window_reaches_back_to_the_last_finished_top_up():
+    assert crawl.top_up_window(TODAY, since=dt.date(2026, 7, 20)) == [
+        (dt.date(2026, 7, 1), dt.date(2026, 7, 31)),
+        (dt.date(2026, 8, 1), dt.date(2026, 8, 31)),
+        (dt.date(2026, 9, 1), dt.date(2026, 9, 30)),
+        (dt.date(2026, 10, 1), dt.date(2026, 10, 14)),
+    ]
+    # a recent top-up never narrows the window below the previous month
+    assert crawl.top_up_window(TODAY, since=dt.date(2026, 10, 13))[0][0] == dt.date(2026, 9, 1)
+
+
+def test_crawl_top_up_after_downtime_rewalks_every_month_since():
+    db = _db()
+    _insert(db, [(5, "2026-07-01", "2026-07-20", "done", 10, 2),
+                 (5, "2026-06-01", "2026-06-30", "done", 10, 2)])
+    crawl.set_meta(db, "top_up_finished", "2026-07-20")
+    client = FakeClient()
+
+    crawl.run_crawl(db, lambda: client, genres=[5], top_up_when_done=True, today=TODAY)
+
+    assert [p["publish_date"] for p in client.params] == [
+        "2026-10-01:2026-10-14", "2026-09-01:2026-09-30",
+        "2026-08-01:2026-08-31", "2026-07-01:2026-07-31"]
+    assert crawl.get_meta(db, "top_up_finished") == "2026-10-14"
+
+
+def test_crawl_first_top_up_reaches_back_to_the_seed():
+    db = _db()
+    # seeded on 20 August; the backfill finished in October
+    _insert(db, [(5, "2026-08-01", "2026-08-20", "done", 10, 2),
+                 (5, "2026-07-01", "2026-07-31", "done", 10, 2)])
+    client = FakeClient()
+
+    crawl.run_crawl(db, lambda: client, genres=[5], top_up_when_done=True, today=TODAY)
+
+    assert [p["publish_date"] for p in client.params][-1] == "2026-08-01:2026-08-31"
+
+
+def test_crawl_top_up_cut_short_finishes_on_a_later_night_and_failures_hold_it_open():
+    db = _db()
+    _insert(db, [(5, "2026-07-01", "2026-07-31", "done", 10, 2)])
+    crawl.set_meta(db, "top_up_finished", "2026-07-31")
+    refuse_august = ScriptedClient({("2026-08-01:2026-08-31", 1): crawl.PageError(400, "bad request")})
+
+    crawl.run_crawl(db, lambda: refuse_august, genres=[5], top_up_when_done=True, today=TODAY)
+    assert crawl.get_meta(db, "top_up_finished") == "2026-07-31"   # August failed: not finished
+
+    tomorrow = TODAY + dt.timedelta(days=1)
+    crawl.run_crawl(db, lambda: FakeClient(), genres=[5], top_up_when_done=False, today=tomorrow,
+                    now=lambda: dt.datetime(2026, 10, 15, 22, 0))
+    assert _state(db, "2026-08-01")[0] == "done"                   # retried on the next night
+    assert crawl.get_meta(db, "top_up_finished") == "2026-10-14"   # the top-up's own day
