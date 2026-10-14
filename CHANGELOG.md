@@ -4,6 +4,12 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.22.0 — 2026-10-14
+
+### Added
+
+- **The artist dictionary job** (`src/publisher/dictionary/`; tunefinder-multi-tenant ADR 0028). A nightly crawl of Beatport's `/v4/catalog/tracks` by genre and month (the 29 Beatport genres behind the eight families, ten years back, newest first, then a top-up from the last finished one) into `crawl.db`; an export of every artist with distinct release dates, last-seen month and a families mask, in shards of at most 1.5 MB; and an upload through the publisher's client to `/api/ingest/dictionary/shard` and `/commit`, shards first and commit last, after checking the API's taxonomy version. Never sends `order_by` (it breaks Beatport's paging). A page that keeps failing marks its slice `failed` and the crawl moves on; one lock beside `crawl.db` per run; every wait is capped at the deadline; the newest spelling of an artist wins; Discord alerts at most once a night per kind. LaunchAgent `com.openclaw.tunefinder-dictionary` (21:30). `PoolApiClient` gains `post_dictionary_shard` and `post_dictionary_commit`, and retries a 500 on those routes.
+
 ## v0.21.2 — 2026-10-12
 
 ### Changed

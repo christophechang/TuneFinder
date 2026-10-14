@@ -495,6 +495,10 @@ It takes TuneFinder's **existing** run lock for the fetch only (retrying every f
 
 Full operator guide — the six env vars, the generated settings file, `--dry-run`, `--replay`, the launchd job and how to turn it off: **`docs/ops/publish-pool.md`**.
 
+### Artist dictionary
+
+`./venv/bin/python -m src.publisher.dictionary nightly --until 05:15 --env dev --env prod` builds the multi-tenant app's artist dictionary: it crawls Beatport's tracks by genre and month into `~/OpenClaw/Automations/artist-crawl/crawl.db` (ten years back, newest first, then a nightly top-up), exports every artist with their release count, last-seen month and families, and uploads the shards to each environment's `/api/ingest/dictionary/*`. It takes TuneFinder's run lock only while fetching the Beatport token, holds its own lock beside `crawl.db`, never sleeps past `--until`, and alerts Discord on a stuck crawl or a failed upload. Other commands: `crawl [--top-up]`, `export`, `upload --env`, `status`. The launchd job is `com.openclaw.tunefinder-dictionary.plist` (21:30 daily; create `logs/` first).
+
 ## Project structure
 
 ```
