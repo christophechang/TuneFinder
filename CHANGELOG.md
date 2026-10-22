@@ -4,6 +4,16 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+## v0.23.0 — 2026-10-22
+
+### Added
+
+- **The publisher fetches each Beatport sub-genre's recent releases.** Labels rarely tag chart rows with a sub-genre. On 2026-10-22 none of the D&B top-100 were Liquid, so the pool held 0 Liquid tracks, 12 Neurofunk / Jump Up and 3 2-Step / Speed Garage. Every `beatport.sub_genres` row in the taxonomy (11 of them) is now also fetched from `/v4/catalog/tracks/?sub_genre_id=&genre_id=`. The fetch covers releases published in the last 28 days, newest first, at most 50 per sub-genre, with no chart position. Only the generated `config/settings.pool.yaml` carries `sub_genres`, so the Sunday run and mix-prep are unchanged. A failed sub-genre is skipped, and it never counts toward the all-genres fail-safe. When every sub-genre fails, the run logs an ERROR. The ingest contract is unchanged.
+
+### Changed
+
+- **`tools/publish-pool-contract` re-vendored** from tunefinder-multi-tenant. It picks up the 2026-10-20 library tag tables and the sub-genre comment.
+
 ## v0.22.0 — 2026-10-14
 
 ### Added
