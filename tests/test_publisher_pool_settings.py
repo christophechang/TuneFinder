@@ -72,6 +72,23 @@ def test_generated_beatport_rows_cover_taxonomy(generated):
     assert generated["sources"]["beatport"]["enabled"] is True
 
 
+def test_generated_beatport_sub_genres_cover_taxonomy(generated):
+    taxonomy = load_taxonomy()
+    with open(_TAXONOMY_YAML) as f:
+        raw_rows = yaml.safe_load(f)["beatport"]["sub_genres"]
+    beatport = generated["sources"]["beatport"]
+    rows = beatport["sub_genres"]
+
+    assert len(rows) == len(raw_rows) == 11
+    assert [row["slug"] for row in rows] == [raw["slug"] for raw in raw_rows]
+    assert [row["id"] for row in rows] == [raw["id"] for raw in raw_rows]
+    assert [row["genre_id"] for row in rows] == [raw["parent"] for raw in raw_rows]
+    assert [row["name"] for row in rows] == [taxonomy.beatport_sub_genres[raw["slug"]] for raw in raw_rows]
+    assert {"name": "liquid", "slug": "liquid", "id": 5, "genre_id": 1} in rows
+    assert beatport["sub_genre_lookback_days"] == 28
+    assert beatport["sub_genre_limit"] == 50
+
+
 def test_generated_volumo_rows_cover_taxonomy(generated):
     taxonomy = load_taxonomy()
     rows = generated["sources"]["volumo"]["genres"]

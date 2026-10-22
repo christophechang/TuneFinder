@@ -65,8 +65,10 @@ fine_genres:
 beatport:
   # One top-100 chart per genre below (GET /v4/catalog/genres/{id}/top/100/). A row's fine
   # genre is `fine`, unless the row carries a `sub_genre` listed under `sub_genres`, which
-  # then wins (decision A). Beatport has no chart per sub-genre; this is how sub-genre fine
-  # genres are reached.
+  # then wins (decision A). Beatport has no chart per sub-genre, and labels rarely tag chart
+  # rows with one (2026-10-22: 0 of the D&B top-100 were Liquid), so each `sub_genres` row
+  # is also fetched on its own: recent releases of that sub-genre under its `parent` genre
+  # (GET /v4/catalog/tracks/?sub_genre_id=&genre_id=, newest first), unranked.
   genres:
     - { id: 5,   slug: house,                          fine: house }
     - { id: 12,  slug: deep-house,                     fine: deep-house }
@@ -194,9 +196,18 @@ soundcloud:
     - { fine: funk-soul,           genres: "funk,soul,disco" }
 
 # Library import (CONTRACTS §5): free-text Rekordbox/Traktor/Serato genre tags are
-# case-folded, split on ; , / and looked up here after the alias table. Aliases the
-# founder's own library needed (S1a): Hardcore -> breaks-breakbeat, Rave -> jungle,
-# Drum n Bass -> drum-and-bass, Uk Garage -> uk-garage-bassline. Loop Samples is excluded.
+# case-folded and looked up in the tables below, the whole field first, then each ; or ,
+# segment, and only then split on /. Aliases the founder's own library needed (S1a):
+# Hardcore -> breaks-breakbeat, Rave -> jungle, Drum n Bass -> drum-and-bass,
+# Uk Garage -> uk-garage-bassline. Loop Samples is excluded. The rest were added on
+# 2026-10-20 after the first outside DJ's import (founder-approved table).
+#
+# Every key is a folded tag; the new ones are quoted so the file stays plain YAML for
+# yaml.safe_load. The client compares a tag with a key by its squash (letters and digits
+# only), so one key covers its spellings: `nu-disco`, `Nu Disco` and `nudisco` are one.
+# Editing these is a founder decision; the reasons in the comments are for the founder.
+#
+# library_aliases: SURE. The tag is placed silently.
 library_aliases:
   hardcore:            breaks-breakbeat
   rave:                jungle
@@ -221,7 +232,1131 @@ library_aliases:
   electronic:          electronica
   breaks:              breaks-breakbeat
   breakbeat:           breaks-breakbeat
-library_excluded_tags: ["loop samples", "dj tools", "acapella", "acapellas"]
+  # House
+  "minimal house":                  minimal-deep-tech   # Beatport sub-genre of Minimal / Deep Tech
+  "minimal tech":                   minimal-deep-tech
+  "deep tech house":                minimal-deep-tech
+  "melodic house":                  melodic-house-techno   # Beatport sub-genre
+  "melodic techno":                 melodic-house-techno   # Beatport sub-genre
+  "melodic house and techno":       melodic-house-techno
+  "prog house":                     progressive-house
+  "funky house":                    funky-jackin-house   # Beatport genre 81; UK 'funky house' of 2008 is closer to UK Funky
+  "jacking house":                  funky-jackin-house
+  "jackin":                         funky-jackin-house
+  "soulful":                        soulful-house   # Beatport House sub-genre (decision A)
+  "gospel house":                   soulful-house
+  "vocal house":                    house
+  "acid house":                     house   # Beatport files Acid under House
+  "chicago house":                  house
+  "hip house":                      house
+  "latin house":                    house   # Beatport House sub-genre
+  "piano house":                    house
+  "club house":                     house   # ID3 'Club-House'
+  "tribal house":                   house
+  "afro tech":                      afro-house   # Beatport Afro House chart carries it
+  "3step":                          afro-house   # Beatport Afro House sub-genre 3Step
+  "three step":                     afro-house
+  "afro melodic":                   afro-house   # Beatport Afro House sub-genre
+  "afro deep":                      afro-house
+  "afro / latin":                   afro-house   # Beatport Afro House sub-genre; kept whole so 'latin' is not reported
+  "dark disco":                     indie-dance   # Beatport Indie Dance sub-genre
+  "disco edits":                    nu-disco-disco
+  "nu disco edits":                 nu-disco-disco
+  "bass house / future house":      bass-house   # Volumo genre name (decision C); kept whole so the guess does not show
+  "uk jackin":                      funky-jackin-house
+  "afro tech house":                afro-house
+  "disco edit":                     nu-disco-disco
+  "house music":                    house
+  "uk house":                       house
+  "deep house music":               deep-house
+  "uk tech house":                  tech-house
+  "detroit house":                  deep-house   # Detroit house (Theo Parrish, Moodymann) is deep house's catalogue
+  "90s house":                      house   # era + genre
+  "house classics":                 house   # era + genre
+  "classic house music":            house   # era + genre
+  "old school house":               house   # era + genre
+  "old skool house":                house   # era + genre
+  "disco classics":                 nu-disco-disco   # era + genre
+  "classic disco":                  nu-disco-disco   # era + genre
+  # Techno
+  "peak time techno":               techno-peak-time
+  "driving techno":                 techno-peak-time
+  "big room techno":                techno-peak-time
+  "psy-techno":                     techno-peak-time   # Beatport sub-genre
+  "raw techno":                     techno-raw-deep
+  "deep techno":                    techno-raw-deep
+  "hypnotic techno":                techno-raw-deep
+  "dub techno":                     techno-raw-deep   # Beatport Raw / Deep / Hypnotic sub-genre Dub
+  "broken techno":                  techno-raw-deep   # Beatport sub-genre Broken
+  "deep / hypnotic":                techno-raw-deep   # Beatport sub-genre name
+  "techno (raw, deep, dub)":        techno-raw-deep   # Volumo genre name; kept whole (it uses commas)
+  "schranz":                        hard-techno
+  "hard techno":                    hard-techno
+  "peak time / driving":            techno-peak-time   # Beatport sub-genre pair
+  "raw / deep / hypnotic":          techno-raw-deep   # Beatport sub-genre trio
+  # Electro
+  "detroit electro":                electro
+  "classic electro":                electro
+  "modern electro":                 electro
+  "electro (classic / detroit)":    electro   # Volumo genre name
+  # Drum & Bass
+  "d&b":                            drum-and-bass
+  "dnb jungle":                     jungle
+  "jungle drum & bass":             jungle
+  "liquid funk":                    liquid
+  "liquid dnb":                     liquid
+  "liquid drum & bass":             liquid
+  "liquid drum and bass":           liquid
+  "liquid d&b":                     liquid
+  "neuro":                          neurofunk-jump-up
+  "neurofunk dnb":                  neurofunk-jump-up
+  "jump up dnb":                    neurofunk-jump-up
+  "dancefloor dnb":                 drum-and-bass
+  "dancefloor drum & bass":         drum-and-bass
+  "rollers":                        drum-and-bass
+  "deep dnb":                       drum-and-bass   # Beatport D&B sub-genre Deep
+  "deep drum & bass":               drum-and-bass
+  "minimal dnb":                    drum-and-bass
+  "minimal drum & bass":            drum-and-bass
+  "ragga jungle":                   jungle
+  "old skool jungle":               jungle
+  "old school jungle":              jungle
+  "hardcore jungle":                jungle
+  "jungle techno":                  jungle
+  "deep drum and bass":             drum-and-bass
+  "dancefloor drum and bass":       drum-and-bass
+  "minimal drum and bass":          drum-and-bass
+  "uk dnb":                         drum-and-bass
+  "90s jungle":                     jungle   # era + genre
+  "90s dnb":                        drum-and-bass   # era + genre
+  "dnb classics":                   drum-and-bass   # era + genre
+  "jungle classics":                jungle   # era + genre
+  "old skool dnb":                  drum-and-bass   # era + genre
+  "old school dnb":                 drum-and-bass   # era + genre
+  # Breaks & UK Bass
+  "breakbeats":                     breaks-breakbeat
+  "nu skool breaks":                breaks-breakbeat
+  "nu school breaks":               breaks-breakbeat
+  "nu breaks":                      breaks-breakbeat
+  "progressive breaks":             breaks-breakbeat
+  "prog breaks":                    breaks-breakbeat
+  "florida breaks":                 breaks-breakbeat
+  "funky breaks":                   breaks-breakbeat
+  "acid breaks":                    breaks-breakbeat
+  "tech breaks":                    breaks-breakbeat
+  "uk breaks":                      breaks-breakbeat
+  "breakbeat hardcore":             breaks-breakbeat
+  "hardcore breaks":                breaks-breakbeat
+  "old skool hardcore":             breaks-breakbeat
+  "uk bass music":                  uk-bass
+  "uk grime":                       140-deep-dubstep-grime
+  "instrumental grime":             140-deep-dubstep-grime
+  "grime instrumental":             140-deep-dubstep-grime
+  "dubstep / bass / grime":         dubstep   # Volumo genre name (decision H); kept whole
+  "eskibeat":                       140-deep-dubstep-grime
+  "riddim dubstep":                 dubstep
+  "melodic dubstep":                dubstep   # Beatport Dubstep sub-genre
+  "global club":                    bass-club   # Beatport Bass / Club sub-genre
+  "jersey club":                    bass-club   # Beatport Bass / Club sub-genre
+  "baltimore club":                 bass-club
+  "bmore club":                     bass-club
+  "bmore":                          bass-club
+  "philly club":                    bass-club
+  "gqom":                           bass-club   # Beatport Bass / Club sub-genre
+  "footwork":                       bass-club   # Beatport Bass / Club sub-genre Juke / Footwork
+  "juke":                           bass-club   # as above
+  "uk funky":                       bass-club   # Beatport Bass / Club sub-genre; many UK DJs file it with garage
+  "nu-breakz":                      breaks-breakbeat   # ID3 genre 174
+  "west coast breaks":              breaks-breakbeat
+  "breakbeat kota":                 breaks-breakbeat
+  "rave breaks":                    breaks-breakbeat
+  "sinogrime":                      140-deep-dubstep-grime
+  "8 bar":                          140-deep-dubstep-grime   # grime instrumental form
+  "neo-grime":                      140-deep-dubstep-grime
+  "uk funky house":                 bass-club
+  "chicago footwork":               bass-club
+  "old skool breaks":               breaks-breakbeat   # era + genre
+  "old school breaks":              breaks-breakbeat   # era + genre
+  # UK Garage
+  "two step":                       2-step-speed-garage
+  "2-step garage":                  2-step-speed-garage
+  "4x4 garage":                     uk-garage-bassline
+  "bassline house":                 uk-garage-bassline
+  "uk bassline":                    uk-garage-bassline
+  "niche":                          uk-garage-bassline   # Sheffield niche = bassline
+  "garage / bassline / grime":      uk-garage-bassline   # Traxsource genre; kept whole so grime does not split it
+  "dark garage":                    uk-garage-bassline
+  "classic garage":                 uk-garage-bassline
+  "old skool garage":               uk-garage-bassline
+  "ukg classics":                   uk-garage-bassline
+  "garage classics":                uk-garage-bassline
+  "uk garage classics":             uk-garage-bassline
+  "90s garage":                     uk-garage-bassline   # era + genre
+  "old school garage":              uk-garage-bassline   # era + genre
+  # Electronica & Downtempo
+  "organic downtempo":              downtempo
+  "electronic music":               electronica
+  "intelligent dance music":        idm-leftfield
+  "braindance":                     idm-leftfield
+  "ambient / experimental":         ambient   # Beatport genre 100 -> ambient (taxonomy); kept whole
+  "dark ambient":                   ambient
+  "lounge":                         trip-hop-chill-out   # Bandcamp lounge row
+  "melodic downtempo":              downtempo   # Beatport Downtempo sub-genre
+  "ambient electronic":             ambient
+  "ambient electronica":            ambient
+  "laptronica":                     electronica
+  "downtempo electronica":          downtempo
+  "ambient / experimental / drone": ambient   # Redeye section name; kept whole
+  # Hip-Hop, R&B & Soul
+  "rnb":                            rnb
+  "contemporary r&b":               rnb
+  "northern soul":                  funk-soul
+  "deep funk":                      funk-soul
+  "p-funk":                         funk-soul
+  "modern funk":                    funk-soul
+  "rare groove":                    funk-soul
+  "motown":                         funk-soul
+  "soul-funk":                      funk-soul
+  "hip hop and rap":                hip-hop
+  "pop rap":                        hip-hop
+  "sad rap":                        hip-hop
+  "gangsta":                        hip-hop
+  "gangsta rap":                    hip-hop
+  "g-funk":                         hip-hop
+  "boom bap":                       hip-hop
+  "hardcore hip-hop":               hip-hop
+  "hardcore rap":                   hip-hop
+  "instrumental hip-hop":           hip-hop
+  "abstract hip-hop":               hip-hop
+  "jazzy hip-hop":                  hip-hop
+  "jazz rap":                       hip-hop
+  "jazz hop":                       hip-hop
+  "old school hip-hop":             hip-hop
+  "uk hip-hop":                     hip-hop
+  "uk rap":                         hip-hop
+  "dirty south":                    hip-hop
+  "crunk":                          hip-hop
+  "lo-fi hip-hop":                  hip-hop
+  "uk drill":                       hip-hop
+  "hybrid trap":                    trap-future-bass
+  "kawaii future bass":             trap-future-bass
+  "trap edm":                       trap-future-bass
+  "edm trap":                       trap-future-bass
+  "hard trap":                      trap-future-bass
+  "jersey club rap":                hip-hop
+  "beat tape":                      hip-hop
+  "hip hop instrumentals":          hip-hop
+  "alternative hip-hop":            hip-hop
+  "cloud rap":                      hip-hop
+  "memphis rap":                    hip-hop
+  "conscious hip-hop":              hip-hop
+  "underground hip-hop":            hip-hop
+  "underground rap":                hip-hop
+  "experimental hip-hop":           hip-hop
+  "east coast hip-hop":             hip-hop
+  "west coast hip-hop":             hip-hop
+  "southern hip-hop":               hip-hop
+  "chopped and screwed":            hip-hop
+  "nerdcore":                       hip-hop
+  "horrorcore":                     hip-hop
+  "road rap":                       hip-hop
+  "plugg":                          hip-hop
+  "mumble rap":                     hip-hop
+  "emo rap":                        hip-hop
+  "rap & hip-hop":                  hip-hop
+  "christian rap":                  hip-hop
+  "political hip-hop":              hip-hop
+  "hiphop instrumental":            hip-hop
+  "golden age hip-hop":             hip-hop
+  "hip hop soul":                   rnb
+  "new jack swing":                 rnb
+  "alternative r&b":                rnb
+  "quiet storm":                    rnb
+  "trap soul":                      rnb
+  "pluggnb":                        rnb
+  "slow jam":                       rnb
+  "contemporary rnb":               rnb
+  "go-go":                          funk-soul
+  "philly soul":                    funk-soul
+  "chicago soul":                   funk-soul
+  "southern soul":                  funk-soul
+  "deep soul":                      funk-soul
+  "psychedelic soul":               funk-soul
+  "blue-eyed soul":                 funk-soul
+  "modern soul":                    funk-soul
+  "smooth soul":                    funk-soul
+  "soul blues":                     funk-soul
+  "progressive soul":               funk-soul
+  "90s hip hop":                    hip-hop   # era + genre
+  "classic hip hop":                hip-hop   # era + genre
+  "soul classics":                  funk-soul   # era + genre
+  "funk classics":                  funk-soul   # era + genre
+  "classic soul":                   funk-soul   # era + genre
+# library_guesses: GUESS. The tag is placed, and shown pre-selected under
+# OUR BEST GUESSES — CHECK THESE, where one tap changes it.
+library_guesses:
+  # House
+  "minimal techno":                 minimal-deep-tech   # Minimal Techno was dropped (S5 decision E); its heirs live here, Raw/Deep techno also fits
+  "microhouse":                     minimal-deep-tech   # Volumo's Microhouse was left unmapped as a pool lane (decision E); as a library tag this is the nearest row
+  "rominimal":                      minimal-deep-tech   # as above
+  "romanian minimal":               minimal-deep-tech   # as above
+  "microhouse / rominimal":         minimal-deep-tech   # Volumo genre name, as above
+  "prog":                           progressive-house   # also prog rock
+  "melodic progressive":            progressive-house   # Melodic H&T also fits
+  "ghetto house":                   funky-jackin-house   # Chicago ghetto house; plain House also fits
+  "disco house":                    funky-jackin-house   # Beatport shelves disco-sampling house as Funky House; Nu Disco also fits
+  "french house":                   funky-jackin-house   # filter/French touch house; Nu Disco also fits
+  "filter house":                   funky-jackin-house   # as above
+  "french touch":                   funky-jackin-house   # as above
+  "jersey house":                   soulful-house   # as above
+  "acid":                           house   # Beatport's Acid is a House sub-genre, but DJs also write it for acid techno and acid breaks
+  "italo house":                    house   # Italo-flavoured house
+  "euro house":                     house   # 90s euro house borders Dance/Pop, which is cut
+  "outsider house":                 house   # lo-fi/raw house
+  "lo-fi house":                    deep-house   # dusty deep house (DJ Seinfeld et al.)
+  "jazzy house":                    deep-house   # Soulful also fits
+  "afro":                           afro-house   # could be afrobeats or afrobeat
+  "electroclash":                   indie-dance   # Electro also fits
+  "italo disco":                    nu-disco-disco   # Beatport has Italo under both Indie Dance and Nu Disco
+  "italo":                          nu-disco-disco   # as above
+  "cosmic disco":                   nu-disco-disco   # Indie Dance also fits
+  "cosmic":                         nu-disco-disco   # as above
+  "boogie":                         nu-disco-disco   # post-disco boogie; Funk / Soul also fits
+  "euro disco":                     nu-disco-disco
+  "hi-nrg":                         nu-disco-disco
+  "space disco":                    nu-disco-disco
+  "post-disco":                     nu-disco-disco   # Funk / Soul also fits
+  "fidget house":                   bass-house   # late-00s fidget is bass house's ancestor
+  "fidget":                         bass-house   # as above
+  "future house":                   bass-house   # Volumo's Bass House / Future House lane maps here (decision C)
+  "g-house":                        bass-house
+  "electro house":                  bass-house   # JUDGEMENT: Beatport files it under Mainstage (cut); bass-house is the nearest offered row
+  "balearic house":                 house   # Balearic-flavoured house; Downtempo also fits
+  "diva house":                     soulful-house   # 90s vocal diva house; plain House also fits
+  "new jersey sound":               soulful-house   # Jersey garage house, soulful house's root
+  "jersey sound":                   soulful-house   # as above
+  "jazz house":                     deep-house   # jazz-sampling deep house; Soulful also fits
+  "stutter house":                  house   # 2023- stutter house; melodic and pop-leaning
+  "kwaito":                         afro-house   # South African house-derived; slower and vocal
+  "south african house":            afro-house   # SA house is the Afro House catalogue's base; Deep House also fits
+  "schaffel":                       minimal-deep-tech   # Kompakt shuffle-minimal
+  "deep minimal":                   minimal-deep-tech
+  "deep progressive":               progressive-house   # Melodic H&T also fits
+  "progressive techno":             melodic-house-techno   # today's progressive/melodic techno; Peak Time also fits
+  "electro disco":                  nu-disco-disco   # electro-disco; Indie Dance also fits
+  "latin disco":                    nu-disco-disco
+  "red disco":                      nu-disco-disco
+  "dance-punk":                     indie-dance   # DFA-style dance-punk is Indie Dance's catalogue
+  "alternative dance":              indie-dance
+  "new rave":                       indie-dance   # 2006-08 new rave; not Beatport's Neo Rave (hard dance)
+  "indietronica":                   indie-dance   # Electronica also fits
+  "chicago":                        house   # a lone city name; Chicago house is the usual meaning
+  # Techno
+  "dark techno":                    techno-raw-deep   # Hard Techno also fits
+  "acid techno":                    techno-raw-deep   # Peak Time also fits
+  "bleep":                          techno-raw-deep   # Sheffield bleep techno (LFO); Electronica also fits
+  "detroit techno":                 techno-raw-deep   # classic Detroit; Peak Time also fits
+  "detroit":                        techno-raw-deep   # overrides the Electro name's half; Detroit electro also exists
+  "ebm":                            techno-raw-deep   # Beatport sub-genre of Raw / Deep / Hypnotic; in older libraries EBM is industrial records
+  "electronic body music":          techno-raw-deep   # as above
+  "new beat":                       techno-raw-deep   # Belgian new beat sits beside EBM
+  "industrial techno":              hard-techno   # Raw/Deep also fits
+  "hardgroove":                     hard-techno   # 90s hard groove; Raw/Deep also fits
+  "tekno":                          hard-techno   # free-party tekno
+  "tekk":                           hard-techno   # as above
+  "bleep techno":                   techno-raw-deep   # Sheffield bleep (LFO); Electronica also fits
+  "birmingham sound":               techno-raw-deep   # Regis/Surgeon; Hard Techno also fits
+  "hardgroove techno":              hard-techno
+  "loop techno":                    techno-raw-deep
+  "berlin techno":                  techno-raw-deep
+  "german techno":                  techno-raw-deep
+  "belgian techno":                 hard-techno   # 90s R&S/Belgian hard techno
+  "classic techno":                 techno-raw-deep   # classic 90s/Detroit techno; Peak Time also fits
+  "free tekno":                     hard-techno   # free-party tekno
+  "hardtek":                        hard-techno   # free-party hardtek; Hard Dance (cut) also fits
+  "modern hardtek":                 hard-techno   # as above
+  "90s techno":                     techno-raw-deep   # era + genre; Peak Time also fits
+  # Electro
+  "miami bass":                     electro   # electro-derived; Hip-Hop also fits
+  "booty bass":                     electro   # as above
+  "electro funk":                   electro   # 80s electro-funk; Funk / Soul also fits
+  "electro bass":                   electro
+  "techno bass":                    electro   # Detroit techno bass = electro/Miami bass lineage
+  "electro hop":                    electro   # early-80s electro-rap; Hip-Hop also fits
+  "drexciya":                       electro
+  # Drum & Bass
+  "drum & bass jungle":             jungle   # Redeye section name; squash-equal to 'drum & bass jungle'
+  "drum and bass jungle":           jungle   # as above
+  "soulful drum & bass":            liquid   # soulful D&B is usually sold as liquid; can be deep/minimal
+  "soulful dnb":                    liquid   # as above
+  "atmospheric drum & bass":        liquid   # 90s atmospheric/intelligent D&B; liquid is the nearest row
+  "atmospheric dnb":                liquid   # as above
+  "intelligent drum & bass":        liquid   # as above
+  "intelligent dnb":                liquid   # as above
+  "techstep":                       neurofunk-jump-up   # techstep is neurofunk's ancestor, but plenty is filed as plain D&B
+  "darkstep":                       neurofunk-jump-up   # dark/tech D&B; neuro is nearest, plain D&B also fits
+  "crossbreed":                     neurofunk-jump-up   # D&B tempo hybrid with gabber; Hard Dance itself is cut
+  "autonomic":                      drum-and-bass   # half D&B, half electronica
+  "halftime":                       drum-and-bass   # Beatport files Halftime under D&B; on Bandcamp it often means 140/bass
+  "drumfunk":                       jungle   # amen-led D&B; jungle is the closer scene
+  "ragga dnb":                      jungle   # ragga-sampling D&B is jungle in practice
+  "dubwise":                        jungle   # D&B usage = dub-reggae jungle; in a reggae library it means dub
+  "darkcore":                       jungle   # 1993 dark breakbeat hardcore, the bridge to jungle; breaks is the other candidate
+  "jazzstep":                       liquid   # jazzy D&B
+  "sambass":                        liquid   # Brazilian D&B (DJ Marky); plain D&B also fits
+  "hardstep":                       jungle   # 94-95 hard jungle
+  "drumstep":                       drum-and-bass   # dubstep at D&B tempo; Dubstep also fits
+  "footwork jungle":                jungle   # Bass / Club also fits
+  "atmospheric drum and bass":      liquid   # 90s atmospheric D&B; liquid is the nearest row
+  "neurohop":                       neurofunk-jump-up   # halftime neuro; Dubstep also fits
+  "intelligent drum and bass":      liquid   # 90s intelligent D&B; liquid is the nearest row
+  "rave music":                     jungle   # follows the S1a 'rave -> jungle' ruling, but Wikipedia's 'rave music' is the whole era
+  # Breaks & UK Bass
+  "big beat":                       breaks-breakbeat   # breakbeat in tempo and lineage; stores shelve it as electronica too
+  "glitch hop":                     breaks-breakbeat   # Beatport sub-genre of Breaks / Breakbeat / UK Bass
+  "electro breaks":                 breaks-breakbeat   # could equally be Electro
+  "oldskool":                       breaks-breakbeat   # UK usage = old skool rave/hardcore, consistent with hardcore -> breaks
+  "bass music":                     uk-bass   # UK usage; US 'bass music' means dubstep/trap
+  "bass":                           uk-bass   # a lone 'bass' is bass music; overrides the 'Bass / Club' half
+  "leftfield bass":                 uk-bass   # UK bass with an experimental lean
+  "brostep":                        dubstep   # same Beatport genre, different scene from UK dubstep
+  "riddim":                         dubstep   # dubstep sub-style, but also the word for a reggae backing track
+  "tearout":                        dubstep   # heavy dubstep sub-style
+  "midtempo":                       dubstep   # Beatport files Midtempo under Dubstep; also used for 100-110 bass
+  "uk dubstep":                     140-deep-dubstep-grime   # UK dubstep is the deep/140 sound rather than Beatport's main-floor dubstep
+  "ballroom":                       bass-club   # vogue/ballroom beats; also ballroom dance music
+  "deconstructed club":             bass-club   # could be IDM / Leftfield
+  "ghettotech":                     bass-club   # Detroit ghettotech; Electro also fits
+  "psybreaks":                      breaks-breakbeat   # psychedelic breakbeat; psy itself is cut
+  "psychedelic breakbeat":          breaks-breakbeat   # as above
+  "ghetto funk":                    breaks-breakbeat   # Ghetto Funk is a funky-breaks scene
+  "post-dubstep":                   uk-bass
+  "weightless":                     140-deep-dubstep-grime   # weightless grime
+  "grindie":                        140-deep-dubstep-grime   # grime/indie crossover
+  "reggaestep":                     dubstep
+  "future riddim":                  dubstep
+  "colour bass":                    dubstep
+  "deathstep":                      dubstep
+  "chillstep":                      dubstep   # melodic chill dubstep; Downtempo also fits
+  "melodic bass":                   dubstep   # Seven Lions-style; Trap / Future Bass also fits
+  "tearout brostep":                dubstep
+  "midtempo bass":                  dubstep   # Beatport files Midtempo under Dubstep
+  "funkstep":                       bass-club   # UK funky offshoot
+  "kuduro":                         bass-club   # Angolan kuduro is a global-club staple
+  "juke house":                     bass-club
+  # UK Garage
+  "breakstep":                      2-step-speed-garage   # broken 2-step; UK Bass also fits
+  "4x4":                            uk-garage-bassline   # UK garage shorthand, but literally any four-to-the-floor
+  "garage house":                   uk-garage-bassline   # founder 2026-10-20: UK DJs mean UK garage; US/NJ garage house reads as soulful
+  # Electronica & Downtempo
+  "wonky":                          idm-leftfield   # beat-scene wonky; Hip-Hop also fits
+  "balearic":                       downtempo   # founder 2026-10-20: Balearic reads as downtempo/electronica, not disco
+  "experimental":                   idm-leftfield   # JUDGEMENT: Beatport's Ambient / Experimental feeds Ambient; library 'experimental' is wider (noise, avant)
+  "abstract":                       idm-leftfield   # Discogs style; abstract hip-hop also
+  "glitch":                         idm-leftfield
+  "drill n bass":                   idm-leftfield   # Squarepusher-style; D&B also fits
+  "breakcore":                      idm-leftfield   # amen-chopping breakcore; Jungle also fits
+  "drone":                          ambient
+  "ambient house":                  ambient   # The Orb lineage; Downtempo also fits
+  "ambient techno":                 electronica   # modern stores shelve it as electronica; Raw/Deep techno also fits
+  "lo-fi":                          downtempo   # Beatport Downtempo sub-genre Lofi; lo-fi hip-hop also
+  "chillhop":                       downtempo   # instrumental lo-fi hip-hop; Hip-Hop also fits
+  "illbient":                       downtempo
+  "future jazz":                    downtempo   # JUDGEMENT: St Germain/Jazzanova lineage; Funk / Soul also fits
+  "nu jazz":                        downtempo   # as future jazz
+  "downbeat":                       downtempo
+  "balearic beat":                  downtempo   # as balearic
+  "ambient dub":                    ambient   # The Orb / Higher Intelligence; Downtempo also fits
+  "psybient":                       ambient   # psy-chill; psy trance itself is cut
+  "psydub":                         downtempo
+  "psychill":                       downtempo
+  "space music":                    ambient
+  "soundscape":                     ambient
+  "drone ambient":                  ambient
+  "berlin school":                  ambient   # 70s sequencer music; Electronica also fits
+  "progressive electronic":         electronica
+  "folktronica":                    electronica
+  "livetronica":                    electronica
+  "jazztronica":                    downtempo   # as nu jazz
+  "microsound":                     idm-leftfield
+  "experimental electronic":        idm-leftfield
+  "glitch pop":                     idm-leftfield
+  "chill electronica":              downtempo
+  "bristol sound":                  trip-hop-chill-out   # Massive Attack/Portishead; Bristol D&B also exists
+  "balearic / downtempo":           downtempo   # Redeye section name
+  # Hip-Hop, R&B & Soul
+  "r&b & soul":                     rnb   # one tag naming both; Funk / Soul also fits
+  "neo soul":                       rnb   # Funk / Soul also fits
+  "rhythm & blues":                 funk-soul   # Discogs 'Rhythm & Blues' is 50s/60s R&B, closer to soul than modern R&B
+  "rhythm and blues":               funk-soul   # as above
+  "acid jazz":                      funk-soul   # Talkin' Loud/Brand New Heavies funk-jazz; jazz itself has no home
+  "jazz-funk":                      funk-soul   # jazz itself has no home
+  "soul-jazz":                      funk-soul   # as above
+  "afro funk":                      funk-soul
+  "conscious":                      hip-hop   # Discogs hip-hop style
+  "turntablism":                    hip-hop
+  "britcore":                       hip-hop   # UK hardcore rap of the late 80s
+  "drill":                          hip-hop   # UK/Chicago drill rap
+  "phonk":                          hip-hop   # Trap / Future Bass also fits
+  "east coast":                     hip-hop   # Beatport Hip-Hop sub-genre
+  "west coast":                     hip-hop   # Beatport Hip-Hop sub-genre
+  "future beats":                   trap-future-bass
+  "brit funk":                      funk-soul
+  "synth-funk":                     funk-soul   # 80s synth funk/boogie; Electro also fits
+  "funktronica":                    funk-soul
+  "hardwave":                       trap-future-bass   # as wave
+  "vaportrap":                      trap-future-bass
+  "beats":                          hip-hop   # Bandcamp 'beats' = instrumental hip-hop / beat scene
+  "snap":                           hip-hop   # snap rap
+  "afro trap":                      hip-hop   # afrobeats crossover; Afrobeats has no home
+  "uk trap":                        hip-hop   # UK rap trap; Trap / Future Bass also fits
+  "drift phonk":                    hip-hop   # as phonk
+  "golden era":                     hip-hop   # golden-age hip-hop is the usual meaning
+  "uk street soul":                 rnb
+  "rhythmic soul":                  rnb   # ID3 118
+  "latin soul":                     funk-soul   # Latin itself has no home
+# library_no_home: NO HOME. Never placed and never split: the tag stays LEAVE OUT and is shown
+# as having no home in these genres yet.
+library_no_home:
+  # ID3 genre 72 and Bandcamp tag; Beatport uses it in Downtempo and Latin Electronic - no clear home
+  - "tribal"
+  # Beatport genre 8 (cut). Kept whole, or its 'hardcore' half lands on Breaks via the S1a alias
+  - "hard dance / hardcore / neo rave"
+  # Beatport genre 99 (cut). Kept whole, or 'deep'/'hypnotic)' land on house/techno guesses
+  - "trance (raw / deep / hypnotic)"
+  # Volumo genre 9 (cut, decision list). Kept whole so 'electro house' does not raise a guess
+  - "electro house / big room / mainstage"
+  # Beatport Latin Electronic sub-genre (cut); kept whole so 'tribal' does not raise a guess
+  - "tribal / guaracha"
+  # Beatport sub-genre (cut); kept whole so 'uk' is not reported alone
+  - "uk / happy hardcore"
+  # Beatport genre 7 (cut); one token, listed so it reads as no-home
+  - "trance (main floor)"
+  # Discogs style; kept whole so 'dj' is not reported alone
+  - "cut-up/dj"
+  # half of a fine-genre name with no standalone meaning here; listed so the half rule does not place it
+  - "modern"
+  - "club"
+  - "reggae"
+  - "dancehall"
+  - "dub"
+  - "ska"
+  - "rocksteady"
+  - "roots"
+  - "roots reggae"
+  - "lovers rock"
+  - "ragga"
+  - "world"
+  - "world music"
+  - "latin"
+  - "salsa"
+  - "reggaeton"
+  - "moombahton"
+  - "baile funk"
+  - "brazilian funk"
+  - "funk carioca"
+  - "pop"
+  - "dance-pop"
+  - "dance"
+  - "edm"
+  - "dance & edm"
+  - "eurodance"
+  - "synth-pop"
+  - "electropop"
+  - "indie pop"
+  - "k-pop"
+  - "j-pop"
+  - "rock"
+  - "indie"
+  - "indie rock"
+  - "alternative"
+  - "prog rock"
+  - "psychedelic rock"
+  - "punk"
+  - "post-punk"
+  - "new wave"
+  - "metal"
+  - "speed metal"
+  - "thrash"
+  - "jazz"
+  - "free jazz"
+  - "fusion"
+  - "swing"
+  - "blues"
+  - "country"
+  - "folk"
+  - "classical"
+  - "modern classical"
+  - "soundtrack"
+  - "score"
+  - "new age"
+  - "easy listening"
+  - "gospel"
+  - "christmas"
+  - "holiday"
+  - "children's music"
+  - "comedy"
+  - "spoken word"
+  - "trance"
+  - "progressive trance"
+  - "uplifting trance"
+  - "vocal trance"
+  - "tech trance"
+  - "hard trance"
+  - "neo trance"
+  - "psy"
+  - "goa"
+  - "hardstyle"
+  - "hard dance"
+  - "hard house"
+  - "gabber"
+  - "frenchcore"
+  - "happy hardcore"
+  - "uk hardcore"
+  - "neo rave"
+  - "big room"
+  - "mainstage"
+  - "future rave"
+  - "tropical house"
+  - "afrobeats"
+  - "afropop"
+  - "broken beat"
+  - "bruk"
+  - "african"
+  - "caribbean"
+  - "latin electronic"
+  - "industrial"
+  - "noise"
+  - "rhythmic noise"
+  - "field recording"
+  - "vaporwave"
+  - "synthwave"
+  - "darkwave"
+  - "chiptune"
+  - "skullstep"
+  - "twerk"
+  - "moombahcore"
+  # pop / EDM / world, no lane we press
+  - "electro swing"
+  - "singer-songwriter"
+  - "amapiano"
+  - "afrobeat"
+  - "eurobeat"
+  - "italo dance"
+  - "bubblegum dance"
+  - "disco polo"
+  - "freestyle"
+  - "dancehall pop"
+  - "afropiano"
+  - "bongo flava"
+  - "coupe-decale"
+  - "budots"
+  - "shangaan electro"
+  - "funk brasileiro"
+  - "funk mandelao"
+  - "brazilian phonk"
+  - "dembow"
+  - "cumbia"
+  - "digital cumbia"
+  - "tribal guarachero"
+  - "guaracha"
+  - "latin pop"
+  - "latin house pop"
+  - "reggae / dancehall"
+  - "top 40"
+  - "oldies"
+  - "ethnic"
+  - "global"
+  - "bhangra"
+  - "tango"
+  - "samba"
+  - "bossa nova"
+  - "zouk"
+  - "soca"
+  - "calypso"
+  - "shatta"
+  - "ragga hip-hop"
+  - "classic rock"
+  - "alternative rock"
+  - "hard rock"
+  - "britpop"
+  - "grunge"
+  - "emo"
+  - "goth"
+  - "gothic"
+  - "industrial rock"
+  - "post-rock"
+  - "trip rock"
+  - "acoustic"
+  - "showtunes"
+  - "musical"
+  - "opera"
+  - "cabaret"
+  - "bluegrass"
+  - "celtic"
+  - "polka"
+  # no home (synth/indie/experimental outside our lanes)
+  - "neo-classical"
+  - "chillwave"
+  - "darksynth"
+  - "outrun"
+  - "retrowave"
+  - "dreamwave"
+  - "sovietwave"
+  - "future funk"
+  - "hauntology"
+  - "hypnagogic pop"
+  - "witch house"
+  - "electroacoustic"
+  - "musique concrete"
+  - "plunderphonics"
+  - "sound collage"
+  - "sound art"
+  - "harsh noise"
+  - "power electronics"
+  - "minimal synth"
+  - "minimal wave"
+  - "coldwave"
+  - "dungeon synth"
+  - "krautrock"
+  - "kosmische musik"
+  - "dream pop"
+  - "shoegaze"
+  - "electro-industrial"
+  - "dark electro"
+  - "aggrotech"
+  - "futurepop"
+  - "electronic rock"
+  - "hyperpop"
+  - "nightcore"
+  - "meditation"
+  - "meditative"
+  # trance family, cut (ADR 0022)
+  - "psy-trance"
+  - "goa trance"
+  - "full on"
+  - "acid trance"
+  - "balearic trance"
+  - "dream trance"
+  - "eurotrance"
+  - "hands up"
+  - "nitzhonot"
+  - "dark psytrance"
+  - "dark psy"
+  - "forest psytrance"
+  - "forest"
+  - "minimal psytrance"
+  - "progressive psytrance"
+  - "progressive psy"
+  - "suomisaundi"
+  - "melodic trance"
+  - "big room trance"
+  - "trance 2.0"
+  - "psychedelic trance"
+  - "main floor trance"
+  - "raw trance"
+  - "deep trance"
+  - "hypnotic trance"
+  # hard dance / hardcore family, cut (ADR 0022)
+  - "hardcore techno"
+  - "rawstyle"
+  - "euphoric hardstyle"
+  - "jumpstyle"
+  - "dubstyle"
+  - "early hardstyle"
+  - "mainstream hardcore"
+  - "early hardcore"
+  - "industrial hardcore"
+  - "j-core"
+  - "digital hardcore"
+  - "speedcore"
+  - "splittercore"
+  - "flashcore"
+  - "extratone"
+  - "uptempo hardcore"
+  - "uptempo"
+  - "terror"
+  - "freeform hardcore"
+  - "makina"
+  - "raggacore"
+  - "mashcore"
+  - "nu style gabber"
+  - "crossbreed hardcore"
+  # Beatport Mainstage sub-genre, cut
+  - "speed house"
+  # Mainstage / big-room / EDM family, cut (ADR 0022)
+  - "slap house"
+  - "dutch house"
+  - "big room house"
+  - "complextro"
+  - "melbourne bounce"
+  - "future bounce"
+  - "brazilian bass"
+  - "stadium house"
+  - "moombahsoul"
+  - "bubbling"
+  - "bubbling house"
+  - "hardbag"
+  - "pumping house"
+  - "scouse house"
+  - "uk hard house"
+  - "chicago hard house"
+  - "hardbass"
+  - "trouse"
+  - "electro latino"
+  - "french electro"
+  - "blog house"
+  # hard dance / free-party crossover with no home
+  - "jungletek"
+  - "raggatek"
+  - "frenchtek"
+  - "hypertechno"
+  - "bouncy techno"
+  - "toytown techno"
+  - "hard nrg"
+  # EDM bass house variant despite the name
+  - "jungle terror"
+  # EDM
+  - "jungle dutch"
+  # Hardwax 'Wave' = post-punk/new wave; SoundCloud 'wave' = bass music: ambiguous
+  - "wave"
+  # Hardwax section
+  - "reggae - dub"
+  # Hardwax section (global/world)
+  - "outernational"
+  # afrobeats family, cut
+  - "afroswing"
+  # ambiguous
+  - "rage"
+  # no home
+  - "euro-techno"
+  - "techno-industrial"
+  - "electronic dance music"
+  - "dance-rock"
+  - "space rock"
+  - "ambient industrial"
+  - "isolationism"
+  - "spacesynth"
+  - "noise music"
+  - "electroacoustic music"
+  - "field recordings"
+  - "space"
+  - "dream"
+  - "game"
+  - "anime"
+  - "synth"
+  - "city pop"
+  - "worldbeat"
+  - "dreampunk"
+  - "neoclassical new-age"
+  - "tecnocumbia"
+# library_ignored: IGNORE. A slot, a mood, an era, a status or a format, not a genre: the tag
+# is dropped silently, neither placed nor shown, like a version word in the Mix field.
+library_ignored:
+  # mood word, not a genre (v1 had it as a GUESS)
+  - "melodic"
+  - "funky"
+  - "groove"
+  - "deep"
+  - "organic"
+  - "driving"
+  - "hypnotic"
+  - "chill"
+  - "jazzy"
+  # a slot in the night as often as Beatport's techno sub-genre; 'peak time techno' stays SURE
+  - "peak time"
+  # a vocal/instrumental flag (digitaldjtips grouping field); v1 had NO HOME
+  - "vocal"
+  # a version, not a genre (v1 had NO HOME)
+  - "dj edits"
+  - "edits"
+  - "re-edit"
+  # a version (ID3 33); v1 had NO HOME
+  - "instrumental"
+  # time-of-night / use / crowd tag (DJ tagging guides), not a genre
+  - "warm up"
+  - "opener"
+  - "openers"
+  - "opening"
+  - "warmer"
+  - "closing"
+  - "closer"
+  - "closers"
+  - "after hours"
+  - "late night"
+  - "early"
+  - "late"
+  - "main"
+  - "peak"
+  - "peak hour"
+  - "prime time"
+  - "main room"
+  - "sunrise"
+  - "sunset"
+  - "morning"
+  - "daytime"
+  - "night"
+  - "b2b"
+  - "encore"
+  - "filler"
+  - "fillers"
+  - "banger"
+  - "bangers"
+  - "anthem"
+  - "anthems"
+  - "big tune"
+  - "big tunes"
+  - "dancefloor"
+  - "floorfiller"
+  - "crowd pleaser"
+  - "party"
+  - "wedding"
+  - "workout"
+  - "gym"
+  - "bar"
+  - "cocktail"
+  - "dinner"
+  - "beach"
+  - "pool party"
+  - "festival"
+  - "underground"
+  - "commercial"
+  - "mixed"
+  # energy tag (rekordbox My Tag habit), not a genre
+  - "low"
+  - "mid"
+  - "high"
+  - "low energy"
+  - "mid energy"
+  - "high energy"
+  - "energy"
+  - "fast"
+  - "slow"
+  - "hard"
+  - "soft"
+  - "loud"
+  # mood / texture word (Bandcamp tags, rekordbox My Tags), not a genre
+  - "dark"
+  - "happy"
+  - "sad"
+  - "uplifting"
+  - "emotional"
+  - "euphoric"
+  - "energetic"
+  - "melancholic"
+  - "melancholy"
+  - "dreamy"
+  - "atmospheric"
+  - "groovy"
+  - "bouncy"
+  - "heavy"
+  - "mellow"
+  - "relaxing"
+  - "relax"
+  - "smooth"
+  - "sexy"
+  - "weird"
+  - "trippy"
+  - "cinematic"
+  - "epic"
+  - "raw"
+  - "rolling"
+  - "minimalistic"
+  - "spiritual"
+  - "ethereal"
+  - "chilled"
+  - "laid back"
+  - "feel good"
+  - "summer"
+  - "summery"
+  - "winter"
+  - "cheesy"
+  - "cheese"
+  - "fun"
+  - "quirky"
+  - "spacey"
+  - "tribal drums"
+  - "percussive"
+  - "vocals"
+  - "female vocal"
+  - "female vocals"
+  - "male vocal"
+  - "male vocals"
+  - "vocal sample"
+  # era tag, not a genre (era+genre pairs like '90s house' are written out as SURE entries)
+  - "classic"
+  - "classics"
+  - "oldie"
+  - "throwback"
+  - "throwbacks"
+  - "retro"
+  - "vintage"
+  - "old school"
+  - "new"
+  - "new music"
+  - "fresh"
+  - "recent"
+  - "latest"
+  - "60s"
+  - "70s"
+  - "80s"
+  - "90s"
+  - "00s"
+  - "2000s"
+  - "10s"
+  - "2010s"
+  - "2020s"
+  - "noughties"
+  # library-housekeeping / version / status tag, not a genre
+  - "favourites"
+  - "favorites"
+  - "faves"
+  - "fave"
+  - "fav"
+  - "favs"
+  - "top"
+  - "best"
+  - "essentials"
+  - "hits"
+  - "hit"
+  - "chart"
+  - "charts"
+  - "to sort"
+  - "to tag"
+  - "unsorted"
+  - "sort"
+  - "check"
+  - "todo"
+  - "maybe"
+  - "test"
+  - "playlist"
+  - "crate"
+  - "crates"
+  - "bought"
+  - "purchased"
+  - "downloads"
+  - "download"
+  - "free download"
+  - "free dl"
+  - "promo"
+  - "promos"
+  - "white label"
+  - "unreleased"
+  - "dubplate"
+  - "dubplates"
+  - "vip"
+  - "remix"
+  - "remixes"
+  - "bootleg"
+  - "bootlegs"
+  - "mashup"
+  - "flip"
+  - "refix"
+  - "rework"
+  - "blend"
+  - "edit"
+  - "extended"
+  - "extended mix"
+  - "radio edit"
+  - "clean"
+  - "dirty"
+  - "explicit"
+  - "intro"
+  - "outro"
+  - "transition"
+  - "bpm change"
+  # format / source / placeholder (ID3 12 'Other', 158 'Eclectic'), not a genre
+  - "vinyl"
+  - "vinyl rip"
+  - "wav"
+  - "mp3"
+  - "flac"
+  - "aiff"
+  - "320"
+  - "320kbps"
+  - "beatport"
+  - "traxsource"
+  - "bandcamp"
+  - "soundcloud"
+  - "juno"
+  - "youtube"
+  - "spotify"
+  - "tidal"
+  - "itunes"
+  - "apple music"
+  - "unknown"
+  - "other"
+  - "misc"
+  - "miscellaneous"
+  - "none"
+  - "n/a"
+  - "genre"
+  - "untitled"
+  - "various"
+  - "music"
+  - "audio"
+  - "track"
+  - "tracks"
+  - "single"
+  - "album"
+  - "ep"
+  - "lp"
+  - "compilation"
+  - "eclectic"
+  - "electronic dance"
+  - "dance music"
+# library_excluded_tags: the row is not a release and feeds nothing (CONTRACTS §5).
+library_excluded_tags:
+  - "loop samples"
+  - "dj tools"
+  - "acapella"
+  - "acapellas"
+  - "loop"
+  - "samples"
+  - "sample"
+  - "sample pack"
+  - "drum loops"
+  - "construction kit"
+  - "sound effects"
+  - "scratch tools"
+  - "podcast"
+  - "radio show"
+  - "drum tools"
+  - "ringtone"
+  # plural of the loop samples case
+  - "loops"
+  # one-shot samples
+  - "one shots"
+  # sound effects
+  - "sfx"
+  # Traktor/Serato effect one-shots; risk: none seen as a genre
+  - "fx"
+  # singular of the existing 'dj tools'
+  - "dj tool"
+  # Beatport DJ Tools sub-genre
+  - "battle tools"
+  # spelling variants of acapella; or make the excluded lookup squash too
+  - "a cappella"
+  # stem packs
+  - "stems"
+  # a recorded mix is not a release
+  - "dj mix"
+  # same; risk: hip-hop mixtapes are releases
+  - "mixtape"
+  # DJ-pool transition edits are tools; risk: low
+  - "transitions"
+  # ID3 37
+  - "sound clip"
+  # ID3 101
+  - "speech"
+  # ID3 183
+  - "audiobook"
+  # ID3 184
+  - "audio theatre"
+  # karaoke backing tracks
+  - "karaoke"
+  # Beatport genre 16 (both halves already excluded; compound for R0)
+  - "dj tools / acapellas"
 
 # Contradictory pairs at family level, re-derived from TuneFinder's tag pairs
 # (electronica<->ukg, electronica<->dnb, ukg<->dnb, ukg<->techno, dnb<->house). Legitimate

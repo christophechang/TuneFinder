@@ -66,6 +66,13 @@ def _beatport_slug_to_id() -> dict[str, int]:
     return {row["slug"]: row["id"] for row in rows}
 
 
+def _beatport_sub_genre_rows() -> list[dict]:
+    """Beatport sub-genre rows (id, slug, parent genre id), read from the
+    taxonomy YAML directly for the same reason as _beatport_slug_to_id()."""
+    with open(_TAXONOMY_PATH) as f:
+        return yaml.safe_load(f)["beatport"]["sub_genres"]
+
+
 def generate_pool_settings(taxonomy: Taxonomy, base: dict) -> dict:
     """The pool fetch config: every taxonomy row as a fetcher target, with the
     per-source request knobs (sort, lookback, limits) carried over from `base`
@@ -95,6 +102,19 @@ def generate_pool_settings(taxonomy: Taxonomy, base: dict) -> dict:
             "genres": [
                 {"name": fines[0], "slug": slug, "id": slug_to_id[slug]}
                 for slug, fines in taxonomy.beatport_genres.items()
+            ],
+            # Every sub-genre row gets its own recent-releases fetch: chart rows
+            # rarely carry a sub-genre, so the charts alone left Liquid at 0.
+            "sub_genre_lookback_days": 28,
+            "sub_genre_limit": 50,
+            "sub_genres": [
+                {
+                    "name": taxonomy.beatport_sub_genres[row["slug"]],
+                    "slug": row["slug"],
+                    "id": row["id"],
+                    "genre_id": row["parent"],
+                }
+                for row in _beatport_sub_genre_rows()
             ],
         },
         "volumo": {

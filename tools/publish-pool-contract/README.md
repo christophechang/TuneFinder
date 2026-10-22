@@ -108,6 +108,24 @@ as `null`.
 well-formed and the write did not happen. The publisher may re-post those items in the next
 run, or immediately; the pool's merge rules make a repeat harmless either way.
 
+`throttled` is also a whole request's refusal, on all four routes (#143, 2026-10-09): **429**
+when a run-level read or write was throttled — the run document a batch is acknowledged on, the
+manifest's reads and writes, the artist index, the source switches. It carries `Retry-After` in
+whole seconds and the usual `{error, detail}`; send the same request again after the wait. The
+publisher's client already retries 429 (with 502, 503 and 504) on its own fixed backoff of 5, 15
+and 45 s, without reading `Retry-After`. A manifest's prune of the run history is the exception:
+it is skipped on a throttle and the manifest answers 200. Every other store failure is a 500,
+which is not a refusal and carries no body to parse.
+
+| Status | Routes | Body | Retry? |
+|---|---|---|---|
+| 200 | all | the route's response | — |
+| 400 | batch, manifest, artists | `{error, detail}` | no: the request is wrong |
+| 401, 403 | all | none (`WWW-Authenticate`) | 401 once with a fresh token; 403 no |
+| 404 `unknown_run`, 409 `batches_missing` | manifest | `{error, detail, missing_batches?}` | 409: post the missing batches, then the manifest |
+| 429 `throttled` | all | `{error, detail}`, `Retry-After` | yes, the same request |
+| 500 | all | none to rely on | no |
+
 ## Run ids and ordering
 
 `run_id` is `<started_at, UTC, ISO 8601 to the second>-<suffix>`, for example

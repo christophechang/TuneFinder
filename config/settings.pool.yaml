@@ -100,6 +100,53 @@ sources:
     - name: trap-future-bass
       slug: trap-future-bass
       id: 38
+    sub_genre_lookback_days: 28
+    sub_genre_limit: 50
+    sub_genres:
+    - name: soulful-house
+      slug: soulful
+      id: 177
+      genre_id: 5
+    - name: liquid
+      slug: liquid
+      id: 5
+      genre_id: 1
+    - name: neurofunk-jump-up
+      slug: jump-up
+      id: 6
+      genre_id: 1
+    - name: jungle
+      slug: jungle
+      id: 66
+      genre_id: 1
+    - name: 2-step-speed-garage
+      slug: 2-step
+      id: 317
+      genre_id: 86
+    - name: 2-step-speed-garage
+      slug: speed-garage
+      id: 318
+      genre_id: 86
+    - name: trip-hop-chill-out
+      slug: trip-hop
+      id: 339
+      genre_id: 63
+    - name: trip-hop-chill-out
+      slug: chillout
+      id: 335
+      genre_id: 63
+    - name: funk-soul
+      slug: funk
+      id: 308
+      genre_id: 108
+    - name: funk-soul
+      slug: soul
+      id: 309
+      genre_id: 108
+    - name: funk-soul
+      slug: funk-soul
+      id: 210
+      genre_id: 50
   volumo:
     enabled: true
     sort: purchase

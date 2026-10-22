@@ -12,12 +12,16 @@ def _no_sleep():
         yield
 
 
-def _settings(enabled=True, genres=None):
+def _settings(enabled=True, genres=None, **extra):
     s = MagicMock()
     if genres is None:
         genres = [{"name": "dnb", "slug": "drum-bass", "id": 1}]
-    s.get_source_config.return_value = {"enabled": enabled, "genres": genres}
+    s.get_source_config.return_value = {"enabled": enabled, "genres": genres, **extra}
     return s
+
+
+_LIQUID = {"name": "liquid", "slug": "liquid", "id": 5, "genre_id": 1}
+_JUMP_UP = {"name": "neurofunk-jump-up", "slug": "jump-up", "id": 6, "genre_id": 1}
 
 
 def _track(track_id=29206235, name="Lock It", slug="lock-it", bpm=87,
@@ -292,3 +296,133 @@ def test_raw_metadata_pool_keys_none_when_fields_missing():
     assert md["catalog_number"] is None
     assert md["genre_id"] is None
     assert md["genre_slug"] == "drum-bass"
+
+
+# ---------------------------------------------------------------------------
+# Sub-genres (publish-pool): recent releases per sub-genre, not a chart
+# ---------------------------------------------------------------------------
+
+def _liquid_track(track_id, **kw):
+    raw = _track(track_id=track_id, slug=f"l{track_id}", **kw)
+    raw["sub_genre"] = {"id": 5, "slug": "liquid"}
+    return raw
+
+
+def _route(chart=None, sub=None, fail_sub=()):
+    """_get_json stand-in: chart URLs get `chart`, sub-genre URLs get `sub[id]`."""
+    def get(url, session):
+        if "/catalog/tracks/" in url:
+            sub_id = int(url.split("sub_genre_id=")[1].split("&")[0])
+            if sub_id in fail_sub:
+                raise Exception("boom")
+            return _page((sub or {}).get(sub_id, []))
+        return _page(chart or [])
+    return get
+
+
+def test_sub_genre_url_is_recent_releases_of_that_sub_genre():
+    from datetime import date as real_date
+
+    class _Today(real_date):
+        @classmethod
+        def today(cls):
+            return real_date(2026, 10, 22)
+
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport.date", _Today), \
+         patch("src.fetchers.beatport._get_json", side_effect=_route()) as gj:
+        beatport.fetch(_settings(genres=[], sub_genres=[_LIQUID]))
+    assert [call.args[0] for call in gj.call_args_list] == [
+        "https://api.beatport.com/v4/catalog/tracks/?sub_genre_id=5&genre_id=1"
+        "&publish_date=2026-09-24:2026-10-22&order_by=-publish_date&per_page=50"
+    ]
+
+
+def test_sub_genre_knobs_override_defaults_and_limit_caps_at_100():
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_route()) as gj:
+        beatport.fetch(_settings(genres=[], sub_genres=[_LIQUID],
+                                 sub_genre_lookback_days=7, sub_genre_limit=500))
+    url = gj.call_args_list[0].args[0]
+    assert url.endswith("&per_page=100")
+    start, end = url.split("publish_date=")[1].split("&")[0].split(":")
+    from datetime import date
+    assert (date.fromisoformat(end) - date.fromisoformat(start)).days == 7
+
+
+def test_sub_genre_items_carry_slug_and_no_chart_position():
+    sub = {5: [_liquid_track(i) for i in (101, 102)]}
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_route(chart=[_track()], sub=sub)):
+        items = beatport.fetch(_settings(sub_genres=[_LIQUID]))
+    assert len(items) == 3
+    chart, *liquid = items
+    assert chart.raw_metadata["chart_position"] == 1
+    assert [it.raw_metadata["beatport_id"] for it in liquid] == [101, 102]
+    assert all(it.raw_metadata["sub_genre_slug"] == "liquid" for it in liquid)
+    assert all(it.raw_metadata["chart_position"] is None for it in liquid)
+
+
+def test_sub_genre_items_resolve_to_their_fine_genre():
+    from src.publisher.taxonomy import fine_genres_for, load_taxonomy
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_route(sub={5: [_liquid_track(7)]})):
+        items = beatport.fetch(_settings(genres=[], sub_genres=[_LIQUID]))
+    assert fine_genres_for(items[0], load_taxonomy()) == ["liquid"]
+
+
+def test_one_sub_genre_failing_keeps_the_rest_and_does_not_raise():
+    sub = {6: [_liquid_track(9)]}
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json",
+               side_effect=_route(chart=[_track()], sub=sub, fail_sub=(5,))):
+        items = beatport.fetch(_settings(sub_genres=[_LIQUID, _JUMP_UP]))
+    assert [it.raw_metadata["beatport_id"] for it in items] == [29206235, 9]
+
+
+def test_sub_genre_failures_do_not_trip_the_all_genres_fail_safe():
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_route(fail_sub=(5,))):
+        assert beatport.fetch(_settings(genres=[], sub_genres=[_LIQUID])) == []
+
+
+def test_every_sub_genre_failing_logs_an_error(caplog):
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json",
+               side_effect=_route(chart=[_track()], fail_sub=(5, 6))):
+        items = beatport.fetch(_settings(sub_genres=[_LIQUID, _JUMP_UP]))
+    assert len(items) == 1
+    assert any(r.levelname == "ERROR" and "all 2 sub-genre fetches failed" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_one_sub_genre_succeeding_logs_no_error(caplog):
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json",
+               side_effect=_route(sub={6: [_liquid_track(9)]}, fail_sub=(5,))):
+        beatport.fetch(_settings(genres=[], sub_genres=[_LIQUID, _JUMP_UP]))
+    assert not any(r.levelname == "ERROR" for r in caplog.records)
+
+
+def test_sub_genre_rows_missing_ids_are_skipped():
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_route()) as gj:
+        beatport.fetch(_settings(genres=[], sub_genres=[{"slug": "liquid", "id": 5}]))
+    gj.assert_not_called()
+
+
+def test_genre_targeted_fetch_never_runs_sub_genres():
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_route()) as gj:
+        beatport.fetch(_settings(sub_genres=[_LIQUID]), target_genre="dnb")
+    assert all("/catalog/tracks/" not in call.args[0] for call in gj.call_args_list)
+
+
+def test_no_sub_genres_key_means_charts_only():
+    """The Sunday run's settings.yaml has no sub_genres: its fetch is unchanged."""
+    with patch("src.fetchers.beatport.beatport_auth.get_access_token", return_value="T"), \
+         patch("src.fetchers.beatport._get_json", side_effect=_route(chart=[_track()])) as gj:
+        beatport.fetch(_settings())
+    assert [call.args[0] for call in gj.call_args_list] == [
+        "https://api.beatport.com/v4/catalog/genres/1/top/100/?per_page=100"
+    ]

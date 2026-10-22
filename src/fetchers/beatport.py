@@ -4,10 +4,13 @@ Beatport source fetcher — genre top-100 chart via the internal v4 API.
 Replaces the former __NEXT_DATA__ HTML scrape (Cloudflare-blocked since 2026-07).
 Auth (login -> PKCE -> Bearer token, cached/refreshed) lives in beatport_auth.
 Endpoint: GET /v4/catalog/genres/{id}/top/100/.
+Sub-genres (publish-pool only): GET /v4/catalog/tracks/?sub_genre_id=&genre_id=,
+newest first over a lookback window — Beatport has no chart per sub-genre.
 
 Key signals: chart_position (rank in the genre top-100), bpm, key (harmonic mixing).
 """
 import urllib.parse
+from datetime import date, timedelta
 
 import requests
 
@@ -24,6 +27,8 @@ _TRACK_URL = "https://www.beatport.com/track/{slug}/{id}"
 _CHART_SIZE = 100
 _PER_PAGE = 100
 _TIMEOUT = 25
+_SUB_GENRE_LOOKBACK_DAYS = 28
+_SUB_GENRE_LIMIT = 50
 
 # Maps Beatport genre slugs to internal genre tags. KEEP VERBATIM from the prior
 # implementation (merged feeds + house sub-genres roll-ups).
@@ -142,6 +147,26 @@ def _fetch_genre_top(session: requests.Session, genre_id) -> list[dict]:
     return tracks[:_CHART_SIZE]
 
 
+def _fetch_sub_genre_recent(session: requests.Session, sub_genre_id, genre_id,
+                            lookback_days: int, limit: int, today: date) -> list[dict]:
+    """Return up to `limit` raw track dicts of one sub-genre, newest first.
+
+    `publish_date` ends today so pre-orders (dated weeks ahead) stay out. One
+    page only: `limit` is capped at the API's 100 per page. `-sales` and
+    `-popularity` were probed live 2026-10-22 and are not honoured, so recency
+    is the only order Beatport gives here.
+    """
+    start = today - timedelta(days=lookback_days)
+    url = (
+        f"{_BASE}/catalog/tracks/?sub_genre_id={sub_genre_id}&genre_id={genre_id}"
+        f"&publish_date={start.isoformat()}:{today.isoformat()}"
+        f"&order_by=-publish_date&per_page={min(limit, _PER_PAGE)}"
+    )
+    data = _get_json(url, session)
+    results = data.get("results", []) if isinstance(data, dict) else []
+    return results[:limit]
+
+
 def fetch(settings, target_genre: str | None = None,
           bpm_ranges: list[tuple[float, float]] | None = None,
           seed_queries: list[str] | None = None) -> list[SourceItem]:
@@ -150,13 +175,17 @@ def fetch(settings, target_genre: str | None = None,
         return []
 
     genres: list[dict] = cfg.get("genres", [])
+    # Only the pool settings carry sub_genres; the Sunday run's settings.yaml
+    # has none, so its fetch is unchanged.
+    sub_genres: list[dict] = cfg.get("sub_genres", [])
     if target_genre is not None:
         genres = [
             g for g in genres
             if target_genre in (_SLUG_TO_TAGS.get(g.get("slug", "")) or [g.get("name", "")])
         ]
         seed_queries = None  # genre-targeted runs (mix-prep) never seed
-    if not genres and not seed_queries:
+        sub_genres = []
+    if not genres and not seed_queries and not sub_genres:
         return []
 
     token = beatport_auth.get_access_token(settings)  # raises BeatportAuthError
@@ -193,6 +222,46 @@ def fetch(settings, target_genre: str | None = None,
         logger.info(f"[beatport] {name}: {len(genre_items)} tracks")
         all_items.extend(genre_items)
         polite_sleep(2.0)
+
+    # --- Sub-genres (publish-pool) ---
+    # Labels rarely tag chart rows with a sub-genre (2026-10-22: 88 of the D&B
+    # top-100 had none, 0 were Liquid), so the charts alone leave the
+    # taxonomy's sub-genre rows nearly empty. Each row here is asked for its
+    # own recent releases. No chart_position: these are not ranked. Failures
+    # degrade per sub-genre and never count toward the all-genres fail-safe.
+    lookback_days = int(cfg.get("sub_genre_lookback_days", _SUB_GENRE_LOOKBACK_DAYS))
+    limit = int(cfg.get("sub_genre_limit", _SUB_GENRE_LIMIT))
+    today = date.today()
+    sub_attempted = 0
+    sub_completed = 0
+    for sub_genre in sub_genres:
+        name = sub_genre.get("name") or sub_genre.get("slug", "")
+        sub_genre_id = sub_genre.get("id")
+        genre_id = sub_genre.get("genre_id")
+        if not sub_genre_id or not genre_id:
+            logger.warning(f"[beatport] Skipping sub-genre with missing id/genre_id: {sub_genre}")
+            continue
+        sub_attempted += 1
+        polite_sleep(2.0)
+        try:
+            raw_tracks = _fetch_sub_genre_recent(
+                session, sub_genre_id, genre_id, lookback_days, limit, today
+            )
+        except Exception as e:
+            logger.warning(f"[beatport] sub-genre {sub_genre.get('slug')}: fetch failed: {e}")
+            continue
+        sub_completed += 1
+        sub_items = []
+        for raw in raw_tracks:
+            item = _parse_track(raw, fallback_tags=[name])
+            if item:
+                sub_items.append(item)
+        logger.info(f"[beatport] sub-genre {sub_genre.get('slug')}: {len(sub_items)} tracks")
+        all_items.extend(sub_items)
+    # The charts still publish, so source health stays green; without this
+    # line a dead sub-genre route would quietly put Liquid back at 0.
+    if sub_attempted > 0 and sub_completed == 0:
+        logger.error(f"[beatport] all {sub_attempted} sub-genre fetches failed")
 
     # --- Taste-seeded searches (feedback loop spec, Slice C) ---
     # /v4/catalog/search?q=&type=tracks with the same Bearer session (verified
