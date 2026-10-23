@@ -1,5 +1,5 @@
 """The publish-pool genre taxonomy (tools/publish-pool-contract/taxonomy.yaml):
-8 families, 38 fine genres, and the per-source mappings that resolve a
+9 families, 41 fine genres, and the per-source mappings that resolve a
 SourceItem's raw genre data (whatever slug/id/tag the fetcher stored in
 raw_metadata, or — for SoundCloud — genre_tags) to fine-genre ids.
 

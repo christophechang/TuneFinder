@@ -80,7 +80,7 @@ def set_meta(db, key: str, value: str) -> None:
 
 
 def genre_ids() -> list[int]:
-    """The Beatport genre ids that feed the taxonomy's eight families — every
+    """The Beatport genre ids that feed the taxonomy's nine families — every
     `beatport.genres` row of the vendored taxonomy (excluded genres are listed
     apart and never crawled)."""
     return sorted(_beatport_slug_to_id().values())

@@ -534,7 +534,7 @@ src/
   publisher/           # publish-pool — see docs/ops/publish-pool.md
     run.py             # The run: config gate, lock + fetch, build, post, snapshots
     pool_settings.py   # config/settings.pool.yaml — generated from the taxonomy
-    taxonomy.py        # The 8 families / 38 fine genres and the per-source mappings
+    taxonomy.py        # The 9 families / 41 fine genres and the per-source mappings
     identity.py        # key_v1 / key_v2 — the pool document's identity
     payload.py         # SourceItems -> contract items, batches, manifest, per-source
     artists.py         # The thirteen-week artist index and its payloads
