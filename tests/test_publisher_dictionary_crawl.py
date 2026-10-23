@@ -501,7 +501,13 @@ def test_crawl_top_up_cut_short_finishes_on_a_later_night_and_failures_hold_it_o
     crawl.set_meta(db, "top_up_finished", "2026-07-31")
     refuse_august = ScriptedClient({("2026-08-01:2026-08-31", 1): crawl.PageError(400, "bad request")})
 
-    crawl.run_crawl(db, lambda: refuse_august, genres=[5], top_up_when_done=True, today=TODAY)
+    # `now` is pinned here, not just `today`: a slice's `failed_night` comes from
+    # night_of(now()), and retry_failed only reopens a slice whose failed_night is
+    # strictly earlier than the night being run. Left to the wall clock, August
+    # would be stamped with tonight's real date, the second run below would be an
+    # *earlier* night than that, and the retry would never fire.
+    crawl.run_crawl(db, lambda: refuse_august, genres=[5], top_up_when_done=True, today=TODAY,
+                    now=lambda: dt.datetime(2026, 10, 14, 22, 0))
     assert crawl.get_meta(db, "top_up_finished") == "2026-07-31"   # August failed: not finished
 
     tomorrow = TODAY + dt.timedelta(days=1)
