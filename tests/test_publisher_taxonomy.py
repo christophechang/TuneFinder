@@ -26,8 +26,8 @@ def _item(source, **kw):
 def test_load_counts():
     taxonomy = load_taxonomy()
     assert taxonomy.version == 1
-    assert len(taxonomy.families) == 8
-    assert len(taxonomy.fine_genres) == 38
+    assert len(taxonomy.families) == 9
+    assert len(taxonomy.fine_genres) == 41
 
 
 def test_every_fine_genre_has_a_known_family():

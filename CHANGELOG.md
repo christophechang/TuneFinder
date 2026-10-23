@@ -4,6 +4,12 @@ All notable changes to TuneFinder. The format loosely follows [Keep a Changelog]
 
 ## Unreleased
 
+### Added
+
+- **A ninth family, Reggae & Dancehall, in the pool.** `tools/publish-pool-contract` re-vendored from tunefinder-multi-tenant (ADR 0022 amendment of 2026-10-23): the family `reggae-dancehall` with three fine genres, `reggae`, `dancehall` and `dub`. `config/settings.pool.yaml` regenerated — Beatport genre 103 (Caribbean) plus sub-genres 283 Reggae, 284 Dancehall and 286 Dub; Bandcamp tags `reggae`, `roots-reggae`, `dancehall` and `dub`; three SoundCloud targets. Volumo carries no reggae genre at all, so it contributes nothing. The taxonomy version stays `1`: the change is additive, so every stored pool document keeps its stamp. No Python changed — the fetchers fall through to the configured row name and `fine_genres_for()` resolves from `raw_metadata`.
+- **The artist dictionary crawls Caribbean.** `crawl.genre_ids()` reads `beatport.genres`, so genre 103 joins the nightly crawl and reggae artists reach the multi-tenant dictionary. Mapping the whole Caribbean genre to `reggae` also keeps the chart-position signal; measured on 2026-10-23, the Caribbean top-100 is 47 Reggae, 14 Dancehall, 2 Dub and 5 Soca, so about 5% of chart rows carry a tag they should not. That bleed is accepted in the ADR amendment — soca is not in the taxonomy and has nowhere else to go.
+- **The Sunday run and mix-prep are untouched.** `config/settings.yaml` has no reggae, and `MIX_PREP_GENRES` still lists ten genres. Only the pool knows the new family.
+
 ## v0.23.0 — 2026-10-22
 
 ### Added

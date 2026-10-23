@@ -26,7 +26,8 @@ def _no_sockets(monkeypatch):
 # The multi-tenant taxonomy's family order (src/TuneFinder.Core/Taxonomy/Taxonomy.cs
 # FamilyEntries) — bit i of a mask is family i.
 FAMILY_ORDER = ["house", "techno", "electro", "drum-and-bass", "breaks-uk-bass",
-                "uk-garage", "electronica-downtempo", "hip-hop-rnb-soul"]
+                "uk-garage", "electronica-downtempo", "hip-hop-rnb-soul",
+                "reggae-dancehall"]
 HOUSE, TECHNO, DNB, BREAKS = 1, 2, 8, 16
 
 NOW = dt.datetime(2026, 10, 14, 5, 40, 12, tzinfo=dt.timezone.utc)

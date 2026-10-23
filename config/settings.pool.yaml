@@ -100,6 +100,9 @@ sources:
     - name: trap-future-bass
       slug: trap-future-bass
       id: 38
+    - name: reggae
+      slug: caribbean
+      id: 103
     sub_genre_lookback_days: 28
     sub_genre_limit: 50
     sub_genres:
@@ -147,6 +150,18 @@ sources:
       slug: funk-soul
       id: 210
       genre_id: 50
+    - name: reggae
+      slug: reggae
+      id: 283
+      genre_id: 103
+    - name: dancehall
+      slug: dancehall
+      id: 284
+      genre_id: 103
+    - name: dub
+      slug: dub
+      id: 286
+      genre_id: 103
   volumo:
     enabled: true
     sort: purchase
@@ -223,6 +238,10 @@ sources:
     - funk
     - r-b-soul
     - hip-hop-rap
+    - reggae
+    - roots-reggae
+    - dancehall
+    - dub
   soundcloud:
     enabled: true
     downloadable_only: true
@@ -255,3 +274,9 @@ sources:
       genres: hip-hop & rap,hip hop,hip-hop
     - tf_tag: funk-soul
       genres: funk,soul,disco
+    - tf_tag: reggae
+      genres: reggae,roots reggae
+    - tf_tag: dancehall
+      genres: dancehall
+    - tf_tag: dub
+      genres: dub,dub reggae

@@ -62,7 +62,7 @@ def test_generated_beatport_rows_cover_taxonomy(generated):
         raw_rows = yaml.safe_load(f)["beatport"]["genres"]
     rows = generated["sources"]["beatport"]["genres"]
 
-    assert len(rows) == 29
+    assert len(rows) == 30
     assert [row["slug"] for row in rows] == [raw["slug"] for raw in raw_rows]
     assert [row["id"] for row in rows] == [raw["id"] for raw in raw_rows]
     assert set(row["slug"] for row in rows) == set(taxonomy.beatport_genres)
@@ -79,7 +79,7 @@ def test_generated_beatport_sub_genres_cover_taxonomy(generated):
     beatport = generated["sources"]["beatport"]
     rows = beatport["sub_genres"]
 
-    assert len(rows) == len(raw_rows) == 11
+    assert len(rows) == len(raw_rows) == 14
     assert [row["slug"] for row in rows] == [raw["slug"] for raw in raw_rows]
     assert [row["id"] for row in rows] == [raw["id"] for raw in raw_rows]
     assert [row["genre_id"] for row in rows] == [raw["parent"] for raw in raw_rows]
@@ -112,7 +112,7 @@ def test_generated_bandcamp_tags(generated):
     bandcamp = generated["sources"]["bandcamp"]
 
     assert bandcamp["tags"] == list(taxonomy.bandcamp_tags)
-    assert len(bandcamp["tags"]) == 17
+    assert len(bandcamp["tags"]) == 21
     assert "future-garage" in bandcamp["tags"]
     assert bandcamp["count_per_tag"] == _base()["sources"]["bandcamp"]["count_per_tag"]
     assert bandcamp["enabled"] is True
@@ -123,7 +123,7 @@ def test_generated_soundcloud_targets(generated):
     soundcloud = generated["sources"]["soundcloud"]
     targets = soundcloud["targets"]
 
-    assert len(targets) == 12
+    assert len(targets) == 15
     # tf_tag is the fine genre id — that is what fine_genres_for() resolves against.
     assert [t["tf_tag"] for t in targets] == [row["fine"] for row in taxonomy.soundcloud_targets]
     assert {"tf_tag": "uk-bass", "tags": "uk bass,ukbass"} in targets
@@ -179,7 +179,7 @@ def test_load_pool_settings_overlays_sources_only(tmp_path, monkeypatch):
     # The pool file's sources win outright — TuneFinder's own switches are gone.
     assert settings.source_enabled("traxsource") is False
     assert settings.source_enabled("beatport") is True
-    assert len(settings.get_source_config("beatport")["genres"]) == 29
+    assert len(settings.get_source_config("beatport")["genres"]) == 30
     # Everything outside `sources` is inherited from settings.yaml.
     assert settings.discord_alert_channel == "pool-alerts"
     assert settings.data_dir == str(tmp_path / "data")

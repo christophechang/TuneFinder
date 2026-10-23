@@ -58,7 +58,8 @@
         "breaks-uk-bass",
         "uk-garage",
         "electronica-downtempo",
-        "hip-hop-rnb-soul"
+        "hip-hop-rnb-soul",
+        "reggae-dancehall"
       ]
     },
     "fine_genre": {
@@ -102,7 +103,10 @@
         "hip-hop",
         "rnb",
         "funk-soul",
-        "trap-future-bass"
+        "trap-future-bass",
+        "reggae",
+        "dancehall",
+        "dub"
       ]
     },
     "source_name": {
@@ -252,7 +256,7 @@
         "families": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 8,
+          "maxItems": 9,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/family"
@@ -261,7 +265,7 @@
         "fine_genres": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 38,
+          "maxItems": 41,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/fine_genre"

@@ -2,13 +2,15 @@
 # spike S5 on 2026-09-05 (docs/spikes/S5-genre-lists.md). Editing this file is a
 # founder decision recorded by amending ADR 0022's table.
 #
-# Shape: 8 families, 38 fine genres. Every source id, slug or tag maps to exactly one
+# Shape: 9 families, 41 fine genres. Every source id, slug or tag maps to exactly one
 # fine genre (and through it one family) unless marked otherwise. A source row whose
 # store genre is coarser than ours is mapped to the fine genre the founder chose in S5,
 # never loosely; rows the sources lack are listed under `unmapped`, not dropped silently.
 version: 1
 decided: 2026-09-05
 amended: 2026-09-06   # family-only source tags given a fine genre (ADR 0022); ids unchanged, version unchanged
+# amended 2026-10-23: the reggae-dancehall family, with reggae, dancehall and dub (ADR 0022
+# amendment of 2026-10-23). Purely additive, so every id and the version are unchanged.
 
 families:
   house:                  { name: "House" }
@@ -19,6 +21,7 @@ families:
   uk-garage:              { name: "UK Garage" }
   electronica-downtempo:  { name: "Electronica & Downtempo" }
   hip-hop-rnb-soul:       { name: "Hip-Hop, R&B & Soul" }
+  reggae-dancehall:       { name: "Reggae & Dancehall" }
 
 fine_genres:
   house:                  { name: "House",                              family: house }
@@ -61,6 +64,9 @@ fine_genres:
   rnb:                    { name: "R&B",                                family: hip-hop-rnb-soul }
   funk-soul:              { name: "Funk / Soul",                        family: hip-hop-rnb-soul }
   trap-future-bass:       { name: "Trap / Future Bass",                 family: hip-hop-rnb-soul }
+  reggae:                 { name: "Reggae",                             family: reggae-dancehall }
+  dancehall:              { name: "Dancehall",                          family: reggae-dancehall }
+  dub:                    { name: "Dub",                                family: reggae-dancehall }
 
 beatport:
   # One top-100 chart per genre below (GET /v4/catalog/genres/{id}/top/100/). A row's fine
@@ -99,6 +105,12 @@ beatport:
     - { id: 105, slug: hip-hop,                        fine: hip-hop }
     - { id: 108, slug: rb,                             fine: rnb }
     - { id: 38,  slug: trap-future-bass,               fine: trap-future-bass }
+    - { id: 103, slug: caribbean,                      fine: reggae }
+    # Beatport files reggae under one Caribbean genre, so the genre row above carries `reggae` and a row's own
+    # sub-genre wins over it. Measured 2026-10-23: the Caribbean top-100 is 47 Reggae, 14 Dancehall, 2 Dub,
+    # 5 Soca and 32 rows with no sub-genre. Soca and Calypso are not in this taxonomy, so those rows take
+    # `reggae`: an accepted bleed of 5 in 100 (ADR 0022 amendment of 2026-10-23; precedent, decisions C, D
+    # and H). The row also buys artist-dictionary coverage, whose crawl reads `genres` rows only.
   sub_genres:
     - { id: 177, slug: soulful,       parent: 5,   fine: soulful-house }
     - { id: 5,   slug: liquid,        parent: 1,   fine: liquid }
@@ -111,6 +123,9 @@ beatport:
     - { id: 308, slug: funk,          parent: 108, fine: funk-soul }
     - { id: 309, slug: soul,          parent: 108, fine: funk-soul }
     - { id: 210, slug: funk-soul,     parent: 50,  fine: funk-soul }
+    - { id: 283, slug: reggae,        parent: 103, fine: reggae }
+    - { id: 284, slug: dancehall,     parent: 103, fine: dancehall }
+    - { id: 286, slug: dub,           parent: 103, fine: dub }
   excluded:
     - { id: 16,  slug: dj-tools-acapellas, why: "acapellas, battle tools and loops are not releases" }
     - { id: 110, slug: dj-edits,           why: "edits of non-electronic catalogue; same rule" }
@@ -147,6 +162,8 @@ volumo:
     - { id: 29, slug: soul-rnb-hip-hop, why: "spans three of ours with no true fit; TuneFinder dropped it for the same reason (decision J)" }
     - { id: 26, slug: microhouse,       why: "Microhouse / Rominimal; the only candidate for Minimal Techno, which was dropped (decision E)" }
     - { id: 5,  slug: dj-tools,         why: "not releases" }
+    # Volumo carries no reggae, dancehall or dub genre at all: verified live on 2026-10-23,
+    # GET /api/v1/genres returns 35 genres and none of the three. Nothing to list.
     # Dropped families, present on Volumo should they return: 24 trance, 32 psy-trance,
     # 28 hardcore, 37 neo-rave-hard-house-hard-dance, 33 amapiano, 35 dance-pop,
     # 9 electro-house-big-room.
@@ -177,6 +194,10 @@ bandcamp:
     - { tag: funk,          fine: funk-soul }
     - { tag: r-b-soul,      fine: rnb }
     - { tag: hip-hop-rap,   fine: hip-hop }
+    - { tag: reggae,        fine: reggae }                # 2026-10-23
+    - { tag: roots-reggae,  fine: reggae }                # 2026-10-23
+    - { tag: dancehall,     fine: dancehall }             # 2026-10-23
+    - { tag: dub,           fine: dub }                   # 2026-10-23
 
 soundcloud:
   # Official API search targets, folksonomy values; carried over from TuneFinder with two
@@ -194,6 +215,9 @@ soundcloud:
     - { fine: downtempo,           genres: "downtempo" }
     - { fine: hip-hop,             genres: "hip-hop & rap,hip hop,hip-hop" }
     - { fine: funk-soul,           genres: "funk,soul,disco" }
+    - { fine: reggae,              genres: "reggae,roots reggae" }           # 2026-10-23
+    - { fine: dancehall,           genres: "dancehall" }                     # 2026-10-23
+    - { fine: dub,                 genres: "dub,dub reggae" }                # 2026-10-23
 
 # Library import (CONTRACTS §5): free-text Rekordbox/Traktor/Serato genre tags are
 # case-folded and looked up in the tables below, the whole field first, then each ; or ,
@@ -492,6 +516,17 @@ library_aliases:
   "soul classics":                  funk-soul   # era + genre
   "funk classics":                  funk-soul   # era + genre
   "classic soul":                   funk-soul   # era + genre
+  # Reggae & Dancehall (2026-10-23). Every tag here left library_no_home in the same edit.
+  # `dub techno` above still wins on the whole field, and `dubwise` stays on jungle.
+  "reggae":                         reggae
+  "roots":                          reggae
+  "roots reggae":                   reggae
+  "lovers rock":                    reggae
+  "reggae / dancehall":             reggae   # Hardwax section name; the pair reads as reggae first
+  "dancehall":                      dancehall
+  "ragga":                          dancehall
+  "dub":                            dub
+  "reggae - dub":                   dub   # Hardwax section name
 # library_guesses: GUESS. The tag is placed, and shown pre-selected under
 # OUR BEST GUESSES — CHECK THESE, where one tap changes it.
 library_guesses:
@@ -737,15 +772,8 @@ library_no_home:
   # half of a fine-genre name with no standalone meaning here; listed so the half rule does not place it
   - "modern"
   - "club"
-  - "reggae"
-  - "dancehall"
-  - "dub"
   - "ska"
   - "rocksteady"
-  - "roots"
-  - "roots reggae"
-  - "lovers rock"
-  - "ragga"
   - "world"
   - "world music"
   - "latin"
@@ -862,7 +890,6 @@ library_no_home:
   - "guaracha"
   - "latin pop"
   - "latin house pop"
-  - "reggae / dancehall"
   - "top 40"
   - "oldies"
   - "ethnic"
@@ -1020,8 +1047,6 @@ library_no_home:
   - "jungle dutch"
   # Hardwax 'Wave' = post-punk/new wave; SoundCloud 'wave' = bass music: ambiguous
   - "wave"
-  # Hardwax section
-  - "reggae - dub"
   # Hardwax section (global/world)
   - "outernational"
   # afrobeats family, cut

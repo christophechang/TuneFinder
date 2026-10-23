@@ -60,9 +60,10 @@ def _insert(db, rows):
 # ---------------------------------------------------------------------------
 
 def test_crawl_genres_come_from_taxonomy():
-    # The 29 ids the standalone crawler hardcoded — now read from taxonomy.yaml.
+    # The 29 ids the standalone crawler hardcoded, plus Caribbean (103) for the
+    # reggae-dancehall family — all read from taxonomy.yaml.
     assert crawl.genre_ids() == [1, 2, 3, 5, 6, 9, 11, 12, 14, 15, 18, 37, 38, 50, 63, 81, 85, 86,
-                                 89, 90, 91, 92, 93, 94, 95, 97, 100, 105, 108]
+                                 89, 90, 91, 92, 93, 94, 95, 97, 100, 103, 105, 108]
 
 
 # ---------------------------------------------------------------------------

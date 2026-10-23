@@ -15,7 +15,7 @@ morning's publishing lost, so a change here is a change in both places in the sa
 | `manifest.schema.json` | `POST /api/ingest/manifest` — a run declaring itself finished |
 | `artists.schema.json` | `POST /api/ingest/artists` — one family's weekly artist counts |
 | `ingest-config.schema.json` | `GET /api/ingest/config` — what the publisher reads before a run |
-| `taxonomy.yaml` | the 8 families and 38 fine genres; the `family` and `fine_genre` enums in `batch.schema.json` are its ids |
+| `taxonomy.yaml` | the 9 families and 41 fine genres; the `family` and `fine_genre` enums in `batch.schema.json` are its ids |
 | `samples/` | a valid example of each, read by the API's tests |
 | `samples/invalid/` | one file per rejection reason, named after the reason it produces (`<reason>.json`, or `<reason>.<variant>.json` where a reason has more than one shape). `bad_observation.future.json` is the odd one out: it is refused by the API's **service**, not by its validator, because the rule is a comparison with the API's clock |
 
